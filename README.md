@@ -90,7 +90,9 @@ WRITE_DATA_DIR="$HOME/Notes" WRITE_PASSWORD=choose-a-long-passphrase npm start
   absolute path is safer.
 - `npm start` listens on all interfaces at port 3000. Use `npm start -- -p 8080` for another port, or
   `npm start -- -H 127.0.0.1` to only accept connections from this machine.
-- Instead of exporting variables you can copy `.env.example` to `.env.local` and edit it.
+- Instead of exporting `WRITE_DATA_DIR` and `WRITE_PASSWORD`, you can copy `.env.example` to `.env.local`
+  and set them there. The port and bind address can't go in that file, because `npm start` picks them
+  before it reads it. Use the `-p` and `-H` flags above.
 
 <details>
 <summary>Run it as a systemd service</summary>
@@ -128,13 +130,15 @@ All settings are environment variables, read when the server starts.
 | ------------------ | ----------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `WRITE_DATA_DIR`   | `./data` on bare metal (relative to the working dir), `/data` in Docker | The folder that holds your notes. It may be a symlink, for example into a synced folder. A path inside `.next/` is refused, because builds wipe it.               |
 | `WRITE_PASSWORD`   | unset: no sign-in                                                       | Turns on the sign-in page and a 30-day session cookie. Scripts can send `Authorization: Bearer <password>` instead. Changing the password signs out every device. |
-| `PORT`             | `3000`                                                                  | The port to listen on.                                                                                                                                            |
-| `HOSTNAME`         | `0.0.0.0` in Docker                                                     | The address the Docker/standalone server binds to. With `npm start`, use `-H <address>` instead.                                                                  |
+| `PORT`             | `3000`                                                                  | The port to listen on. Set it in the real environment (shell, systemd, Docker), not in `.env.local`. With `npm start`, `-p <port>` also works.                    |
+| `HOSTNAME`         | `0.0.0.0` in Docker                                                     | The address the Docker image's server binds to. `npm start` ignores it, even as a real environment variable: use `npm start -- -H <address>`.                     |
 | `BUILD_STANDALONE` | unset (the Dockerfile sets `1`)                                         | Build-time only. Produces the self-contained server that the Docker image runs. You don't need it for `npm start`.                                                |
 
-`GET /api/health` returns `200 {"ok":true}` when the data folder is writable, and `503` otherwise. It
-never needs a password, so you can point uptime monitors at it. The Docker image uses it for its
-`HEALTHCHECK`.
+`GET /api/health` returns `200 {"ok":true}` when the data folder is usable, and `503` otherwise. It
+never needs a password, so you can point uptime monitors at it. It does a real write test of the data
+folder (a hidden `.write-health-*.tmp` file, removed at once) at most every 10 minutes, and only a
+read-only permission check in between, so frequent checks don't wake your sync tools. The Docker image
+uses it for its `HEALTHCHECK`.
 
 ---
 
@@ -165,8 +169,13 @@ data/                          ← WRITE_DATA_DIR
   already exist with other names still open fine.
 - **Deleting moves to `.trash`.** A deleted note goes to `.trash/<timestamp>/<folder>/<name>.md`, and a
   deleted folder to `.trash/<timestamp>/<folder>/`. Nothing is purged automatically: to restore something,
-  move it back; to reclaim space, delete the old `.trash` entries. An empty "Untitled" note that you
-  create and then leave without typing is removed for good, since it held nothing.
+  move it back; to reclaim space, delete the old `.trash` entries. **Keep mine** in a conflict also puts
+  the version it replaces into `.trash`, at `.trash/<timestamp>/<folder>/<name>.md`.
+- **Interrupted renames come back.** Changing only the case of a name (`plan` → `Plan`) takes two steps.
+  If the server stops between them, the note or folder reappears as "Recovered note" or "Recovered folder"
+  the next time write loads, so you can rename it back.
+- **Empty new notes don't pile up.** An "Untitled" note that you create and then leave for another page in
+  write without typing anything is removed for good, since it held nothing. Reloading the page keeps it.
 - **Delete the last folder** and write recreates an empty `notebook`, so there's always somewhere to
   write.
 
@@ -192,7 +201,8 @@ or come back to the tab:
 - If you haven't typed anything since the change, write loads the new version silently and says
   "Updated from disk".
 - If you have unsaved edits, write doesn't overwrite the file. It shows a banner with three choices:
-  **Keep mine**, **Use disk version**, or **Save mine as a copy**.
+  **Keep mine**, **Use disk version**, or **Save mine as a copy**. Keep mine copies the version that was
+  on disk to `.trash` before saving yours, so neither side's edits are lost.
 
 Autosave also keeps a copy of unsaved edits in the browser, so a crash, a closed tab or a lost
 connection doesn't lose your typing. The next time you open the note you get your changes back.
@@ -207,11 +217,14 @@ saves, the editor writes standard Markdown, which can differ slightly from what 
 | `#` headings, **bold**/_italic_/~~strike~~/`code`, links (with titles), blockquotes, `---`, nested and numbered lists (including the start number), nested task lists, fenced code with a language, images, and text like `&`, `<`, `snake_case`, `[[wiki links]]`, `[^1]` | **Kept exactly.**                                                                                                                                                   |
 | Tables (column padding), `_em_` → `*em*`, `* item` → `- item`, underlined (setext) headings → `#` headings, bare URLs and `<autolinks>` → `[url](url)`, reference links → inline links, loose lists → tight lists, runs of blank lines                                     | **Normalized** to the equivalent standard form. This only happens the first time you edit that note.                                                                |
 | YAML (`---`) or TOML (`+++`) front matter at the top of the file                                                                                                                                                                                                           | **Kept byte for byte.** It's shown read-only as "Properties" above the note, and can be edited in Markdown mode.                                                    |
-| Raw HTML, HTML comments, footnote definitions, math (`$…$`, `$$…$$`)                                                                                                                                                                                                       | The visual editor can't keep these, so the note **opens as Markdown source** instead, with a banner. Choose "Edit visually anyway" only if you're fine losing them. |
+| Raw HTML, HTML comments, footnote definitions, math (`$…$`, `$$…$$`), link definitions nothing links to (bookmark lists, `[//]: #` comments), backslash escapes other apps rely on (`\#tag`, `\[\[x]]`, `\$5`)                                                             | The visual editor can't keep these, so the note **opens as Markdown source** instead, with a banner. Choose "Edit visually anyway" only if you're fine losing them. |
 
 A few more rules:
 
-- **Large notes** (over 256 KB) always open in Markdown source mode, which stays fast.
+- **Large notes** (over 256 KB, or with a single paragraph over 16 KB) always open in Markdown source mode,
+  which stays fast.
+- **Pasting Markdown** the visual editor can't fully keep (HTML, a linked badge, an unused link
+  definition…) pastes it as plain text instead, with a message, so nothing is silently dropped.
 - **Very large files** (over 5 MB) and **files that aren't valid UTF-8** open read-only, with a download
   button. write never modifies them.
 - **Images** display when they point to a web URL. Uploading images isn't supported yet, and images with
@@ -228,7 +241,8 @@ A few more rules:
   downloads `write-notes-YYYY-MM-DD.zip`, with one directory per folder. It includes empty folders, but
   not `.trash`.
 
-Downloads save your latest edits first.
+Downloads save your latest edits first. If a download fails, for example because the note was renamed
+outside write or you were signed out, write shows an error message and stays where you are.
 
 ### Scripted backups
 
@@ -282,8 +296,11 @@ Machine, `rsync` or `git`. That also captures `.trash`.
 - **Cross-site requests are blocked** even without a password. Every change has to be a same-origin JSON
   request, which the browser checks with `Sec-Fetch-Site`, so a malicious web page can't write to a write
   server on your LAN.
-- **Sign-in** uses an HTTP-only session cookie. Repeated wrong passwords are slowed down. Changing
-  `WRITE_PASSWORD` signs out every device.
+- **Sign-in** uses an HTTP-only session cookie. After 10 wrong passwords (at the sign-in page or in an
+  `Authorization: Bearer` header) within 15 minutes, password checks are refused with
+  `429 Too Many Requests` for 15 minutes, even the right password. Devices that are already signed in
+  keep working. A script with a stale Bearer password keeps triggering the lockout, so update it when you
+  change the password. Choose a long passphrase anyway. Changing `WRITE_PASSWORD` signs out every device.
 - **Run one instance per data folder.** write serializes writes within one process. Two servers on the
   same folder could overwrite each other's saves.
 - Hosting under a subpath (like `example.com/notes/`) isn't supported. Use a subdomain.
@@ -352,7 +369,7 @@ decode UTF-8 names correctly. Double-click the zip in Finder, or run `ditto -x -
 Run `sudo chown -R 1000:1000 ./data`, or set `user:` in `docker-compose.yml` to the owner of the folder.
 
 **Why did a note open in Markdown source mode?** It contains something the visual editor can't keep (raw
-HTML, footnotes, math), or it's over 256 KB. See [How your Markdown is kept](#how-your-markdown-is-kept).
+HTML, footnotes, math, unused link definitions), or it's over 256 KB or has a paragraph over 16 KB. See [How your Markdown is kept](#how-your-markdown-is-kept).
 
 **Why is a note read-only?** It's over 5 MB or not valid UTF-8. write won't risk changing it; download it
 or edit it with another app.
@@ -362,7 +379,8 @@ with other apps at the same time is fine.
 
 **Can I use my iCloud Drive or Dropbox folder?** Yes, on bare metal: set `WRITE_DATA_DIR` to a folder
 inside it, or symlink it. write only writes the files you edit, and it never rewrites a file with identical
-content, so sync tools stay quiet.
+content, so sync tools stay quiet. The only other write is the health check's short-lived hidden
+`.write-health-*.tmp` file, at most every 10 minutes.
 
 **I forgot the password.** It's just the `WRITE_PASSWORD` environment variable. Set a new one and restart.
 
@@ -371,7 +389,8 @@ content, so sync tools stay quiet.
 ## Contributing
 
 Contributions are welcome. [CONTRIBUTING.md](CONTRIBUTING.md) covers setup (`nvm use && npm ci && npm run
-dev`), the architecture and the project rules.
+dev`), the architecture and the project rules. [docs/design-decisions.md](docs/design-decisions.md)
+explains why the app works the way it does.
 
 ## License
 

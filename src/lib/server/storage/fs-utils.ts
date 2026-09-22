@@ -112,6 +112,7 @@ export async function renameNoClobber(src: string, dst: string) {
 /**
  * Renames a file or directory to a name that differs only in case or Unicode normalization. On
  * case-insensitive filesystems (APFS, NTFS) src and dst are the "same" entry, so go through a temp name.
+ * A crash between the two steps leaves the entry at the temp name; cleanup.ts gives it back to the user.
  */
 export async function renameCaseOnly(src: string, dst: string) {
   const tmp = path.join(path.dirname(src), `.write-rename-${randomHex(4)}`);

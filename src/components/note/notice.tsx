@@ -56,12 +56,17 @@ const LOSS_LABELS: Record<LossReason, string> = {
   html: "HTML",
   footnotes: "footnotes",
   math: "math",
+  references: "link reference definitions",
+  escapes: "backslash escapes",
   structure: "formatting",
 };
 
 type SourceModeNoticeProps = { reason: NonNullable<SourceReason>; onEditVisually: () => void };
 
-/** Explains why a note opened as Markdown source although the user didn't ask for it (§8.3). */
+/**
+ * Explains why a note opened as Markdown source although the user didn't ask for it (see
+ * docs/design-decisions.md#d16).
+ */
 export function SourceModeNotice({ reason, onEditVisually }: SourceModeNoticeProps) {
   if (reason.kind === "large") return <Notice>Large note, opened as Markdown.</Notice>;
   const what = reason.reasons.map((r) => LOSS_LABELS[r]).join(", ");

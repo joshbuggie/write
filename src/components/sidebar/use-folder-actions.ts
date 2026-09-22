@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { startTransition } from "react";
 import { useFlushActiveNote } from "@/components/shell/shell-context";
+import { useDownload } from "@/components/ui/download-link";
 import { useToast } from "@/components/ui/toast";
 import { api } from "@/lib/api-client";
 import { MAX_NOTE_BYTES } from "@/lib/constants";
@@ -20,6 +21,7 @@ export function useFolderActions(folder: string, openRef: NoteRef | null) {
   const router = useRouter();
   const toast = useToast();
   const flushActiveNote = useFlushActiveNote();
+  const startDownload = useDownload();
   const holdsOpenNote = openRef !== null && openRef.folder === folder;
 
   async function rename(newName: string): Promise<void> {
@@ -40,10 +42,7 @@ export function useFolderActions(folder: string, openRef: NoteRef | null) {
     });
   }
 
-  async function download(): Promise<void> {
-    await flushActiveNote();
-    window.location.assign(downloadFolderHref(folder));
-  }
+  const download = () => startDownload(downloadFolderHref(folder));
 
   /** One file at a time, so the server's " 2", " 3" suffixing stays predictable. */
   async function importFiles(files: File[]): Promise<void> {

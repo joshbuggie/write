@@ -1,11 +1,11 @@
 import { ERROR_STATUS, type ApiErrorBody, type ErrorCode } from "@/lib/api-contract";
 import { MAX_NOTE_BYTES } from "@/lib/constants";
-import { isRequestAuthenticated } from "./auth";
+import { authenticateRequest, lockoutMessage, lockoutRetryAfterS } from "./auth";
 import { StorageError } from "./storage";
 
 /**
- * Shared plumbing for every Route Handler (§7.1): auth, CSRF, JSON parsing and error mapping live here
- * so each route file only contains its happy path.
+ * Shared plumbing for every Route Handler (see docs/design-decisions.md#d3): auth, CSRF, JSON parsing and
+ * error mapping live here so each route file only contains its happy path.
  */
 
 /** An expected, user-facing failure raised by the HTTP layer itself (bad input, CSRF, auth). */
@@ -13,6 +13,8 @@ export class HttpError extends Error {
   constructor(
     readonly code: ErrorCode,
     message: string,
+    /** Extra response headers, e.g. Retry-After on a 429. */
+    readonly headers?: HeadersInit,
   ) {
     super(message);
     this.name = "HttpError";
@@ -38,9 +40,19 @@ export function noContent(headers?: HeadersInit): Response {
   return new Response(null, { status: 204, headers: h });
 }
 
-function errorJson(code: ErrorCode, message: string, extra?: Pick<ApiErrorBody, "current">): Response {
+function errorJson(
+  code: ErrorCode,
+  message: string,
+  extra?: Pick<ApiErrorBody, "current">,
+  headers?: HeadersInit,
+): Response {
   const body: ApiErrorBody = { error: { code, message }, ...extra };
-  return json(body, ERROR_STATUS[code]);
+  return json(body, ERROR_STATUS[code], headers);
+}
+
+/** 429 for a password check refused by the brute-force lockout; Retry-After tells scripts when to retry. */
+export function rateLimitedError(): HttpError {
+  return new HttpError("rate_limited", lockoutMessage(), { "Retry-After": String(lockoutRetryAfterS()) });
 }
 
 /** Maps any thrown value to an ApiErrorBody response. Unknown errors are logged and never leak details. */
@@ -49,7 +61,7 @@ export function errorResponse(err: unknown): Response {
     const extra = err.code === "version_conflict" ? { current: err.current ?? null } : undefined;
     return errorJson(err.code, err.message, extra);
   }
-  if (err instanceof HttpError) return errorJson(err.code, err.message);
+  if (err instanceof HttpError) return errorJson(err.code, err.message, undefined, err.headers);
   console.error("[write] unexpected API error", err);
   return errorJson("internal", "Something went wrong on the server.");
 }
@@ -62,9 +74,9 @@ function isJsonRequest(req: Request): boolean {
 }
 
 /**
- * CSRF (§1 #19): browsers send Sec-Fetch-Site on every request, so a cross-site write is refused outright;
- * requiring a JSON content type forces a CORS preflight that we never answer. No Origin/Host comparison,
- * so reverse proxies need no configuration.
+ * CSRF (see docs/design-decisions.md#d14): browsers send Sec-Fetch-Site on every request, so a cross-site
+ * write is refused outright; requiring a JSON content type forces a CORS preflight that we never answer. No
+ * Origin/Host comparison, so reverse proxies need no configuration.
  */
 function checkCsrf(req: Request): void {
   if (req.method === "GET" || req.method === "HEAD") return;
@@ -77,6 +89,12 @@ function checkCsrf(req: Request): void {
   }
 }
 
+function requireAuth(req: Request): void {
+  const status = authenticateRequest(req);
+  if (status === "rate_limited") throw rateLimitedError();
+  if (status === "unauthorized") throw new HttpError("unauthorized", "Sign in to continue.");
+}
+
 /** Wrap every Route Handler: auth (unless opts.public) → CSRF (non-GET/HEAD) → fn → error mapping. */
 export function handle<C = unknown>(
   fn: (req: Request, ctx: C) => Promise<Response>,
@@ -84,9 +102,7 @@ export function handle<C = unknown>(
 ): (req: Request, ctx: C) => Promise<Response> {
   return async (req, ctx) => {
     try {
-      if (!opts.public && !isRequestAuthenticated(req)) {
-        throw new HttpError("unauthorized", "Sign in to continue.");
-      }
+      if (!opts.public) requireAuth(req);
       checkCsrf(req);
       return await fn(req, ctx);
     } catch (err) {
@@ -143,7 +159,10 @@ export async function readJson<T>(req: Request, guard: (v: unknown) => v is T): 
   return value;
 }
 
-/** Required, non-empty query parameter. Names always travel in the query string, never in the path (§1 #2). */
+/**
+ * Required, non-empty query parameter. Names always travel in the query string, never in the path (see
+ * docs/design-decisions.md#d2).
+ */
 export function requireParam(url: URL, key: string): string {
   const value = url.searchParams.get(key);
   if (!value) throw new HttpError("bad_request", `Missing "${key}" query parameter.`);

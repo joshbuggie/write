@@ -66,7 +66,24 @@ describe("safeNextPath", () => {
     ["/\\evil.example", "/"],
     ["notes", "/"],
     ["/notes/Work/Plan", "/notes/Work/Plan"],
+    // Browsers strip tab/CR/LF, so these would resolve to //evil.com.
+    ["/\t/evil.com", "/"],
+    ["/\n/evil.com", "/"],
+    ["/\r//evil.com", "/"],
+    ["/ /evil.com", "/"],
+    ["/\\\\evil.com", "/"],
+    ["/x\\evil.com", "/"],
+    ["/\u0000/evil.com", "/"],
+    ["https://evil.com", "/"],
+    // Still-encoded characters are ordinary path characters.
+    ["/%09/evil.com", "/%09/evil.com"],
+    ["/%2F%2Fevil.com", "/%2F%2Fevil.com"],
+    ["/notes/a%20b?x=1#h", "/notes/a%20b?x=1#h"],
+    ["/notes/a/../b", "/notes/b"],
   ])("%j → %j", (input, expected) => {
     expect(safeNextPath(input)).toBe(expected);
+    expect(new URL(safeNextPath(input), "https://notes.example.com/login").origin).toBe(
+      "https://notes.example.com",
+    );
   });
 });

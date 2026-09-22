@@ -9,9 +9,9 @@ import { isAuthEnabled, verifySessionToken } from "./auth";
 import { ensureBootstrap, listTree, mostRecentNote, readNote, StorageError } from "./storage";
 
 /**
- * Data access for Server Components (§5.9). Pages and layouts read through these instead of the API.
- * Every loader calls connection() first so nothing is prerendered at build time (notes live on disk and
- * change at runtime), then re-checks auth as defense in depth behind the proxy.
+ * Data access for Server Components (see docs/design-decisions.md#d1). Pages and layouts read through these
+ * instead of the API. Every loader calls connection() first so nothing is prerendered at build time (notes
+ * live on disk and change at runtime), then re-checks auth as defense in depth behind the proxy.
  */
 
 export { isAuthEnabled };

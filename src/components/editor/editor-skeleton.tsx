@@ -1,8 +1,8 @@
 import { cn } from "@/lib/cn";
 
 /**
- * The text column of the note screen (§10.2). Shared by the note view, the desktop toolbar and the
- * loading skeletons so everything lines up with the text at every breakpoint.
+ * The text column of the note screen (see docs/design-decisions.md#d25). Shared by the note view, the desktop
+ * toolbar and the loading skeletons so everything lines up with the text at every breakpoint.
  */
 export const TEXT_COLUMN =
   "mx-auto w-full max-w-[42rem] px-[max(1rem,env(safe-area-inset-left))] md:px-10 lg:max-w-[44rem] xl:max-w-[46rem]";

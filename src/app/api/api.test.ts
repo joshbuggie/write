@@ -10,7 +10,7 @@ import type {
   UpdateNoteResponse,
 } from "@/lib/api-contract";
 import { MAX_NOTE_BYTES } from "@/lib/constants";
-import { resetLoginThrottle } from "@/lib/server/auth";
+import { resetPasswordGuard } from "@/lib/server/auth";
 import { withTempDataDir } from "@/lib/server/storage/test-utils";
 import * as login from "./auth/login/route";
 import * as logout from "./auth/logout/route";
@@ -52,7 +52,7 @@ const q = (params: Record<string, string>) => "?" + new URLSearchParams(params).
 beforeEach(() => vi.stubEnv("WRITE_PASSWORD", ""));
 afterEach(() => {
   vi.unstubAllEnvs();
-  resetLoginThrottle();
+  resetPasswordGuard();
 });
 
 describe("GET /api/health", () => {
@@ -414,15 +414,37 @@ describe("auth", () => {
       expect(res.headers.get("set-cookie")).toMatch(/; Secure$/);
     }));
 
-  it("wrong passwords get 401, then a throttle message after 5 failures", () =>
+  it("wrong passwords get 401, then an immediate 429 with Retry-After once the budget is spent", () =>
     withTempDataDir(async () => {
       vi.stubEnv("WRITE_PASSWORD", "pw");
-      const attempt = async () => {
-        const res = await call(login.POST, "POST", "/api/auth/login", { body: { password: "nope" } });
+      vi.spyOn(console, "warn").mockImplementation(() => {});
+      const attempt = (password: string) =>
+        call(login.POST, "POST", "/api/auth/login", { body: { password } });
+      for (let i = 0; i < 10; i++) {
+        const res = await attempt("nope");
         expect(res.status).toBe(401);
-        return ((await res.json()) as ApiErrorBody).error.message;
-      };
-      for (let i = 0; i < 4; i++) expect(await attempt()).toBe("Wrong password.");
-      expect(await attempt()).toBe("Too many attempts — wait a moment.");
+        expect(((await res.json()) as ApiErrorBody).error.message).toBe("Wrong password.");
+      }
+      const locked = await attempt("pw");
+      expect(locked.status).toBe(429);
+      expect(await errorCode(locked)).toBe("rate_limited");
+      expect(Number(locked.headers.get("retry-after"))).toBeGreaterThan(0);
+    }));
+
+  it("parallel wrong passwords (login and Bearer) share one budget", () =>
+    withTempDataDir(async () => {
+      vi.stubEnv("WRITE_PASSWORD", "pw");
+      vi.spyOn(console, "warn").mockImplementation(() => {});
+      const statuses = await Promise.all(
+        Array.from({ length: 50 }, (_, i) =>
+          i % 2
+            ? call(tree.GET, "GET", "/api/tree", { headers: { authorization: `Bearer guess${i}` } })
+            : call(login.POST, "POST", "/api/auth/login", { body: { password: `guess${i}` } }),
+        ).map(async (res) => (await res).status),
+      );
+      expect(statuses.filter((s) => s === 401)).toHaveLength(10);
+      expect(statuses.filter((s) => s === 429)).toHaveLength(40);
+      const bearer = await call(tree.GET, "GET", "/api/tree", { headers: { authorization: "Bearer pw" } });
+      expect(bearer.status).toBe(429);
     }));
 });

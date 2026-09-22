@@ -1,5 +1,15 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { clearDraft, moveDraft, readDraft, writeDraft, type Draft } from "./drafts";
+import {
+  clearDraft,
+  clearDraftConflict,
+  draftAction,
+  moveDraft,
+  readDraft,
+  readDraftConflict,
+  writeDraft,
+  writeDraftConflict,
+  type Draft,
+} from "./drafts";
 
 /** In-memory Storage, enough for the drafts module. */
 class MemoryStorage implements Storage {
@@ -86,6 +96,27 @@ describe("drafts", () => {
     expect(readDraft(renamed, storage)).toEqual(draft);
   });
 
+  it("keeps a pending draft conflict apart from the draft autosave writes and clears", () => {
+    const storage = new MemoryStorage();
+    const pending: Draft = { ...draft, content: "# Yesterday's offline edit\n", baseVersion: "old" };
+    writeDraftConflict(ref, pending, storage);
+    writeDraft(ref, draft, storage); // the next keystroke's autosave…
+    clearDraft(ref, storage); // …and its successful PUT
+    expect(readDraftConflict(ref, storage)).toEqual(pending);
+    clearDraftConflict(ref, storage);
+    expect(readDraftConflict(ref, storage)).toBeNull();
+    expect(storage.length).toBe(0);
+  });
+
+  it("moves a pending draft conflict along with a rename", () => {
+    const storage = new MemoryStorage();
+    const renamed = { folder: "Work", name: "Shopping" };
+    writeDraftConflict(ref, draft, storage);
+    moveDraft(ref, renamed, storage);
+    expect(readDraftConflict(ref, storage)).toBeNull();
+    expect(readDraftConflict(renamed, storage)).toEqual(draft);
+  });
+
   it("keeps the draft when moving onto the same ref", () => {
     const storage = new MemoryStorage();
     writeDraft(ref, draft, storage);
@@ -118,5 +149,22 @@ describe("drafts", () => {
     vi.stubGlobal("localStorage", undefined);
     expect(() => writeDraft(ref, draft)).not.toThrow();
     expect(readDraft(ref)).toBeNull();
+  });
+});
+
+describe("draftAction", () => {
+  const disk = { content: "# Milk\r\n", baseline: "# Milk\n", version: "abc123" };
+
+  it("drops a draft the file already has, raw or as the editor serializes it", () => {
+    expect(draftAction({ ...draft, content: "# Milk\r\n" }, disk)).toBe("drop");
+    expect(draftAction({ ...draft, content: "# Milk\n", baseVersion: "old" }, disk)).toBe("drop");
+  });
+
+  it("restores a draft written on top of the version on disk", () => {
+    expect(draftAction({ ...draft, content: "# Milk\n\nEggs\n" }, disk)).toBe("restore");
+  });
+
+  it("asks when the file changed since the draft's version", () => {
+    expect(draftAction({ ...draft, content: "# Milk\n\nEggs\n", baseVersion: "old" }, disk)).toBe("conflict");
   });
 });

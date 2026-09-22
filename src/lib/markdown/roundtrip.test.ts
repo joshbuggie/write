@@ -1,10 +1,10 @@
 /// <reference types="vite/types/importMeta.d.ts" />
-import { Editor, type JSONContent } from "@tiptap/core";
+import { Editor, getSchema, type JSONContent } from "@tiptap/core";
 import { MarkdownManager } from "@tiptap/markdown";
 import { marked, Marked } from "marked";
 import { afterEach, describe, expect, it } from "vitest";
 import { patchMarkdownManager } from "./escape";
-import { createExtensions, createMarkdownManager } from "./extensions";
+import { createExtensions, createMarkdownManager, createSchemaExtensions } from "./extensions";
 import { analyzeFidelity } from "./fidelity";
 import { finalizeMarkdown } from "./file-format";
 import { serializeBody } from "./serialize";
@@ -48,6 +48,18 @@ function headlessEditor(markdown: string): Editor {
 }
 afterEach(() => {
   editors.splice(0).forEach((editor) => editor.destroy());
+});
+
+describe("schema parity", () => {
+  // The fixture corpus runs through createMarkdownManager(), which only knows createSchemaExtensions().
+  // A node or mark added to createExtensions() alone would be untested here and dropped by fidelity checks.
+  it("the editor and the headless manager share one schema", () => {
+    const names = (schema: ReturnType<typeof getSchema>) => ({
+      nodes: Object.keys(schema.nodes).sort(),
+      marks: Object.keys(schema.marks).sort(),
+    });
+    expect(names(headlessEditor("x").schema)).toEqual(names(getSchema(createSchemaExtensions())));
+  });
 });
 
 describe("fixture corpus", () => {

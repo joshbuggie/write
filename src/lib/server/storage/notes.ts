@@ -19,7 +19,7 @@ import {
   safeJoin,
 } from "./paths";
 import { decode, encode, type Eol, toLf, versionOf, versionOfStream } from "./text";
-import { moveToTrash } from "./trash";
+import { copyToTrash, moveToTrash } from "./trash";
 
 const tooLarge = () => new StorageError("too_large", "This note is larger than 5 MB, the maximum note size.");
 
@@ -91,8 +91,10 @@ export async function createNote(input: { folder: string; name?: string; content
 }
 
 /**
- * Autosave target (spec §6.5). Refuses to overwrite a newer disk version unless `force`, never rewrites
- * identical bytes (so sync tools and mtimes don't churn), and keeps the file's EOL style and BOM.
+ * Autosave target (see docs/design-decisions.md#d8). Refuses to overwrite a newer disk version unless
+ * `force`, never rewrites identical bytes (so sync tools and mtimes don't churn), and keeps the file's EOL
+ * style and BOM. A forced overwrite of a version the client didn't base its edit on first copies that version
+ * into .trash.
  */
 export async function saveNote(input: {
   ref: NoteRef;
@@ -103,8 +105,9 @@ export async function saveNote(input: {
   const { ref, baseVersion, force = false } = input;
   const text = toLf(input.content);
   return withWriteLock(async () => {
+    const dataDir = getDataDir();
     try {
-      const folder = await resolveFolder(getDataDir(), ref.folder);
+      const folder = await resolveFolder(dataDir, ref.folder);
       const existing = await lookupNote(folder.path, ref.name);
       if (existing && !existing.stats.isFile()) throw noteNotFound();
 
@@ -138,6 +141,10 @@ export async function saveNote(input: {
 
       const bytes = encodeChecked(text, decoded);
       if (bytes.equals(current)) return unchanged;
+      // A forced save over a version the client never saw ("Keep mine") keeps the other version in .trash.
+      if (baseVersion !== currentVersion) {
+        await copyToTrash(dataDir, current, [folder.name, existing.name + NOTE_EXT]);
+      }
       await atomicWrite(existing.path, bytes);
       return {
         ...toSummary(folder.name, existing.name, await lstat(existing.path)),

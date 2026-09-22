@@ -25,7 +25,8 @@ const VARIANTS: Record<Variant, string> = {
 
 const PRESSED = "bg-active text-ink";
 
-// Touch devices always get 44px targets (§10.6); fine pointers keep the compact desktop metrics.
+// Touch devices always get 44px targets; fine pointers keep the compact desktop metrics.
+// See docs/design-decisions.md#d25.
 const TEXT_SIZES: Record<Size, string> = {
   sm: "h-8 px-2.5 text-[13px] pointer-coarse:h-11 pointer-coarse:text-[15px]",
   md: "h-9 px-3.5 text-[14px] pointer-coarse:h-11 pointer-coarse:text-[16px]",

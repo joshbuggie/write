@@ -57,7 +57,8 @@ export function Dialog({ open, onClose, title, description, children, footer }: 
       }
     >
       {open && (
-        <div className="px-5 pt-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] md:pb-5">
+        // wrap-anywhere is inherited: a long unbroken note or folder name wraps instead of scrolling sideways.
+        <div className="px-5 pt-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] wrap-anywhere md:pb-5">
           <h2 id={titleId} className="text-[17px] font-semibold tracking-tight md:text-[16px]">
             {title}
           </h2>

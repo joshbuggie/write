@@ -16,14 +16,20 @@ export type SaveState =
   | { kind: "error"; message: string; retrying: boolean }
   | { kind: "conflict"; current: Note | null }; // null = file deleted/renamed/folder gone elsewhere
 
+/** What one save sends, besides the note's folder and name (which the caller binds). */
+export type SaveInput = { content: string; baseVersion: string | null; force: boolean };
+
 export interface AutosaverDeps {
   /** Full file text to save (front matter + body). Called only when a save is about to run. */
   getContent(): string;
   /** Persist; resolve with the saved note; reject with ApiError. Implemented with api.saveNote. */
-  save(
-    input: { content: string; baseVersion: string | null; force: boolean },
-    opts: { keepalive: boolean },
-  ): Promise<SavedNote>;
+  save(input: SaveInput, opts: { keepalive: boolean }): Promise<SavedNote>;
+  /**
+   * UTF-8 size of the whole request body save() would send. The browser's keepalive quota counts the
+   * JSON body (escaped newlines and quotes, folder, name), not just the note text. Default: the JSON of
+   * `input` alone.
+   */
+  bodyBytes?(input: SaveInput): number;
   /** Crash-safety draft hooks (drafts.ts bound to the note ref). */
   drafts?: { write(content: string, baseVersion: string): void; clear(): void };
   isOnline?(): boolean; // default: navigator.onLine ?? true
@@ -52,7 +58,9 @@ export interface Autosaver {
   hasUnsavedChanges(): boolean;
   markDirty(): void; // O(1); call from editor onUpdate / textarea onChange
   flush(): Promise<void>; // save now; resolves when clean (no-op if unchanged); rejects ApiError
-  flushKeepalive(): void; // best effort for pagehide/unmount: keepalive PUT if ≤ KEEPALIVE_MAX_BYTES, always writes draft first
+  flushKeepalive(): void; // best effort for pagehide/unmount: keepalive PUT if its body ≤ KEEPALIVE_MAX_BYTES, always writes draft first
+  /** The editor text that isn't on disk yet, or null. Still works after dispose(), for handing edits on. */
+  unsavedContent(): string | null;
   retry(): void;
   keepMine(): Promise<void>; // conflict resolution: force save current content
   adopt(content: string, version: string): void; // new baseline (use-disk-version / updated-from-disk); state → saved
@@ -63,7 +71,7 @@ const DEFAULT_RETRY_DELAYS_MS = [1000, 2000, 5000, 10000, 30000];
 export const SIGNED_OUT_MESSAGE =
   "Signed out. Sign in again to keep saving; your changes are kept on this device.";
 
-/** What a failed save means for the user (the §5.7 error-mapping table). */
+/** What a failed save means for the user (the error-mapping table in docs/design-decisions.md#d3). */
 function stateForError(err: ApiError, online: boolean): SaveState {
   switch (err.code) {
     case "version_conflict":
@@ -114,6 +122,11 @@ export function createAutosaver(deps: AutosaverDeps, opts: AutosaverOptions): Au
   let inFlight: Promise<void> | null = null;
   let epoch = 0; // bumped by adopt/dispose so late results of older saves are ignored
   let disposed = false;
+  // Text flushKeepalive could only put in a draft because a save was in flight. That draft names the
+  // in-flight save's base version; once that save lands (often after the page is gone) it must name the
+  // new version, or reopening the note would flag the user's own last keystrokes as a conflict.
+  let keepaliveDraft: string | null = null;
+  const bodyBytes = (input: SaveInput) => deps.bodyBytes?.(input) ?? byteLength(JSON.stringify(input));
 
   function setState(next: SaveState) {
     state = next;
@@ -158,6 +171,7 @@ export function createAutosaver(deps: AutosaverDeps, opts: AutosaverOptions): Au
     const sentSeq = editSeq;
     const baseVersion = version;
     deps.drafts?.write(content, baseVersion); // before every PUT: survives a killed tab
+    keepaliveDraft = null;
     dirtySince = null;
     setState({ kind: "saving" });
 
@@ -170,6 +184,7 @@ export function createAutosaver(deps: AutosaverDeps, opts: AutosaverOptions): Au
     }
     // The draft is on disk now; keep it only if the user typed after this PUT was sent.
     if (saved && editSeq === sentSeq) deps.drafts?.clear();
+    else if (saved && keepaliveDraft !== null) deps.drafts?.write(keepaliveDraft, saved.version);
 
     if (sentEpoch !== epoch) {
       // Superseded by adopt(): ignore the result, but don't strand edits made since.
@@ -245,11 +260,18 @@ export function createAutosaver(deps: AutosaverDeps, opts: AutosaverOptions): Au
       if (disposed) return;
       const content = deps.getContent();
       if (content === baseline) return;
-      if (inFlight || state.kind === "conflict" || byteLength(content) > KEEPALIVE_MAX_BYTES) {
+      const tooLarge = bodyBytes({ content, baseVersion: version, force: false }) > KEEPALIVE_MAX_BYTES;
+      if (inFlight || state.kind === "conflict" || tooLarge) {
         deps.drafts?.write(content, version); // a second concurrent PUT could race into a false conflict
+        if (inFlight) keepaliveDraft = content;
         return;
       }
       void startSave(false, true, content); // writes the draft first, then the keepalive PUT
+    },
+
+    unsavedContent() {
+      const content = deps.getContent();
+      return content === baseline ? null : content;
     },
 
     retry() {
@@ -274,6 +296,7 @@ export function createAutosaver(deps: AutosaverDeps, opts: AutosaverOptions): Au
       dirtySince = null;
       retryAttempt = 0;
       lastError = null;
+      keepaliveDraft = null;
       deps.drafts?.clear();
       setState({ kind: "saved", at: lastSavedAt });
     },

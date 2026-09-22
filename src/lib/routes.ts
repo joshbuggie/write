@@ -33,8 +33,22 @@ export function noteRefFromParams(p: { folder: string; note: string }): NoteRef 
   return { folder: decodeSegment(p.folder), name: decodeSegment(p.note) };
 }
 
-/** Open-redirect guard for ?next=. */
+const NEXT_BASE = "http://next.invalid";
+/** Browsers strip tabs/newlines and treat "\\" as "/" in URLs, so "/\t/evil.com" means "//evil.com". */
+const UNSAFE_IN_NEXT = /[\p{Cc}\s\\]/u;
+
+/**
+ * Open-redirect guard for ?next=: returns a same-origin path, or "/" for anything else. Prefix checks
+ * aren't enough (see UNSAFE_IN_NEXT), so the value is parsed the way a browser would and its origin
+ * compared. The re-serialized path is returned, so nothing the parser dropped can reach a Location header.
+ */
 export function safeNextPath(next: string | null | undefined): string {
-  if (!next || !next.startsWith("/") || next.startsWith("//") || next.startsWith("/\\")) return "/";
-  return next;
+  if (!next || !next.startsWith("/") || UNSAFE_IN_NEXT.test(next)) return "/";
+  let url: URL;
+  try {
+    url = new URL(next, NEXT_BASE);
+  } catch {
+    return "/";
+  }
+  return url.origin === NEXT_BASE ? url.pathname + url.search + url.hash : "/";
 }

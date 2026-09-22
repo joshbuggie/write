@@ -459,20 +459,50 @@ describe("flushKeepalive", () => {
     expect(t.drafts.write.mock.invocationCallOrder[0]).toBeLessThan(t.save.mock.invocationCallOrder[0]);
   });
 
-  it("sends a body of exactly KEEPALIVE_MAX_BYTES", () => {
+  // The default body size is the JSON of { content, baseVersion, force }.
+  const envelope = JSON.stringify({ content: "", baseVersion: "v1", force: false }).length;
+
+  it("sends a request body of exactly KEEPALIVE_MAX_BYTES", () => {
     const t = setup();
-    t.edit("x".repeat(KEEPALIVE_MAX_BYTES));
+    t.edit("x".repeat(KEEPALIVE_MAX_BYTES - envelope));
     t.saver.flushKeepalive();
     expect(t.save).toHaveBeenCalledTimes(1);
   });
 
-  it("only writes the draft above KEEPALIVE_MAX_BYTES (counted in UTF-8 bytes)", () => {
+  it("only writes the draft when the body is above KEEPALIVE_MAX_BYTES (counted in UTF-8 bytes)", () => {
     const t = setup();
-    const big = "é".repeat(KEEPALIVE_MAX_BYTES / 2 + 1); // 2 bytes each
+    const big = "é".repeat((KEEPALIVE_MAX_BYTES - envelope) / 2 + 1); // 2 bytes each
     t.edit(big);
     t.saver.flushKeepalive();
     expect(t.save).not.toHaveBeenCalled();
     expect(t.drafts.write).toHaveBeenCalledWith(big, "v1");
+  });
+
+  it("measures the escaped JSON body, not the note text", () => {
+    const t = setup();
+    // 55 KiB of checklist lines: well under the limit as text, but every quote, tab and newline
+    // doubles in JSON, which pushes the body past the browser's keepalive quota.
+    const line = '- [ ] "item"\tx\n';
+    const text = line.repeat(Math.floor((55 * 1024) / line.length));
+    expect(new TextEncoder().encode(text).length).toBeLessThan(KEEPALIVE_MAX_BYTES);
+    t.edit(text);
+    t.saver.flushKeepalive();
+    expect(t.save).not.toHaveBeenCalled();
+    expect(t.drafts.write).toHaveBeenCalledWith(text, "v1");
+  });
+
+  it("sizes the body with the injected bodyBytes (folder and name count too)", () => {
+    const bodyBytes = vi.fn(() => KEEPALIVE_MAX_BYTES + 1);
+    const save = vi.fn(async () => savedNote("v2"));
+    const saver = createAutosaver(
+      { getContent: () => "small\n", save, bodyBytes },
+      { baseline: "base\n", version: "v1" },
+    );
+    saver.markDirty();
+    saver.flushKeepalive();
+    expect(bodyBytes).toHaveBeenCalledWith({ content: "small\n", baseVersion: "v1", force: false });
+    expect(save).not.toHaveBeenCalled();
+    saver.dispose();
   });
 
   it("does nothing when the content is already saved", () => {
@@ -492,6 +522,29 @@ describe("flushKeepalive", () => {
     expect(t.drafts.write).toHaveBeenLastCalledWith("two\n", "v1");
   });
 
+  it("rebases the draft onto the version of the save that was in flight, even after dispose", async () => {
+    const t = setup();
+    t.edit("base + A\n");
+    await vi.advanceTimersByTimeAsync(800); // PUT #1 in flight, based on v1
+    t.edit("base + A + B\n");
+    t.saver.flushKeepalive(); // the page is going away: draft only
+    t.saver.dispose();
+    await t.resolveSave("v2"); // PUT #1 still lands
+    expect(t.drafts.write).toHaveBeenLastCalledWith("base + A + B\n", "v2");
+    expect(t.drafts.clear).not.toHaveBeenCalled();
+  });
+
+  it("leaves the draft on the old version when the save in flight fails", async () => {
+    const t = setup();
+    t.edit("base + A\n");
+    await vi.advanceTimersByTimeAsync(800);
+    t.edit("base + A + B\n");
+    t.saver.flushKeepalive();
+    t.saver.dispose();
+    await t.rejectSave(apiError("network"));
+    expect(t.drafts.write).toHaveBeenLastCalledWith("base + A + B\n", "v1");
+  });
+
   it("clears the draft even when the note closed before the keepalive PUT returned", async () => {
     const t = setup();
     t.edit("closing\n");
@@ -499,6 +552,20 @@ describe("flushKeepalive", () => {
     t.saver.dispose();
     await t.resolveSave();
     expect(t.drafts.clear).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("unsavedContent", () => {
+  it("is the editor text while it differs from what is on disk, also after dispose", async () => {
+    const t = setup();
+    expect(t.saver.unsavedContent()).toBeNull();
+    t.edit("typed\n");
+    await vi.advanceTimersByTimeAsync(750);
+    await t.resolveSave();
+    expect(t.saver.unsavedContent()).toBeNull();
+    t.edit("typed more\n");
+    t.saver.dispose();
+    expect(t.saver.unsavedContent()).toBe("typed more\n");
   });
 });
 

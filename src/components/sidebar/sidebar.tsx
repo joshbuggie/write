@@ -76,7 +76,7 @@ export function Sidebar({ tree, authEnabled, variant }: SidebarProps) {
           enterKeyHint="search"
           className={cn(
             "border-transparent! bg-hover! pl-8! focus-visible:border-accent!",
-            page ? "h-10!" : "h-8! md:text-[13px]! pointer-coarse:h-11!",
+            page ? "h-11!" : "h-8! md:text-[13px]! pointer-coarse:h-11!",
           )}
         />
       </div>

@@ -14,23 +14,50 @@ const BACKSLASH_BEFORE_PUNCT_OR_END = /\\(?=[!-/:-@[-`{-~]|$)/g;
  * The text is escaped in isolation, so anything at the node's edges is treated as "could combine".
  */
 export function encodeText(text: string): string {
-  return (
-    text
-      // A backslash only needs doubling before punctuation, or at the end where the next node may start with it.
-      .replace(BACKSLASH_BEFORE_PUNCT_OR_END, "\\\\")
-      // & only where it would form an entity; < only where a tag, comment or autolink could start.
-      .replace(/&(?=#?[A-Za-z0-9]+;)/g, "&amp;")
-      .replace(/<(?=[A-Za-z/!?])/g, "&lt;")
-      .replace(/`/g, "\\`")
-      // * and ~ can't open or close emphasis when surrounded by whitespace ("5 * 3").
-      .replace(/[*~]/g, (c, i: number, s: string) =>
-        /\s/.test(s[i - 1] ?? "") && /\s/.test(s[i + 1] ?? "") ? c : "\\" + c,
-      )
-      // _ can't open or close emphasis between two letters/digits, so snake_case stays readable.
-      .replace(/(?<![\p{L}\p{N}])_|_(?![\p{L}\p{N}])/gu, "\\_")
-      // [ and ] only where a link or reference definition could form; keeps [[wiki]] and [^1].
-      .replace(/\[(?=[^\]]*\][([:])|\](?=[([:])/g, (m) => "\\" + m)
-  );
+  const escaped = text
+    // A backslash only needs doubling before punctuation, or at the end where the next node may start with it.
+    .replace(BACKSLASH_BEFORE_PUNCT_OR_END, "\\\\")
+    // & only where it would form an entity; < only where a tag, comment or autolink could start.
+    .replace(/&(?=#?[A-Za-z0-9]+;)/g, "&amp;")
+    .replace(/<(?=[A-Za-z/!?])/g, "&lt;")
+    .replace(/`/g, "\\`")
+    // * and ~ can't open or close emphasis when surrounded by whitespace ("5 * 3").
+    .replace(/[*~]/g, (c, i: number, s: string) =>
+      /\s/.test(s[i - 1] ?? "") && /\s/.test(s[i + 1] ?? "") ? c : "\\" + c,
+    )
+    // _ can't open or close emphasis between two letters/digits, so snake_case stays readable.
+    .replace(/(?<![\p{L}\p{N}])_|_(?![\p{L}\p{N}])/gu, "\\_");
+  // [ and ] only where a link or reference definition could form; keeps [[wiki]] and [^1].
+  return escapeLinkBrackets(escaped);
+}
+
+/** What may follow a "]" to form a link, a reference link or a reference definition. */
+const LINK_CONTINUATION = /[([:]/;
+
+/**
+ * Escape every "]" followed by "(", "[" or ":", and every "[" whose next "]" is such a one.
+ * One right-to-left pass: a per-"[" lookahead was quadratic on text full of unclosed "[".
+ */
+function escapeLinkBrackets(text: string): string {
+  const escape = new Uint8Array(text.length);
+  let nextCloseFormsLink = false;
+  for (let i = text.length - 1; i >= 0; i--) {
+    if (text[i] === "]") nextCloseFormsLink = LINK_CONTINUATION.test(text[i + 1] ?? "");
+    if ((text[i] === "]" || text[i] === "[") && nextCloseFormsLink) escape[i] = 1;
+  }
+  return insertBackslashes(text, escape);
+}
+
+/** Copy of `text` with a backslash before every index flagged in `at`. */
+function insertBackslashes(text: string, at: Uint8Array): string {
+  let out = "";
+  let last = 0;
+  for (let i = 0; i < text.length; i++) {
+    if (!at[i]) continue;
+    out += text.slice(last, i) + "\\";
+    last = i;
+  }
+  return out + text.slice(last);
 }
 
 /** Leading indentation that would turn a paragraph's first line into an indented code block. */
@@ -64,19 +91,51 @@ export function escapeBlockStarts(markdown: string): string {
     .replace(TASK_MARKER_NEAR_START, "$1\\[");
 }
 
+/** Characters marked's emphasis matching can't see inside a tag-shaped span (a backtick too: see below). */
+const HIDDEN_DELIMITERS = new Set(["*", "_", "~", "`"]);
+
+/** After "<", these start a real tag, comment, autolink or plain "< " text, which never need escaping here. */
+const NOT_A_HIDING_LT = /[A-Za-z/!? ]/;
+
 /**
  * While matching emphasis, marked skips anything shaped like a tag ("<x" … ">"), so a literal "<" with
  * formatting before the next ">" hides those delimiters ("x <5 **c** y> z" would lose the bold).
  * Such a "<" is written as "\<"; escaped "<"s don't stop marked's skip, so every one before the ">" is.
  * A backtick counts too: a skipped span ending inside a code span breaks that code span.
- * Code spans are matched first so their content is never touched.
+ * Code spans (an unescaped backtick up to the next backtick) are left untouched. Paragraph-level.
+ *
+ * Linear on purpose: it runs on every save, and a per-"<" lookahead froze the tab on long paragraphs
+ * full of "<". One pass marks escaped characters, one (right to left) tracks the next unescaped ">"
+ * and delimiter, and one writes the output while skipping code spans.
  */
-const CODE_SPAN_OR_HIDING_LT =
-  /(?<!\\)(?:\\\\)*`[^`]*`|<(?![A-Za-z/!? ])(?=(?:\\[\s\S]|[^\\>*_~`])*[*_~`](?:\\[\s\S]|[^\\>])*>)/g;
-
-/** Escape each "<" that would hide formatting delimiters from marked (see above). Paragraph-level. */
 export function escapeTagLikeSpans(markdown: string): string {
-  return markdown.replace(CODE_SPAN_OR_HIDING_LT, (match) => (match === "<" ? "\\<" : match));
+  const n = markdown.length;
+  // A character is escaped when it follows an unescaped backslash.
+  const escaped = new Uint8Array(n);
+  for (let i = 1; i < n; i++) escaped[i] = markdown[i - 1] === "\\" && !escaped[i - 1] ? 1 : 0;
+
+  // A "<" hides delimiters when an unescaped delimiter comes before the next unescaped ">" (which must exist).
+  const hides = new Uint8Array(n);
+  let nextGt = Infinity;
+  let nextDelimiter = Infinity;
+  for (let i = n - 1; i >= 0; i--) {
+    const c = markdown[i];
+    if (c === "<" && !NOT_A_HIDING_LT.test(markdown[i + 1] ?? "") && nextDelimiter < nextGt && nextGt < n) {
+      hides[i] = 1;
+    }
+    if (escaped[i]) continue;
+    if (c === ">") nextGt = i;
+    else if (HIDDEN_DELIMITERS.has(c)) nextDelimiter = i;
+  }
+
+  for (let i = 0; i < n; i++) {
+    if (markdown[i] !== "`" || escaped[i]) continue;
+    const close = markdown.indexOf("`", i + 1);
+    if (close === -1) break; // no backtick after this one, so no more code spans either
+    hides.fill(0, i, close + 1);
+    i = close;
+  }
+  return insertBackslashes(markdown, hides);
 }
 
 /**

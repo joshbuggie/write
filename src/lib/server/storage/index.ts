@@ -4,7 +4,8 @@
  */
 export { StorageError, type StorageErrorCode } from "./errors";
 export { getDataDir } from "./config";
-export { ensureBootstrap, checkHealth } from "./bootstrap";
+export { ensureBootstrap } from "./bootstrap";
+export { checkHealth } from "./health";
 export { listTree, createFolder, renameFolder, deleteFolder } from "./folders";
 export {
   readNote,

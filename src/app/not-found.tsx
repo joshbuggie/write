@@ -2,7 +2,10 @@ import Link from "next/link";
 import { buttonStyles } from "@/components/ui/button";
 import { LIBRARY_HREF } from "@/lib/routes";
 
-/** App-wide 404 for URLs outside /notes. */
+/**
+ * 404 for every URL no route matches, /notes/a/b/c included; it renders outside the notes shell.
+ * A note URL that matches the route but names a missing note gets notes/[folder]/[note]/not-found.tsx.
+ */
 export default function NotFound() {
   return (
     <main className="flex min-h-dvh flex-col items-center justify-center gap-4 px-6 text-center">

@@ -64,7 +64,7 @@ function ToolbarButtons({ editor, onOpenLink, size }: ToolbarProps & { size: But
           className={cn(
             "inline-flex shrink-0 items-center justify-center rounded-md text-muted",
             "hover:bg-hover hover:text-ink disabled:opacity-40 disabled:hover:bg-transparent",
-            size === "sm" ? "size-8" : "size-11",
+            size === "sm" ? "size-8 pointer-coarse:size-11" : "size-11",
             active && "bg-active text-ink",
           )}
         >
@@ -77,7 +77,7 @@ function ToolbarButtons({ editor, onOpenLink, size }: ToolbarProps & { size: But
 
 /**
  * Desktop/tablet formatting bar (≥md). The note view renders it into a sticky slot under the header,
- * aligned with the text column.
+ * aligned with the text column. Compact 32px buttons for a mouse; 44px on touch screens such as an iPad.
  */
 export function DesktopToolbar({ editor, onOpenLink }: ToolbarProps) {
   return (
@@ -86,7 +86,10 @@ export function DesktopToolbar({ editor, onOpenLink }: ToolbarProps) {
         role="toolbar"
         aria-label="Formatting"
         onKeyDown={moveFocus}
-        className={cn(TEXT_COLUMN, "flex h-10 [scrollbar-width:none] items-center gap-0.5 overflow-x-auto")}
+        className={cn(
+          TEXT_COLUMN,
+          "flex h-10 [scrollbar-width:none] items-center gap-0.5 overflow-x-auto pointer-coarse:h-12",
+        )}
       >
         <ToolbarButtons editor={editor} onOpenLink={onOpenLink} size="sm" />
       </div>

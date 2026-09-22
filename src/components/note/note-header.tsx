@@ -18,8 +18,9 @@ type NoteHeaderProps = {
 };
 
 /**
- * Sticky bar above a note (§10.2). Phone: "‹ Notes" back to the library, since there is no sidebar.
- * Tablet and up: sidebar toggle and a folder / name breadcrumb. Download is one click everywhere.
+ * Sticky bar above a note (see docs/design-decisions.md#d25). Phone: "‹ Notes" back to the library, since
+ * there is no sidebar. Tablet and up: sidebar toggle and a folder / name breadcrumb. Download is one click
+ * everywhere.
  */
 export function NoteHeader({ noteRef, status, menu }: NoteHeaderProps) {
   const sidebar = useSidebar();

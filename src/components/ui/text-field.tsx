@@ -5,7 +5,8 @@ import { cn } from "@/lib/cn";
 export type TextFieldProps = React.ComponentPropsWithRef<"input"> & { label?: string; error?: string | null };
 
 /**
- * Labelled single-line input with an inline, announced error message.
+ * Labelled single-line input with an inline error message that screen readers announce when it appears
+ * (a polite live region, so live validation doesn't interrupt typing).
  * When `aria-label` is given the visible label is dropped (the input is already named).
  * `className` styles the <input>. Phones get 16px text so iOS doesn't zoom in (see globals.css);
  * to override a base utility (height, background) use Tailwind's `!` suffix, e.g. `h-8!`.
@@ -34,11 +35,10 @@ export function TextField({ label, error, id, className, ...rest }: TextFieldPro
           className,
         )}
       />
-      {error && (
-        <p id={errorId} className="text-[13px] text-danger">
-          {error}
-        </p>
-      )}
+      {/* Always mounted: screen readers only announce changes to a live region that already exists. */}
+      <p id={errorId} aria-live="polite" className="text-[13px] text-danger empty:hidden">
+        {error}
+      </p>
     </div>
   );
 }

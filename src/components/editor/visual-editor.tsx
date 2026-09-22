@@ -1,13 +1,14 @@
 "use client";
 
 import type { Editor } from "@tiptap/core";
+import { Selection } from "@tiptap/pm/state";
 import { EditorContent, useEditor } from "@tiptap/react";
 import { useEffect, useEffectEvent, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { FrontmatterDetails } from "@/components/note/frontmatter-details";
 import { useToast } from "@/components/ui/toast";
 import { createExtensions } from "@/lib/markdown/extensions";
-import { IGNORED_FILES_EVENT } from "@/lib/markdown/markdown-paste";
+import { IGNORED_FILES_EVENT, PASTED_AS_TEXT_EVENT } from "@/lib/markdown/markdown-paste";
 import { analyzeFidelity } from "@/lib/markdown/fidelity";
 import { composeFile, splitFrontmatter } from "@/lib/markdown/file-format";
 import { serializeBody } from "@/lib/markdown/serialize";
@@ -30,6 +31,7 @@ type VisualEditorProps = {
 };
 
 const NO_UPLOADS = "Image upload isn't supported yet — add files to your data folder.";
+const PASTED_AS_TEXT = "Pasted as plain text: the visual editor can't keep all of this Markdown.";
 /** Caret stays clear of the sticky header + toolbar above and the docked phone toolbar below. */
 const CARET_MARGIN = { top: 112, right: 0, bottom: 72, left: 0 };
 
@@ -37,17 +39,30 @@ const isShortcut = (e: KeyboardEvent, key: string) =>
   (e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === key;
 
 /**
+ * Tiptap's focus command focuses a frame later, so keys typed right after Enter in the title would still
+ * land in the title. This focuses now; a position that no longer fits the document snaps to the nearest
+ * valid caret.
+ */
+function focusAt(editor: Editor, at: "start" | number) {
+  const { doc, tr } = editor.state;
+  const selection =
+    at === "start"
+      ? Selection.atStart(doc)
+      : Selection.near(doc.resolve(Math.min(Math.max(at, 0), doc.content.size)));
+  editor.view.dispatch(tr.setSelection(selection).scrollIntoView());
+  editor.view.focus();
+}
+
+/**
  * The Tiptap editor for a note body. It parses the markdown once, and on that same first render checks
- * whether saving it back would lose anything (§8.3). If it would, the note opens in source mode instead,
- * so nothing is silently dropped from the user's file.
+ * whether saving it back would lose anything (see docs/design-decisions.md#d16). If it would, the note opens
+ * in source mode instead, so nothing is silently dropped from the user's file.
  */
 export function VisualEditor({ content, allowLossy, toolbarSlot, onReady, onChange }: VisualEditorProps) {
   const toast = useToast();
   const [linkOpen, setLinkOpen] = useState(false);
   const [extensions] = useState(() => createExtensions());
   const [parts] = useState(() => splitFrontmatter(content));
-  const [frontmatter, setFrontmatter] = useState(parts.frontmatter);
-  const frontmatterRef = useRef(parts.frontmatter);
 
   const editor = useEditor({
     extensions,
@@ -94,15 +109,11 @@ export function VisualEditor({ content, allowLossy, toolbarSlot, onReady, onChan
       // What "unchanged" means for this note: its normalized serialization, not the raw file.
       baseline: composeFile(parts.frontmatter, opened.roundTripped),
       handle: {
-        getContent: () => composeFile(frontmatterRef.current, serializeBody(current)),
-        setContent: (text) => {
-          const next = splitFrontmatter(text);
-          frontmatterRef.current = next.frontmatter;
-          setFrontmatter(next.frontmatter);
-          current.commands.setContent(next.body, { contentType: "markdown", emitUpdate: false });
-        },
+        getContent: () => composeFile(parts.frontmatter, serializeBody(current)),
         setEditable: (editable) => current.setEditable(editable),
-        focusStart: () => current.commands.focus("start"),
+        focus: (at) => focusAt(current, at),
+        hasFocus: () => current.isFocused,
+        getCaret: () => current.state.selection.head,
       },
     });
   });
@@ -111,14 +122,20 @@ export function VisualEditor({ content, allowLossy, toolbarSlot, onReady, onChan
     if (!lossReasons && live && !live.isDestroyed) announceReady(live);
   }, [lossReasons, live]);
 
-  // MarkdownPaste swallows pastes and drops that carry only files; tell the user why nothing happened.
+  // MarkdownPaste swallows pastes and drops that carry only files, and pastes Markdown the editor would
+  // partly drop as plain text; tell the user why the paste didn't do what they expected.
   const bodyRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const body = bodyRef.current;
     if (!body) return;
     const onIgnoredFiles = () => toast.show({ message: NO_UPLOADS });
+    const onPastedAsText = () => toast.show({ message: PASTED_AS_TEXT });
     body.addEventListener(IGNORED_FILES_EVENT, onIgnoredFiles);
-    return () => body.removeEventListener(IGNORED_FILES_EVENT, onIgnoredFiles);
+    body.addEventListener(PASTED_AS_TEXT_EVENT, onPastedAsText);
+    return () => {
+      body.removeEventListener(IGNORED_FILES_EVENT, onIgnoredFiles);
+      body.removeEventListener(PASTED_AS_TEXT_EVENT, onPastedAsText);
+    };
   }, [live, toast]);
 
   if (lossReasons) {
@@ -137,7 +154,7 @@ export function VisualEditor({ content, allowLossy, toolbarSlot, onReady, onChan
   return (
     <>
       {toolbarSlot && createPortal(<DesktopToolbar editor={live} onOpenLink={openLinkDialog} />, toolbarSlot)}
-      {frontmatter && <FrontmatterDetails frontmatter={frontmatter} />}
+      {parts.frontmatter && <FrontmatterDetails frontmatter={parts.frontmatter} />}
       <div
         ref={bodyRef}
         className="cursor-text pb-[40vh]"

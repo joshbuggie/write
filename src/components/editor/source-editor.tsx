@@ -33,17 +33,16 @@ export function SourceEditor({ content, sourceReason, onReady, onChange }: Sourc
       baseline: content,
       handle: {
         getContent: () => el.value,
-        setContent: (text) => {
-          el.value = text;
-          fitHeight(el, true);
-        },
         setEditable: (editable) => {
           el.readOnly = !editable;
         },
-        focusStart: () => {
-          el.focus({ preventScroll: true });
-          el.setSelectionRange(0, 0);
+        focus: (at) => {
+          const caret = at === "start" ? 0 : Math.min(at, el.value.length);
+          el.focus({ preventScroll: at === "start" });
+          el.setSelectionRange(caret, caret);
         },
+        hasFocus: () => document.activeElement === el,
+        getCaret: () => el.selectionStart,
       },
     });
   });

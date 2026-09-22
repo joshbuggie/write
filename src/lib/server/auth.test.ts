@@ -1,14 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  checkPassword,
+  attemptPassword,
+  authenticateRequest,
   clearSessionCookie,
   createSessionToken,
   isAuthEnabled,
-  isLoginThrottled,
-  isRequestAuthenticated,
   isSecureRequest,
-  recordLoginFailure,
-  resetLoginThrottle,
+  lockoutMessage,
+  lockoutRetryAfterS,
+  LOCKOUT_MS,
+  resetPasswordGuard,
   SESSION_MAX_AGE_S,
   sessionCookie,
   verifySessionToken,
@@ -16,9 +17,11 @@ import {
 
 const NOW = Date.UTC(2026, 8, 22, 12, 0, 0);
 
+beforeEach(() => void vi.spyOn(console, "warn").mockImplementation(() => {})); // lockout log line
+
 afterEach(() => {
   vi.unstubAllEnvs();
-  resetLoginThrottle();
+  resetPasswordGuard();
 });
 
 describe("auth disabled", () => {
@@ -26,9 +29,9 @@ describe("auth disabled", () => {
 
   it("lets every request through and never accepts tokens or passwords", () => {
     expect(isAuthEnabled()).toBe(false);
-    expect(isRequestAuthenticated(new Request("http://localhost/api/tree"))).toBe(true);
+    expect(authenticateRequest(new Request("http://localhost/api/tree"))).toBe("ok");
     expect(verifySessionToken(createSessionToken(NOW), NOW)).toBe(false);
-    expect(checkPassword("")).toBe(false);
+    expect(attemptPassword("")).toBe("unauthorized");
   });
 });
 
@@ -66,14 +69,51 @@ describe("session tokens", () => {
   });
 });
 
-describe("checkPassword", () => {
+describe("attemptPassword", () => {
   beforeEach(() => vi.stubEnv("WRITE_PASSWORD", "hunter2"));
 
   it("accepts only the exact password", () => {
-    expect(checkPassword("hunter2")).toBe(true);
-    expect(checkPassword("hunter")).toBe(false);
-    expect(checkPassword("Hunter2")).toBe(false);
-    expect(checkPassword("")).toBe(false);
+    expect(attemptPassword("hunter2")).toBe("ok");
+    expect(attemptPassword("hunter")).toBe("unauthorized");
+    expect(attemptPassword("Hunter2")).toBe("unauthorized");
+    expect(attemptPassword("")).toBe("unauthorized");
+  });
+
+  it("locks every password check out after 10 failures, even the right password", () => {
+    for (let i = 0; i < 10; i++) expect(attemptPassword(`guess${i}`, NOW + i)).toBe("unauthorized");
+    expect(attemptPassword("guess", NOW + 10)).toBe("rate_limited");
+    expect(attemptPassword("hunter2", NOW + 10)).toBe("rate_limited");
+    expect(lockoutRetryAfterS(NOW + 9)).toBe(LOCKOUT_MS / 1000);
+    expect(lockoutMessage(NOW + 9)).toBe("Too many wrong passwords. Try again in 15 minutes.");
+
+    // After the lockout the budget starts over.
+    const after = NOW + 9 + LOCKOUT_MS;
+    expect(lockoutRetryAfterS(after)).toBe(0);
+    expect(attemptPassword("hunter2", after)).toBe("ok");
+    for (let i = 0; i < 9; i++) expect(attemptPassword("nope", after + i)).toBe("unauthorized");
+    expect(attemptPassword("hunter2", after + 9)).toBe("ok");
+  });
+
+  it("forgets failures older than the window, but not because of a success", () => {
+    for (let i = 0; i < 9; i++) attemptPassword("nope", NOW);
+    expect(attemptPassword("hunter2", NOW)).toBe("ok");
+    expect(attemptPassword("nope", NOW + 1)).toBe("unauthorized");
+    expect(attemptPassword("hunter2", NOW + 2)).toBe("rate_limited");
+
+    resetPasswordGuard();
+    for (let i = 0; i < 9; i++) attemptPassword("nope", NOW);
+    expect(attemptPassword("nope", NOW + 15 * 60 * 1000)).toBe("unauthorized");
+    expect(attemptPassword("hunter2", NOW + 15 * 60 * 1000)).toBe("ok");
+  });
+
+  it("shares one budget between separately bundled copies of this module (proxy vs routes)", async () => {
+    vi.resetModules();
+    const proxyCopy = await import("./auth");
+    vi.resetModules();
+    const routeCopy = await import("./auth");
+    expect(proxyCopy).not.toBe(routeCopy);
+    for (let i = 0; i < 10; i++) proxyCopy.attemptPassword("nope", NOW);
+    expect(routeCopy.attemptPassword("hunter2", NOW)).toBe("rate_limited");
   });
 });
 
@@ -83,17 +123,24 @@ describe("isRequestAuthenticated", () => {
 
   it("accepts a valid session cookie among others", () => {
     const token = createSessionToken();
-    expect(isRequestAuthenticated(req({ cookie: `write-sidebar=open; write_session=${token}` }))).toBe(true);
+    expect(authenticateRequest(req({ cookie: `write-sidebar=open; write_session=${token}` }))).toBe("ok");
   });
 
   it("accepts a Bearer password", () => {
-    expect(isRequestAuthenticated(req({ authorization: "Bearer hunter2" }))).toBe(true);
-    expect(isRequestAuthenticated(req({ authorization: "Bearer nope" }))).toBe(false);
+    expect(authenticateRequest(req({ authorization: "Bearer hunter2" }))).toBe("ok");
+    expect(authenticateRequest(req({ authorization: "Bearer nope" }))).toBe("unauthorized");
   });
 
   it("rejects requests without credentials or with a bad cookie", () => {
-    expect(isRequestAuthenticated(req({}))).toBe(false);
-    expect(isRequestAuthenticated(req({ cookie: "write_session=v1.1.abc" }))).toBe(false);
+    expect(authenticateRequest(req({}))).toBe("unauthorized");
+    expect(authenticateRequest(req({ cookie: "write_session=v1.1.abc" }))).toBe("unauthorized");
+  });
+
+  it("counts wrong Bearer passwords against the lockout, but session cookies keep working", () => {
+    const cookie = `write_session=${createSessionToken()}`;
+    for (let i = 0; i < 10; i++) authenticateRequest(req({ authorization: `Bearer guess${i}` }));
+    expect(authenticateRequest(req({ authorization: "Bearer hunter2" }))).toBe("rate_limited");
+    expect(authenticateRequest(req({ cookie }))).toBe("ok");
   });
 });
 
@@ -111,15 +158,5 @@ describe("cookies", () => {
     expect(isSecureRequest(new Request("http://localhost/"))).toBe(false);
     const proxied = new Request("http://localhost/", { headers: { "x-forwarded-proto": "https,http" } });
     expect(isSecureRequest(proxied)).toBe(true);
-  });
-});
-
-describe("login throttle", () => {
-  it("throttles after 5 failures within 10 minutes", () => {
-    for (let i = 0; i < 4; i++) recordLoginFailure(NOW + i);
-    expect(isLoginThrottled(NOW + 10)).toBe(false);
-    recordLoginFailure(NOW + 10);
-    expect(isLoginThrottled(NOW + 10)).toBe(true);
-    expect(isLoginThrottled(NOW + 10 * 60 * 1000 + 11)).toBe(false);
   });
 });

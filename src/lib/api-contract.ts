@@ -11,6 +11,7 @@ export type ErrorCode =
   | "read_only"
   | "too_large"
   | "unsupported_media_type"
+  | "rate_limited"
   | "storage_unavailable"
   | "internal";
 
@@ -25,6 +26,7 @@ export const ERROR_STATUS: Record<ErrorCode, number> = {
   read_only: 409,
   too_large: 413,
   unsupported_media_type: 415,
+  rate_limited: 429,
   internal: 500,
   storage_unavailable: 503,
 };
@@ -93,7 +95,10 @@ export interface UpdateNoteResponse {
   note: NoteSummary;
 }
 
-/** Response of `DELETE /api/notes?folder=&name=&ifEmpty=1` (§17.1): whether the empty note was removed. */
+/**
+ * Response of `DELETE /api/notes?folder=&name=&ifEmpty=1` (see docs/design-decisions.md#d11): whether the
+ * empty note was removed.
+ */
 export interface DiscardNoteResponse {
   deleted: boolean;
 }

@@ -8,8 +8,11 @@ describe("WELCOME_MARKDOWN", () => {
   it("is not lossy, so the first note opens in the visual editor", () => {
     const manager = createMarkdownManager();
     const roundTripped = finalizeMarkdown(manager.serialize(manager.parse(WELCOME_MARKDOWN)));
-    // Tiptap always writes a blank line before a table, so "normalized" is the best a table allows.
-    expect(analyzeFidelity(WELCOME_MARKDOWN, roundTripped)).toEqual({ kind: "normalized" });
-    expect(roundTripped.replace("\n\n\n|", "\n\n|")).toBe(WELCOME_MARKDOWN);
+    expect(analyzeFidelity(WELCOME_MARKDOWN, roundTripped)).toEqual({ kind: "exact" });
+    expect(roundTripped).toBe(WELCOME_MARKDOWN);
+  });
+
+  it("doesn't repeat the note title as a heading", () => {
+    expect(WELCOME_MARKDOWN).not.toMatch(/^#\s/);
   });
 });

@@ -1,7 +1,7 @@
 /*
- * Editor typography (§10.4). The ProseMirror root carries `prose max-w-none write-prose`.
- * `.write-prose <element>` selectors outrank the typography plugin's `.prose :where(...)` rules,
- * so these win regardless of stylesheet order. Colors come only from the design tokens.
+ * Editor typography (see docs/design-decisions.md#d26). The ProseMirror root carries `prose max-w-none
+ * write-prose`. `.write-prose <element>` selectors outrank the typography plugin's `.prose :where(...)`
+ * rules, so these win regardless of stylesheet order. Colors come only from the design tokens.
  */
 
 .prose.write-prose {

@@ -7,6 +7,7 @@ import {
   patchMarkdownManager,
   withEscapedTablePipes,
 } from "./escape";
+import { createMarkdownManager } from "./extensions";
 
 describe("encodeText", () => {
   it.each([
@@ -106,6 +107,39 @@ describe("escapeTagLikeSpans", () => {
     "<em>a</em> *b* >",
   ])("leaves %j alone", (input) => {
     expect(escapeTagLikeSpans(input)).toBe(input);
+  });
+
+  it.each([
+    ["an escaped backtick doesn't open code", "\\`<5 *x* >", "\\`\\<5 *x* >"],
+    ["an escaped delimiter doesn't count", "<5 \\* > *x* >", "<5 \\* > *x* >"],
+    ["an escaped > doesn't close", "<5 \\> *x* >", "\\<5 \\> *x* >"],
+    ["a code span ends at the next backtick", "`a\\` <5 *x* >", "`a\\` \\<5 *x* >"],
+    ["an unclosed backtick is a delimiter", "<5 ` x >", "\\<5 ` x >"],
+  ])("%s", (_, input, output) => {
+    expect(escapeTagLikeSpans(input)).toBe(output);
+  });
+});
+
+describe("linear time on hostile paragraphs (runs on every save)", () => {
+  const manager = createMarkdownManager();
+  const serializeParagraph = (text: string) =>
+    manager.serialize({ type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text }] }] });
+  const elapsed = (run: () => unknown) => {
+    const start = performance.now();
+    run();
+    return performance.now() - start;
+  };
+
+  it.each([
+    ["'<'", "<".repeat(100_000)],
+    ["'a <1 _'", "a <1 _".repeat(20_000)],
+    ["'['", "[a ".repeat(40_000)],
+  ])("serializes a 100 KB+ paragraph of %s in well under 100 ms", (_, text) => {
+    expect(elapsed(() => serializeParagraph(text))).toBeLessThan(100);
+  });
+
+  it("escapeTagLikeSpans handles 200 KB of '<' and delimiters without a closing '>'", () => {
+    expect(elapsed(() => escapeTagLikeSpans("x <1 _".repeat(35_000)))).toBeLessThan(100);
   });
 });
 

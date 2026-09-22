@@ -27,8 +27,9 @@ function Label({ children }: { children: ReactNode }) {
 }
 
 /**
- * The header's save indicator (§10.7). Calm when things are fine, specific when they are not. Only
- * offline, error and conflict are announced to screen readers; routine saves would be noise.
+ * The header's save indicator (see docs/design-decisions.md#d19). Calm when things are fine, specific when
+ * they are not. Only offline, error and conflict are announced to screen readers; routine saves would be
+ * noise.
  */
 export function SaveStatus({ state, onRetry, onShowConflict }: SaveStatusProps) {
   // Remember which save became slow (state objects are immutable snapshots), so no reset is needed.

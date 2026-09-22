@@ -2,9 +2,9 @@ import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import { SESSION_COOKIE } from "@/lib/constants";
 
 /**
- * Optional single-password auth (§7.2). Everything here is stateless except the login throttle:
- * a session is an HMAC-signed expiry, so no session store is needed and changing WRITE_PASSWORD
- * signs out every device (the password is part of the signing key).
+ * Optional single-password auth (see docs/design-decisions.md#d12). Everything here is stateless except the
+ * brute-force guard: a session is an HMAC-signed expiry, so no session store is needed and changing
+ * WRITE_PASSWORD signs out every device (the password is part of the signing key).
  */
 
 /** Session lifetime: 30 days, in seconds (also the cookie Max-Age). */
@@ -58,8 +58,8 @@ export function verifySessionToken(token: string | undefined, now: number = Date
   return safeEqual(signature, sign(`${version}.${expiry}`));
 }
 
-/** Compares sha256 digests so the comparison is constant-time regardless of input length. */
-export function checkPassword(input: string): boolean {
+/** Compares sha256 digests so the comparison is constant-time. Callers go through attemptPassword(). */
+function checkPassword(input: string): boolean {
   if (!isAuthEnabled()) return false;
   return timingSafeEqual(sha256(input), sha256(currentPassword()));
 }
@@ -75,13 +75,15 @@ function readCookie(header: string | null, name: string): string | undefined {
   return undefined;
 }
 
-/** True if auth is off, the session cookie is valid, or `Authorization: Bearer <WRITE_PASSWORD>` (scripts). */
-export function isRequestAuthenticated(req: Request): boolean {
-  if (!isAuthEnabled()) return true;
-  if (verifySessionToken(readCookie(req.headers.get("cookie"), SESSION_COOKIE))) return true;
-  const authorization = req.headers.get("authorization");
-  const match = authorization?.match(/^Bearer\s+(.+)$/i);
-  return !!match && checkPassword(match[1]);
+/**
+ * "ok" if auth is off, the session cookie is valid, or `Authorization: Bearer <WRITE_PASSWORD>` (scripts).
+ * The Bearer password counts against the same brute-force budget as the login form.
+ */
+export function authenticateRequest(req: Request): AuthStatus {
+  if (!isAuthEnabled()) return "ok";
+  if (verifySessionToken(readCookie(req.headers.get("cookie"), SESSION_COOKIE))) return "ok";
+  const match = req.headers.get("authorization")?.match(/^Bearer\s+(.+)$/i);
+  return match ? attemptPassword(match[1]) : "unauthorized";
 }
 
 /** The cookie should be Secure when the browser reached us over https, including via a TLS reverse proxy. */
@@ -100,32 +102,65 @@ export function clearSessionCookie(): string {
   return `${SESSION_COOKIE}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0`;
 }
 
-// Login throttle (§7.2): module-level, so it is per server process, which matches "one instance per data dir".
-const THROTTLE_WINDOW_MS = 10 * 60 * 1000;
-const THROTTLE_AFTER_FAILURES = 5;
-/** Extra delay for every attempt once throttled. */
-export const THROTTLED_DELAY_MS = 2000;
-/** Delay after every failed attempt. */
-export const FAILURE_DELAY_MS = 250;
+/**
+ * Brute-force guard shared by every password check (login form and Bearer header). One global budget:
+ * after MAX_FAILURES wrong passwords within FAILURE_WINDOW_MS, every password check is refused outright
+ * (429) for LOCKOUT_MS, even a correct one, so parallel requests can't multiply the guess rate. It is
+ * global rather than per client IP because X-Forwarded-For is trivially spoofed. The tradeoff: an
+ * attacker can keep the owner from signing in with the password, but existing session cookies keep
+ * working. State lives on globalThis because proxy.ts and the Route Handlers are separate bundles that
+ * run in the same Node process.
+ */
+const MAX_FAILURES = 10;
+const FAILURE_WINDOW_MS = 15 * 60 * 1000;
+/** How long every password check is refused once the failure budget is spent. */
+export const LOCKOUT_MS = 15 * 60 * 1000;
 
-let failures: number[] = [];
+interface GuardState {
+  failures: number[];
+  lockedUntil: number;
+}
+const holder = globalThis as typeof globalThis & { __writePasswordGuard?: GuardState };
+const guardState = (): GuardState => (holder.__writePasswordGuard ??= { failures: [], lockedUntil: 0 });
 
-function recentFailures(now: number): number[] {
-  failures = failures.filter((t) => now - t < THROTTLE_WINDOW_MS);
-  return failures;
+/** Outcome of an authentication check; the non-"ok" values are the matching ErrorCodes (401 / 429). */
+export type AuthStatus = "ok" | "unauthorized" | "rate_limited";
+
+/**
+ * The only way to check a password. Synchronous on purpose: the lockout check, the comparison and the
+ * failure bookkeeping happen in one tick, so a burst of concurrent requests can't slip past the budget.
+ * A success does not clear earlier failures, otherwise a script using the right password would keep
+ * refilling an attacker's budget.
+ */
+export function attemptPassword(input: string, now: number = Date.now()): AuthStatus {
+  if (!isAuthEnabled()) return "unauthorized";
+  const state = guardState();
+  if (now < state.lockedUntil) return "rate_limited";
+  if (checkPassword(input)) return "ok";
+  state.failures = state.failures.filter((t) => now - t < FAILURE_WINDOW_MS);
+  state.failures.push(now);
+  if (state.failures.length >= MAX_FAILURES) {
+    state.failures = [];
+    state.lockedUntil = now + LOCKOUT_MS;
+    console.warn(
+      `[write] ${MAX_FAILURES} wrong passwords: password sign-in is locked for ${LOCKOUT_MS / 60_000} minutes.`,
+    );
+  }
+  return "unauthorized";
 }
 
-/** True after 5 failed logins within 10 minutes; the login route then slows every attempt down. */
-export function isLoginThrottled(now: number = Date.now()): boolean {
-  return recentFailures(now).length >= THROTTLE_AFTER_FAILURES;
+/** Seconds until the lockout ends (for Retry-After), or 0 when password checks are allowed. */
+export function lockoutRetryAfterS(now: number = Date.now()): number {
+  return Math.max(0, Math.ceil((guardState().lockedUntil - now) / 1000));
 }
 
-/** Remember a failed login for the throttle. */
-export function recordLoginFailure(now: number = Date.now()): void {
-  recentFailures(now).push(now);
+/** User-facing text for a 429, shared by the login route and the proxy. */
+export function lockoutMessage(now: number = Date.now()): string {
+  const minutes = Math.max(1, Math.ceil(lockoutRetryAfterS(now) / 60));
+  return `Too many wrong passwords. Try again in ${minutes} minute${minutes === 1 ? "" : "s"}.`;
 }
 
-/** Test helper: forget all recorded failures. */
-export function resetLoginThrottle(): void {
-  failures = [];
+/** Test helper: forget all recorded failures and lift any lockout. */
+export function resetPasswordGuard(): void {
+  holder.__writePasswordGuard = { failures: [], lockedUntil: 0 };
 }

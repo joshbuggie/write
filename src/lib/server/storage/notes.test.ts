@@ -146,6 +146,21 @@ describe("saveNote", () => {
       expect((await disk(dir, "notebook/Plan.md")).toString()).toBe("mine\n");
     }));
 
+  it("keeps the overwritten disk version in .trash when a forced save wasn't based on it", () =>
+    withTempDataDir(async (dir) => {
+      const base = await setup(dir);
+      await saveNote({ ref: ref("Plan"), content: "mine\n", baseVersion: "stale", force: true });
+      const [stamp] = await readdir(path.join(dir, ".trash"));
+      expect((await disk(dir, `.trash/${stamp}/notebook/Plan.md`)).toString()).toBe("old\n");
+      expect(await readdir(path.join(dir, ".trash", stamp, "notebook"))).toEqual(["Plan.md"]);
+
+      // Based on the disk version (or nothing to change): no backup.
+      const current = versionOf(Buffer.from("mine\n"));
+      await saveNote({ ref: ref("Plan"), content: "again\n", baseVersion: current, force: true });
+      await saveNote({ ref: ref("Plan"), content: "again\n", baseVersion: base, force: true });
+      expect(await readdir(path.join(dir, ".trash"))).toEqual([stamp]);
+    }));
+
   it("never rewrites identical bytes (mtime unchanged)", () =>
     withTempDataDir(async (dir) => {
       const base = await setup(dir);

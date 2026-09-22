@@ -8,8 +8,9 @@ import type {
 } from "@/lib/api-contract";
 
 /**
- * Hand-written type guards for request bodies (no schema library, §1 #24). They check shapes only;
- * name rules and existence are enforced by storage so the error codes stay precise (invalid_name, not_found…).
+ * Hand-written type guards for request bodies (no schema library, see docs/design-decisions.md#d4). They
+ * check shapes only; name rules and existence are enforced by storage so the error codes stay precise
+ * (invalid_name, not_found…).
  */
 
 type Fields = Record<string, unknown>;

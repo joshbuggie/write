@@ -1,13 +1,16 @@
 import { NextRequest } from "next/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createSessionToken } from "@/lib/server/auth";
+import { createSessionToken, resetPasswordGuard } from "@/lib/server/auth";
 import { proxy } from "./proxy";
 
 const passes = (res: Response) => res.headers.get("x-middleware-next") === "1";
 const request = (path: string, headers?: HeadersInit) =>
   new NextRequest(new URL(path, "http://localhost:3000"), { headers });
 
-afterEach(() => vi.unstubAllEnvs());
+afterEach(() => {
+  vi.unstubAllEnvs();
+  resetPasswordGuard();
+});
 
 describe("proxy", () => {
   it("lets everything through when WRITE_PASSWORD is unset", () => {
@@ -39,6 +42,22 @@ describe("proxy", () => {
       expect(passes(proxy(request("/notes/a/b", { cookie })))).toBe(true);
       expect(passes(proxy(request("/api/tree", { authorization: "Bearer pw" })))).toBe(true);
       expect(passes(proxy(request("/api/tree", { authorization: "Bearer wrong" })))).toBe(false);
+    });
+
+    it("answers Bearer guessing with a 429 once the password budget is spent", async () => {
+      vi.stubEnv("WRITE_PASSWORD", "pw");
+      vi.spyOn(console, "warn").mockImplementation(() => {});
+      const guess = (password: string) =>
+        proxy(request("/api/tree", { authorization: `Bearer ${password}` }));
+      for (let i = 0; i < 10; i++) expect(guess(`g${i}`).status).toBe(401);
+      const locked = guess("pw");
+      expect(locked.status).toBe(429);
+      expect(Number(locked.headers.get("retry-after"))).toBeGreaterThan(0);
+      expect(await locked.json()).toEqual({ error: { code: "rate_limited", message: expect.any(String) } });
+      // A signed-in browser is unaffected.
+      expect(passes(proxy(request("/api/tree", { cookie: `write_session=${createSessionToken()}` })))).toBe(
+        true,
+      );
     });
   });
 });

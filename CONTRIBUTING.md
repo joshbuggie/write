@@ -7,6 +7,7 @@ most common changes.
 - [Setup](#setup)
 - [Everyday commands](#everyday-commands)
 - [Architecture map](#architecture-map)
+- [Design decisions](docs/design-decisions.md) (separate file)
 - [Rules](#rules)
 - [Next.js 16 gotchas](#nextjs-16-gotchas)
 - [Recipes](#recipes)
@@ -38,7 +39,13 @@ Start the dev server bound to your computer's LAN address, then open it in Safar
 Wi-Fi:
 
 ```bash
-npm run dev -- -H "$(ipconfig getifaddr en0)"   # macOS; on Linux use `hostname -I`
+# macOS (en0 is usually Wi-Fi)
+npm run dev -- -H "$(ipconfig getifaddr en0)"
+
+# Linux: -H takes exactly one address. `hostname -I` prints several, with a trailing space, so take the
+# first one, and check that it's your Wi-Fi address and not Docker or a VPN (`ip -4 addr show`).
+npm run dev -- -H "$(hostname -I | awk '{print $1}')"
+
 # then open http://<that-ip>:3000 on the phone
 ```
 
@@ -67,40 +74,45 @@ To build the Docker image locally, run `docker build -t write .`. It sets `BUILD
 ## Architecture map
 
 write is a small Next.js App Router app. There is no database: the filesystem **is** the data model.
+This section shows _where_ things are. [docs/design-decisions.md](docs/design-decisions.md) explains _why_
+they work the way they do, as numbered entries (D1, D2, …) that code comments link to.
 
 ```
 Browser ──RSC render / router.refresh()──► app/notes/layout.tsx, pages ──► lib/server/loaders ──► lib/server/storage ──► fs
    ├──fetch JSON (lib/api-client)──► app/api/*/route.ts ──► lib/server/http.handle() (auth, CSRF, errors) ──► storage
-   └──<a> click → location.assign──► app/api/download/route.ts ──► storage (bytes | zip)
+   └──fetch → blob (lib/download)──► app/api/download/route.ts ──► storage (bytes | zip)
 src/proxy.ts: optional auth gate in front of everything except health/login/static.
 ```
 
 - **Reads** happen in Server Components. Pages call loaders, which call storage. After a change, the
   client calls `router.refresh()` to get fresh props. There is no client-side store for the tree.
 - **Writes and downloads** go through Route Handlers under `/api`. The client calls them with the typed
-  `api` object in `lib/api-client.ts`. We don't use Server Actions. Autosave needs `keepalive`, aborts and
-  retries, and a plain HTTP API can also be driven with `curl`.
+  `api` object in `lib/api-client.ts`; downloads go through `downloadFile` in `lib/download.ts` (used by
+  `useDownload()` in `components/ui/download-link.tsx`), which throws the same `ApiError`. We don't use
+  Server Actions. Autosave needs `keepalive`, aborts and retries, and a plain HTTP API can also be driven
+  with `curl`.
 
 ### Where things live
 
-| Path                                       | What it is                                                                                                 |
-| ------------------------------------------ | ---------------------------------------------------------------------------------------------------------- |
-| `src/lib/types.ts`, `constants.ts`         | Shared domain types (`Note`, `Tree`, …) and limits. Imported everywhere.                                   |
-| `src/lib/names.ts`                         | Name rules for notes and folders (`validateName`, `nameKey`, `compareNames`). Shared by UI and server.     |
-| `src/lib/routes.ts`                        | **The only place URLs are built or parsed** (`noteHref`, `decodeSegment`, download links).                 |
-| `src/lib/api-contract.ts`, `api-client.ts` | The HTTP contract (request/response types, error codes) and the typed browser `fetch` wrapper.             |
-| `src/lib/server/storage/`                  | **The only code that touches the filesystem.** Notes, folders, trash, zip export, atomic writes, the lock. |
-| `src/lib/server/http.ts`, `validate.ts`    | `handle()` wraps every route with auth, CSRF checks and error mapping; hand-written body type guards.      |
-| `src/lib/server/auth.ts`, `src/proxy.ts`   | Optional password: HMAC session cookie, Bearer token, and the request gate.                                |
-| `src/lib/server/loaders.ts`                | What Server Components call to read data (`loadTree`, `loadNote`, …).                                      |
-| `src/app/api/*/route.ts`                   | One route file per resource: `tree`, `folders`, `notes`, `download`, `health`, `auth`.                     |
-| `src/lib/markdown/`                        | Framework-free Markdown engine: Tiptap extensions, escaping, front matter, fidelity check, paste.          |
-| `src/lib/autosave.ts`, `drafts.ts`         | Framework-free autosave state machine, plus crash-safety drafts in `localStorage`.                         |
-| `src/components/note/`                     | The note screen: `NoteView` orchestrates the editor, autosave, title/rename and conflict banner.           |
-| `src/components/editor/`                   | The visual (Tiptap) and source (textarea) editors, toolbar, link dialog, `editor.css`.                     |
-| `src/components/shell/`, `sidebar/`        | App shell, `ShellProvider` context, sidebar and phone library.                                             |
-| `src/components/ui/`                       | Small UI kit: `Button`, `IconButton`, `Dialog`, `Menu`, `Toast`, `TextField`, `DownloadLink`.              |
-| `src/app/globals.css`                      | Design tokens (colors for light and dark) exposed as Tailwind utilities.                                   |
+| Path                                       | What it is                                                                                                                                                           |
+| ------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/lib/types.ts`, `constants.ts`         | Shared domain types (`Note`, `Tree`, …) and limits. Imported everywhere.                                                                                             |
+| `src/lib/names.ts`                         | Name rules for notes and folders (`validateName`, `nameKey`, `compareNames`). Shared by UI and server.                                                               |
+| `src/lib/routes.ts`                        | **The only place URLs are built or parsed** (`noteHref`, `decodeSegment`, download links).                                                                           |
+| `src/lib/api-contract.ts`, `api-client.ts` | The HTTP contract (request/response types, error codes) and the typed browser `fetch` wrapper.                                                                       |
+| `src/lib/server/storage/`                  | **The only code that touches the filesystem.** Notes, folders, trash, zip export, atomic writes, the lock.                                                           |
+| `src/lib/server/http.ts`, `validate.ts`    | `handle()` wraps every route with auth, CSRF checks and error mapping; hand-written body type guards.                                                                |
+| `src/lib/server/auth.ts`, `src/proxy.ts`   | Optional password: HMAC session cookie, Bearer token, and the request gate.                                                                                          |
+| `src/lib/server/loaders.ts`                | What Server Components call to read data (`loadTree`, `loadNote`, …).                                                                                                |
+| `src/app/api/*/route.ts`                   | One route file per resource: `tree`, `folders`, `notes`, `download`, `health`, `auth`.                                                                               |
+| `src/lib/markdown/`                        | Framework-free Markdown engine: Tiptap extensions, escaping, front matter, fidelity check, paste.                                                                    |
+| `src/lib/markdown/nodes/`                  | The schema's node overrides (`Write*`): they only allow structure Markdown can store. `inline.ts` is the inline serializer, which checks its own output with marked. |
+| `src/lib/autosave.ts`, `drafts.ts`         | Framework-free autosave state machine, plus crash-safety drafts in `localStorage`.                                                                                   |
+| `src/components/note/`                     | The note screen: `NoteView` orchestrates the editor, autosave, title/rename and conflict banner.                                                                     |
+| `src/components/editor/`                   | The visual (Tiptap) and source (textarea) editors, toolbar, link dialog, `editor.css`.                                                                               |
+| `src/components/shell/`, `sidebar/`        | App shell, `ShellProvider` context, sidebar and phone library.                                                                                                       |
+| `src/components/ui/`                       | Small UI kit: `Button`, `IconButton`, `Dialog`, `Menu`, `Toast`, `TextField`, `DownloadLink`.                                                                        |
+| `src/app/globals.css`                      | Design tokens (colors for light and dark) exposed as Tailwind utilities.                                                                                             |
 
 ### Key ideas, in the order you'll meet them
 
@@ -140,7 +152,8 @@ These keep the app safe with other people's files. Most are enforced by lint or 
    JSON body.
 3. **Mutations go through `/api`, wrapped in `handle()`.** That gives you auth, CSRF protection
    (`Sec-Fetch-Site` plus JSON-only bodies) and consistent `ApiErrorBody` errors for free. No Server
-   Actions.
+   Actions. The browser calls them through `api` in `src/lib/api-client.ts`; downloads use `useDownload()`
+   (`src/components/ui/download-link.tsx`), which calls `downloadFile` in `src/lib/download.ts`.
 4. **Read Markdown with `serializeBody(editor)`, never `editor.getMarkdown()`.** Only `serializeBody`
    applies our escaping and final newline rules.
 5. **Every Markdown extension needs round-trip fixtures** in `src/lib/markdown/__fixtures__/`.
@@ -213,12 +226,16 @@ phone toolbars both render from it.
 
 ### Add a Markdown extension
 
-1. Add it to `createExtensions()` in `src/lib/markdown/extensions.ts`. Use only packages that are
-   already installed (rule 8). The extension must define `parseMarkdown` and `renderMarkdown`, or its
+1. Add it to `createSchemaExtensions()` in `src/lib/markdown/extensions.ts`. That list is the document
+   schema, shared by the editor and by the headless `createMarkdownManager()` that the fixture tests use.
+   Don't add syntax to `createExtensions()`: it only adds editor-only behavior (placeholder, paste, the
+   Markdown plugin itself), so the fixture tests would never see your extension. Use only packages that
+   are already installed (rule 8). The extension must define `parseMarkdown` and `renderMarkdown`, or its
    content is lost on save.
 2. Add fixtures to `src/lib/markdown/__fixtures__/`: `<case>.md` as input and, if the output is
-   normalized, `<case>.expected.md`. Run `npx vitest run src/lib/markdown` and check idempotence and
-   escaping.
+   normalized, `<case>.expected.md`. `roundtrip.test.ts` picks them up automatically and checks the exact
+   output, idempotence, the real editor's `serializeBody`, and the fidelity classification. Run
+   `npx vitest run src/lib/markdown`.
 3. If the syntax used to be "lossy", update the detectors in `src/lib/markdown/fidelity.ts` so those notes
    stop opening in source mode.
 4. Style it in `src/components/editor/editor.css` using token variables only (`var(--line)`,
@@ -262,6 +279,10 @@ phone toolbars both render from it.
   `./data`.
 - **Markdown tests** are driven by fixtures. When you change escaping or an extension, read the fixture
   diffs carefully: they show exactly what would change in people's files.
+- **Round-trip fuzz** (`src/lib/markdown/roundtrip-fuzz.test.ts`) builds seeded documents with real
+  editor commands and key presses and checks that each re-opens unchanged. The default run is quick; run
+  it deeper locally after serializer changes:
+  `FUZZ_SEEDS=5000 FUZZ_STEPS=80 npx vitest run src/lib/markdown/roundtrip-fuzz.test.ts`.
 - **Autosave tests** inject fake timers and a fake `save()`. There's no DOM.
 - UI is verified manually (below). Browser end-to-end tests are planned for later.
 
@@ -276,17 +297,20 @@ mode.
       taken name shows `A note named "X" already exists in <folder>.`; the URL updates.
 - [ ] **Conflict:** open a note, edit the same file in vim and save it. Refocus the tab: a clean note shows
       "Updated from disk"; a note with unsaved edits shows the conflict banner, and Keep mine, Use disk
-      version and Save mine as a copy all work.
+      version and Save mine as a copy all work. After Keep mine, the vim version is in `.trash`.
+- [ ] **Empty new note:** click New note, then open another note without typing: the empty `Untitled`
+      file is gone. Click New note and reload instead: it's still there.
 - [ ] **Offline:** turn off the network (DevTools → Network → Offline), type, and check the status says
       "Offline · kept on this device". Reload: the draft is restored. Go back online and it saves.
 - [ ] **No write on open:** open and close a note without typing, and check that the file's mtime
       (`ls -l --time-style=full-iso`, or `stat` on macOS) is unchanged.
 - [ ] **Downloads:** the note ⬇ gives the exact bytes (`cmp` it with the file on disk); folder and
       "Download all" zips unzip with `ditto -x -k`; downloading right after typing includes the latest
-      edit.
+      edit. Rename the file on disk, then click ⬇: an error toast appears and the app stays put.
 - [ ] **Front matter:** edit a note with YAML front matter, then `diff` it: the front matter is untouched.
 - [ ] **Auth** (if touched): with `WRITE_PASSWORD=x`, pages redirect to `/login`, the API returns 401, and
-      `curl -H "Authorization: Bearer x" localhost:3000/api/tree` works.
+      `curl -H "Authorization: Bearer x" localhost:3000/api/tree` works. Repeated wrong passwords (on
+      `/login` or as a Bearer token) start getting `429`.
 
 ---
 

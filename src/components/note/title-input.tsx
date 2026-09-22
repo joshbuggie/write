@@ -84,11 +84,10 @@ export function TitleInput({ name, inputRef, onRename, onFocusBody }: TitleInput
           "md:text-[32px] md:leading-[40px] xl:text-[34px] xl:leading-[42px]",
         )}
       />
-      {error && (
-        <p id={errorId} className="mt-1 text-[13px] text-danger">
-          {error}
-        </p>
-      )}
+      {/* Always mounted: screen readers only announce changes to a live region that already exists. */}
+      <p id={errorId} aria-live="polite" className="mt-1 text-[13px] text-danger empty:hidden">
+        {error}
+      </p>
     </div>
   );
 }

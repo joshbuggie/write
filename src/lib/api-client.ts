@@ -12,6 +12,7 @@ import {
   type UpdateNoteRequest,
   type UpdateNoteResponse,
 } from "./api-contract";
+import { byteLength } from "./names";
 import { apiQuery } from "./routes";
 import type { NoteRef } from "./types";
 
@@ -33,15 +34,25 @@ export const isApiError = (e: unknown, code?: ErrorCode | "network"): e is ApiEr
 
 export type RequestOptions = { keepalive?: boolean; signal?: AbortSignal };
 
-function codeFromStatus(status: number): ErrorCode {
+/** Fallback for an error response without our JSON body (a proxy's page, a body-less 429). */
+export function codeFromStatus(status: number): ErrorCode {
   if (status === 401) return "unauthorized";
   if (status === 403) return "forbidden";
   if (status === 404) return "not_found";
   if (status === 413) return "too_large";
   if (status === 415) return "unsupported_media_type";
+  if (status === 429) return "rate_limited";
   if (status === 503) return "storage_unavailable";
   return status >= 400 && status < 500 ? "bad_request" : "internal";
 }
+
+const encodeBody = (body: unknown) => JSON.stringify(body);
+
+/**
+ * UTF-8 size of the body `api.saveNote` sends for `input`. The browser's 64 KiB keepalive quota counts
+ * this whole body (JSON escapes, folder and name included), so a tab-close save must be sized by it.
+ */
+export const saveNoteBodyBytes = (input: SaveNoteRequest) => byteLength(encodeBody(input));
 
 async function request<T>(
   method: string,
@@ -54,7 +65,7 @@ async function request<T>(
     res = await fetch(url, {
       method,
       headers: body === undefined ? undefined : { "Content-Type": "application/json" },
-      body: body === undefined ? undefined : JSON.stringify(body),
+      body: body === undefined ? undefined : encodeBody(body),
       keepalive: opts.keepalive,
       signal: opts.signal,
       cache: "no-store",
@@ -93,7 +104,10 @@ export const api = {
   updateNote: (input: UpdateNoteRequest) => request<UpdateNoteResponse>("PATCH", API.notes, input),
   deleteNote: (ref: NoteRef) =>
     request<void>("DELETE", API.notes + apiQuery({ folder: ref.folder, name: ref.name })),
-  /** Removes an abandoned, whitespace-only note permanently (§17.1). Safe to call with keepalive on unmount. */
+  /**
+   * Removes an abandoned, whitespace-only note permanently (see docs/design-decisions.md#d11). Safe to call
+   * with keepalive on unmount.
+   */
   discardIfEmpty: (ref: NoteRef, opts?: RequestOptions) =>
     request<DiscardNoteResponse>(
       "DELETE",

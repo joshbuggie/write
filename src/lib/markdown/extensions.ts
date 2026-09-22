@@ -1,6 +1,4 @@
 import { Extension, type AnyExtension } from "@tiptap/core";
-import { Image } from "@tiptap/extension-image";
-import { OrderedList, TaskItem, TaskList } from "@tiptap/extension-list";
 import { TableKit } from "@tiptap/extension-table";
 import { Placeholder } from "@tiptap/extensions";
 import { Markdown, MarkdownManager } from "@tiptap/markdown";
@@ -8,6 +6,15 @@ import { StarterKit } from "@tiptap/starter-kit";
 import { Marked, type marked } from "marked";
 import { patchMarkdownManager } from "./escape";
 import { MarkdownPaste } from "./markdown-paste";
+import { WriteCodeBlock } from "./nodes/code-block";
+import { WriteBlockquote, WriteDocument, WriteTable } from "./nodes/containers";
+import { WriteHardBreak } from "./nodes/hard-break";
+import { WriteHeading } from "./nodes/heading";
+import { WriteHorizontalRule } from "./nodes/horizontal-rule";
+import { WriteImage } from "./nodes/image";
+import { WriteBulletList, WriteListItem, WriteOrderedList } from "./nodes/lists";
+import { WriteTableCell, WriteTableHeader } from "./nodes/table-cells";
+import { WriteTaskItem, WriteTaskList } from "./nodes/tasks";
 import { WriteParagraph } from "./write-paragraph";
 
 const INDENTATION = { style: "space", size: 2 } as const;
@@ -18,28 +25,28 @@ const INDENTATION = { style: "space", size: 2 } as const;
  */
 const freshMarked = () => new Marked() as unknown as typeof marked;
 
-const upstreamOrderedListTokenizer = OrderedList.config.markdownTokenizer;
-
 /**
- * Tiptap's ordered-list tokenizer also reads letters and roman numerals as list markers, so ordinary lines
- * like "Dr. Smith called", "Q. Why?" or "OK. Fine" would open as lists. CommonMark lists are numeric only,
- * so the upstream tokenizer only gets lines that start with a number; everything else is a paragraph.
+ * The document schema: every node and mark a note can contain, plus how each maps to markdown.
+ * The Write* nodes (./nodes) only allow structure markdown can store, so what the editor shows is what
+ * re-opens from the file.
+ * Shared by the editor (createExtensions) and the headless createMarkdownManager() that the fixture tests
+ * and fidelity checks use. New markdown syntax goes HERE; createExtensions() only adds editor-only behavior.
  */
-const NumericOrderedList = OrderedList.extend({
-  markdownTokenizer: upstreamOrderedListTokenizer && {
-    ...upstreamOrderedListTokenizer,
-    tokenize: (src, tokens, lexer) =>
-      /^\s*\d+[.)]\s/.test(src) ? upstreamOrderedListTokenizer.tokenize(src, tokens, lexer) : undefined,
-  },
-});
-
-/** The document schema: every node and mark a note can contain, plus how each maps to markdown. */
-function createSchemaExtensions(): AnyExtension[] {
+export function createSchemaExtensions(): AnyExtension[] {
   return [
     StarterKit.configure({
       underline: false, // serializes as ++x++ (non-portable; also ate a space in "C++ … C++")
-      paragraph: false, // replaced by WriteParagraph
-      orderedList: false, // replaced by NumericOrderedList
+      // Replaced by the Write* versions below:
+      document: false,
+      paragraph: false,
+      blockquote: false,
+      heading: false,
+      codeBlock: false,
+      hardBreak: false,
+      horizontalRule: false,
+      bulletList: false,
+      orderedList: false,
+      listItem: false,
       link: {
         openOnClick: false,
         enableClickSelection: true,
@@ -47,15 +54,25 @@ function createSchemaExtensions(): AnyExtension[] {
         linkOnPaste: true,
         defaultProtocol: "https",
       },
-      codeBlock: { enableTabIndentation: true, tabSize: 2 },
-      heading: { levels: [1, 2, 3, 4, 5, 6] },
     }),
+    WriteDocument,
     WriteParagraph,
-    NumericOrderedList,
-    TaskList,
-    TaskItem.configure({ nested: true }),
-    TableKit.configure({ table: { resizable: false } }), // column widths can't live in markdown
-    Image.configure({ inline: true, allowBase64: false }), // markdown images are inline; lone ones kept by WriteParagraph
+    WriteBlockquote,
+    WriteHeading.configure({ levels: [1, 2, 3, 4, 5, 6] }),
+    WriteCodeBlock.configure({ enableTabIndentation: true, tabSize: 2 }),
+    WriteHardBreak,
+    WriteHorizontalRule,
+    WriteBulletList,
+    WriteOrderedList,
+    WriteListItem,
+    WriteTaskList,
+    WriteTaskItem.configure({ nested: true }),
+    // Column widths can't live in markdown.
+    TableKit.configure({ table: false, tableCell: false, tableHeader: false }),
+    WriteTable.configure({ resizable: false }),
+    WriteTableCell,
+    WriteTableHeader,
+    WriteImage.configure({ inline: true, allowBase64: false }), // markdown images are inline; lone ones kept by WriteParagraph
   ];
 }
 

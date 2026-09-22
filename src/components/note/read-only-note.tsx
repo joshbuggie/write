@@ -20,8 +20,8 @@ const MESSAGES = {
 } as const;
 
 /**
- * A note write must not edit (§8.3 step 1): invalid UTF-8 or over the size cap. Shows why, offers the
- * exact file as a download, and (for not-UTF-8) a plain preview.
+ * A note write must not edit (see docs/design-decisions.md#d18): invalid UTF-8 or over the size cap. Shows
+ * why, offers the exact file as a download, and (for not-UTF-8) a plain preview.
  */
 export function ReadOnlyNote({ note }: { note: Note & { readOnly: "not-utf8" | "too-large" } }) {
   const ref = { folder: note.folder, name: note.name };

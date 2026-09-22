@@ -1,21 +1,26 @@
 import { NextResponse, type NextRequest } from "next/server";
-import type { ApiErrorBody } from "@/lib/api-contract";
-import { isAuthEnabled, isRequestAuthenticated } from "@/lib/server/auth";
+import { ERROR_STATUS, type ApiErrorBody } from "@/lib/api-contract";
+import { authenticateRequest, lockoutMessage, lockoutRetryAfterS } from "@/lib/server/auth";
 import { loginHref } from "@/lib/routes";
 
 /**
- * Optional auth gate in front of every page and API route (§7.3). With WRITE_PASSWORD unset it lets
- * everything through. Pages redirect to /login (remembering where you were going); API calls get a JSON 401
- * so the client can show "Signed out" instead of following a redirect to HTML.
+ * Optional auth gate in front of every page and API route (see docs/design-decisions.md#d13). With
+ * WRITE_PASSWORD unset it lets everything through. Pages redirect to /login (remembering where you were
+ * going); API calls get a JSON 401 (or 429 during a brute-force lockout) so the client can show "Signed out"
+ * instead of following a redirect to HTML.
  * Route handlers and loaders check auth again; this is only the first line of defense.
  */
 export function proxy(request: NextRequest): NextResponse | Response {
-  if (!isAuthEnabled() || isRequestAuthenticated(request)) return NextResponse.next();
+  const status = authenticateRequest(request);
+  if (status === "ok") return NextResponse.next();
 
   const { pathname, search } = request.nextUrl;
   if (pathname === "/api" || pathname.startsWith("/api/")) {
-    const body: ApiErrorBody = { error: { code: "unauthorized", message: "Sign in to continue." } };
-    return NextResponse.json(body, { status: 401, headers: { "Cache-Control": "no-store" } });
+    const headers: Record<string, string> = { "Cache-Control": "no-store" };
+    if (status === "rate_limited") headers["Retry-After"] = String(lockoutRetryAfterS());
+    const message = status === "rate_limited" ? lockoutMessage() : "Sign in to continue.";
+    const body: ApiErrorBody = { error: { code: status, message } };
+    return NextResponse.json(body, { status: ERROR_STATUS[status], headers });
   }
   return NextResponse.redirect(new URL(loginHref(pathname + search), request.url));
 }

@@ -9,8 +9,10 @@
   --hover: #efefec;
   --active: #e7e6e2;
   --ink: #1d1d1b; /* primary text */
-  --muted: #6b6a66; /* secondary text, icons */
-  --subtle: #9b9a95; /* placeholders, meta */
+  /* muted and subtle are text colors: both keep 4.5:1 (WCAG AA) on canvas, surface, sidebar and hover
+     in both themes, which theme-contrast.test.ts checks. */
+  --muted: #63625e; /* secondary text, icons */
+  --subtle: #6c6b67; /* placeholders, meta */
   --line: #e6e5e1; /* hairlines */
   --line-strong: #d3d2cd;
   --accent: #2f6fdb;
@@ -35,7 +37,7 @@
     --active: #2e2e2c;
     --ink: #e9e7e3;
     --muted: #a3a19b;
-    --subtle: #72706b;
+    --subtle: #918f8a;
     --line: #2a2a28;
     --line-strong: #3b3b38;
     --accent: #7ea6f6;
@@ -108,6 +110,11 @@
     dialog::backdrop {
       background: rgb(0 0 0 / 0.55);
     }
+  }
+  /* Browsers give fieldsets min-width: min-content, so one long label would widen the whole form
+     (and a dialog around it) instead of truncating. */
+  fieldset {
+    min-width: 0;
   }
   /* Keep the page behind an open modal from scrolling (iOS rubber-bands through the backdrop otherwise). */
   html:has(dialog:modal) {

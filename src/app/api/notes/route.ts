@@ -9,7 +9,7 @@ import { createNote, deleteNote, discardIfEmpty, readNote, saveNote, updateNote 
 import { isCreateNoteRequest, isSaveNoteRequest, isUpdateNoteRequest } from "@/lib/server/validate";
 import type { NoteRef } from "@/lib/types";
 
-/** Names always come from the query string (§1 #2), never from path segments. */
+/** Names always come from the query string (see docs/design-decisions.md#d2), never from path segments. */
 function refFromQuery(req: Request): NoteRef {
   const url = new URL(req.url);
   return { folder: requireParam(url, "folder"), name: requireParam(url, "name") };
@@ -46,8 +46,8 @@ export const PATCH = handle(async (req) => {
 
 /**
  * `?folder=&name=` moves the note to .trash (204).
- * With `&ifEmpty=1` (§17.1) it instead deletes the note only if it is blank, for abandoned "Untitled" notes,
- * and answers 200 `{ deleted }`.
+ * With `&ifEmpty=1` (see docs/design-decisions.md#d11) it instead deletes the note only if it is blank, for
+ * abandoned "Untitled" notes, and answers 200 `{ deleted }`.
  */
 export const DELETE = handle(async (req) => {
   const ref = refFromQuery(req);

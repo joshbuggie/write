@@ -6,7 +6,8 @@
 export function FrontmatterDetails({ frontmatter }: { frontmatter: string }) {
   return (
     <details className="mt-4 mb-2">
-      <summary className="w-fit cursor-pointer text-[13px] text-muted select-none hover:text-ink">
+      {/* Padding, not flex, so the disclosure triangle stays; 20px line + 2×12px = a 44px touch target. */}
+      <summary className="w-fit cursor-pointer text-[13px] leading-5 text-muted select-none hover:text-ink pointer-coarse:py-3 pointer-coarse:pr-2">
         Properties
       </summary>
       <pre className="mt-2 overflow-x-auto rounded-md bg-sidebar p-3 font-mono text-[13px] leading-[1.6] text-muted">

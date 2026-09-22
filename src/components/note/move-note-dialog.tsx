@@ -74,7 +74,11 @@ export function MoveNoteDialog({ noteName, currentFolder, folders, onClose, onMo
           ))}
         </fieldset>
       )}
-      {error && <p className="mt-2 text-[13px] text-danger">{error}</p>}
+      {error && (
+        <p role="alert" className="mt-2 text-[13px] text-danger">
+          {error}
+        </p>
+      )}
     </Dialog>
   );
 }

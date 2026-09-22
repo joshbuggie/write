@@ -2,7 +2,7 @@
 
 import { useMemo } from "react";
 import { VISUAL_EDITOR_MAX_BYTES } from "@/lib/constants";
-import type { LossReason } from "@/lib/markdown/fidelity";
+import { hasOversizedParagraph, type LossReason } from "@/lib/markdown/fidelity";
 import { byteLength } from "@/lib/names";
 import { SourceEditor } from "./source-editor";
 import { VisualEditor } from "./visual-editor";
@@ -15,15 +15,21 @@ export type SourceReason = { kind: "large" } | { kind: "lossy"; reasons: LossRea
 
 /**
  * The few things the note screen needs from whichever editor is mounted. Keeps autosave, rename and
- * conflict handling independent of Tiptap vs. textarea.
+ * conflict handling independent of Tiptap vs. textarea. There is deliberately no setContent: other text
+ * (a draft, the disk version) is loaded by remounting, so it passes the same fidelity check as a file.
  */
 export type EditorHandle = {
   /** Full file text to save: front matter + body. */
   getContent(): string;
-  /** Replace the whole file text without counting it as an edit (draft restore). */
-  setContent(fileText: string): void;
   setEditable(editable: boolean): void;
-  focusStart(): void;
+  /**
+   * Focuses the body with the caret at its start, or at a position from getCaret(). Synchronous, so a
+   * key typed right after Enter in the title can't land in the title.
+   */
+  focus(at: "start" | number): void;
+  hasFocus(): boolean;
+  /** The caret position, so it can be put back after the editor remounts (e.g. under a new name). */
+  getCaret(): number;
 };
 
 export type EditorReady = {
@@ -46,11 +52,16 @@ export type NoteEditorProps = {
 };
 
 /**
- * Picks visual or source mode for a note (§8.3). Default export because the note screen loads it with
- * next/dynamic ({ ssr: false }), which keeps Tiptap out of the shell's bundle.
+ * Picks visual or source mode for a note (see docs/design-decisions.md#d18). Default export because the note
+ * screen loads it with next/dynamic ({ ssr: false }), which keeps Tiptap out of the shell's bundle.
  */
 export default function NoteEditor({ content, request, toolbarSlot, onReady, onChange }: NoteEditorProps) {
-  const tooLarge = useMemo(() => byteLength(content) > VISUAL_EDITOR_MAX_BYTES, [content]);
+  // A huge paragraph is as slow to parse as a huge file (marked is quadratic on unclosed emphasis), so
+  // both open in source mode, before Tiptap ever parses them.
+  const tooLarge = useMemo(
+    () => byteLength(content) > VISUAL_EDITOR_MAX_BYTES || hasOversizedParagraph(content),
+    [content],
+  );
 
   if (tooLarge || request === "source") {
     return (

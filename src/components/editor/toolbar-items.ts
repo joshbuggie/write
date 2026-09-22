@@ -32,7 +32,9 @@ export type ToolbarContext = { openLinkDialog: () => void };
 
 /**
  * One formatting action. This list is the single source of truth for the desktop toolbar and the
- * phone keyboard toolbar; to add a button, add an entry here.
+ * phone keyboard toolbar; to add a button, add an entry here. Every editing action is disabled where
+ * its command can't run (`editor.can()`), which is also where the markdown schema refuses structure a
+ * file couldn't store (a list or divider inside a table cell, a link on inline code).
  */
 export type ToolbarItem = {
   id: string;
@@ -56,10 +58,17 @@ const heading = (level: 1 | 2 | 3, icon: LucideIcon): ToolbarItem => ({
   group: "block",
   shortcut: `⌘⌥${level}`,
   isActive: (e) => e.isActive("heading", { level }),
+  isDisabled: (e) => !e.can().toggleHeading({ level }),
   run: (e) => e.chain().focus().toggleHeading({ level }).run(),
 });
 
 const inTable = (e: Editor) => e.isActive("table");
+
+/**
+ * Link dialog availability: a new link needs a selection that can take one (not inline code); an existing
+ * link can always be edited or removed.
+ */
+const cannotLink = (e: Editor) => !e.isActive("link") && !e.can().setLink({ href: "https://example.com" });
 
 export const TOOLBAR_ITEMS: ToolbarItem[] = [
   {
@@ -69,6 +78,7 @@ export const TOOLBAR_ITEMS: ToolbarItem[] = [
     group: "block",
     shortcut: "⌘⌥0",
     isActive: (e) => e.isActive("paragraph"),
+    isDisabled: (e) => !e.can().setParagraph(),
     run: (e) => e.chain().focus().setParagraph().run(),
   },
   heading(1, Heading1),
@@ -81,6 +91,7 @@ export const TOOLBAR_ITEMS: ToolbarItem[] = [
     group: "inline",
     shortcut: "⌘B",
     isActive: (e) => e.isActive("bold"),
+    isDisabled: (e) => !e.can().toggleBold(),
     run: (e) => e.chain().focus().toggleBold().run(),
   },
   {
@@ -90,6 +101,7 @@ export const TOOLBAR_ITEMS: ToolbarItem[] = [
     group: "inline",
     shortcut: "⌘I",
     isActive: (e) => e.isActive("italic"),
+    isDisabled: (e) => !e.can().toggleItalic(),
     run: (e) => e.chain().focus().toggleItalic().run(),
   },
   {
@@ -99,6 +111,7 @@ export const TOOLBAR_ITEMS: ToolbarItem[] = [
     group: "inline",
     shortcut: "⌘⇧S",
     isActive: (e) => e.isActive("strike"),
+    isDisabled: (e) => !e.can().toggleStrike(),
     run: (e) => e.chain().focus().toggleStrike().run(),
   },
   {
@@ -108,6 +121,7 @@ export const TOOLBAR_ITEMS: ToolbarItem[] = [
     group: "inline",
     shortcut: "⌘E",
     isActive: (e) => e.isActive("code"),
+    isDisabled: (e) => !e.can().toggleCode(),
     run: (e) => e.chain().focus().toggleCode().run(),
   },
   {
@@ -117,6 +131,7 @@ export const TOOLBAR_ITEMS: ToolbarItem[] = [
     group: "inline",
     shortcut: "⌘K",
     isActive: (e) => e.isActive("link"),
+    isDisabled: cannotLink,
     run: (_e, ctx) => ctx.openLinkDialog(),
   },
   {
@@ -126,6 +141,7 @@ export const TOOLBAR_ITEMS: ToolbarItem[] = [
     group: "list",
     shortcut: "⌘⇧8",
     isActive: (e) => e.isActive("bulletList"),
+    isDisabled: (e) => !e.can().toggleBulletList(),
     run: (e) => e.chain().focus().toggleBulletList().run(),
   },
   {
@@ -135,6 +151,7 @@ export const TOOLBAR_ITEMS: ToolbarItem[] = [
     group: "list",
     shortcut: "⌘⇧7",
     isActive: (e) => e.isActive("orderedList"),
+    isDisabled: (e) => !e.can().toggleOrderedList(),
     run: (e) => e.chain().focus().toggleOrderedList().run(),
   },
   {
@@ -144,6 +161,7 @@ export const TOOLBAR_ITEMS: ToolbarItem[] = [
     group: "list",
     shortcut: "⌘⇧9",
     isActive: (e) => e.isActive("taskList"),
+    isDisabled: (e) => !e.can().toggleTaskList(),
     run: (e) => e.chain().focus().toggleTaskList().run(),
   },
   {
@@ -153,6 +171,7 @@ export const TOOLBAR_ITEMS: ToolbarItem[] = [
     group: "insert",
     shortcut: "⌘⇧B",
     isActive: (e) => e.isActive("blockquote"),
+    isDisabled: (e) => !e.can().toggleBlockquote(),
     run: (e) => e.chain().focus().toggleBlockquote().run(),
   },
   {
@@ -162,6 +181,7 @@ export const TOOLBAR_ITEMS: ToolbarItem[] = [
     group: "insert",
     shortcut: "⌘⌥C",
     isActive: (e) => e.isActive("codeBlock"),
+    isDisabled: (e) => !e.can().toggleCodeBlock(),
     run: (e) => e.chain().focus().toggleCodeBlock().run(),
   },
   {
@@ -169,6 +189,7 @@ export const TOOLBAR_ITEMS: ToolbarItem[] = [
     label: "Divider",
     icon: Minus,
     group: "insert",
+    isDisabled: (e) => !e.can().setHorizontalRule(),
     run: (e) => e.chain().focus().setHorizontalRule().run(),
   },
   {
@@ -177,6 +198,7 @@ export const TOOLBAR_ITEMS: ToolbarItem[] = [
     icon: Table,
     group: "insert",
     isVisible: (e) => !inTable(e),
+    isDisabled: (e) => !e.can().insertTable({ rows: 3, cols: 3, withHeaderRow: true }),
     run: (e) => e.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run(),
   },
   {
@@ -185,6 +207,7 @@ export const TOOLBAR_ITEMS: ToolbarItem[] = [
     icon: BetweenHorizontalEnd,
     group: "table",
     isVisible: inTable,
+    isDisabled: (e) => !e.can().addRowAfter(),
     run: (e) => e.chain().focus().addRowAfter().run(),
   },
   {
@@ -193,6 +216,7 @@ export const TOOLBAR_ITEMS: ToolbarItem[] = [
     icon: BetweenVerticalEnd,
     group: "table",
     isVisible: inTable,
+    isDisabled: (e) => !e.can().addColumnAfter(),
     run: (e) => e.chain().focus().addColumnAfter().run(),
   },
   {

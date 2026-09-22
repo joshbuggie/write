@@ -11,8 +11,10 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 # write project rules
 
 write is a self-hosted Markdown notes app: every note is a plain `.md` file in `WRITE_DATA_DIR`
-(`<folder>/<name>.md`). Read `CONTRIBUTING.md` for the architecture map and recipes. These rules are
-binding for every change:
+(`<folder>/<name>.md`). Read `CONTRIBUTING.md` for the architecture map and recipes, and
+`docs/design-decisions.md` for why things work the way they do. Cite its numbered entries in comments as
+`docs/design-decisions.md#d8`, and update an entry when you change the decision behind it. These rules
+are binding for every change:
 
 1. **Only `src/lib/server/storage/` touches the filesystem.** ESLint enforces it, and it also blocks
    `@/lib/server/*` imports from client-reachable code (`src/components`, `src/lib` outside `server`).
@@ -20,9 +22,11 @@ binding for every change:
    exactly once with `noteRefFromParams` / `decodeSegment`. Route Handler params are never used for names;
    API names travel in the query string or the JSON body.
 3. **Mutations and downloads go through `/api` Route Handlers wrapped in `handle()`** (auth, CSRF, error
-   mapping). No Server Actions. The client calls them only through `api` in `src/lib/api-client.ts`.
+   mapping). No Server Actions. The client calls them only through `api` in `src/lib/api-client.ts`, or,
+   for downloads, `useDownload()` / `downloadFile` (`src/lib/download.ts`), which throw the same `ApiError`.
 4. **Read Markdown with `serializeBody(editor)`, never `editor.getMarkdown()`.**
-5. **Every Markdown extension needs round-trip fixtures** in `src/lib/markdown/__fixtures__/`.
+5. **Every Markdown extension needs round-trip fixtures** in `src/lib/markdown/__fixtures__/`. New syntax
+   goes in `createSchemaExtensions()`, which the fixture tests use, not in `createExtensions()`.
 6. **Colors only via design tokens** (`bg-canvas`, `text-muted`, `border-line`, …). No hex values and no
    Tailwind palette colors in components.
 7. **Small focused files** (about 200 lines at most), with a short JSDoc on each export that explains why.

@@ -1,6 +1,6 @@
 import { toSafeName } from "@/lib/names";
 
-/** File types offered by the folder menu's "Import .md files…" picker (§17.2). */
+/** File types offered by the folder menu's "Import .md files…" picker (docs/design-decisions.md#d24). */
 export const IMPORT_ACCEPT = ".md,.markdown,.txt,text/markdown,text/x-markdown,text/plain";
 
 /** Note title for an imported file: drop a .md/.markdown/.txt extension, then make the rest a valid name. */

@@ -2,35 +2,34 @@
 
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
-import { startTransition, useRef, useState } from "react";
+import { startTransition, useEffect, useRef, useState } from "react";
 import { EditorSkeleton, TEXT_COLUMN } from "@/components/editor/editor-skeleton";
-import type { EditorReady, EditorRequest, SourceReason } from "@/components/editor/note-editor";
+import type { EditorRequest } from "@/components/editor/note-editor";
 import { useRegisterActiveNote } from "@/components/shell/shell-context";
 import { ConfirmDialog } from "@/components/ui/dialog";
+import { useDownload } from "@/components/ui/download-link";
 import { useToast } from "@/components/ui/toast";
 import { api, isApiError } from "@/lib/api-client";
-import { clearDraft, moveDraft, readDraft, writeDraft, type Draft } from "@/lib/drafts";
-import { splitFrontmatter } from "@/lib/markdown/file-format";
+import { moveDraft } from "@/lib/drafts";
 import { downloadNoteHref, LIBRARY_HREF, noteHref } from "@/lib/routes";
 import type { Note, NoteRef } from "@/lib/types";
 import { CONFLICT_BANNER_ID, ConflictBanner } from "./conflict-banner";
+import { isSavedHere, recordMove } from "./known-notes";
 import { MoveNoteDialog } from "./move-note-dialog";
 import { NoteHeader } from "./note-header";
+import { watchForLeaving } from "./note-lifecycle";
 import { NoteMenu } from "./note-menu";
 import { Notice, SourceModeNotice } from "./notice";
 import { ReadOnlyNote } from "./read-only-note";
 import { SaveStatus } from "./save-status";
 import { TitleInput } from "./title-input";
-import { isUntitledName, useNoteSync } from "./use-note-sync";
+import { useEditorSession } from "./use-editor-session";
 
 // Tiptap is a big chunk; load it only on the client and only on the note screen.
 const NoteEditor = dynamic(() => import("@/components/editor/note-editor"), {
   ssr: false,
   loading: () => <EditorSkeleton />,
 });
-
-/** What the inner editor is loaded from. Bumping `key` remounts it (mode switch, reload from disk). */
-type EditorSource = { content: string; version: string; request: EditorRequest; key: number };
 
 const messageOf = (err: unknown) => (err instanceof Error ? err.message : "Something went wrong.");
 
@@ -49,67 +48,31 @@ function EditableNote({ note, folders }: { note: Note; folders: string[] }) {
   const toast = useToast();
   const ref: NoteRef = { folder: note.folder, name: note.name };
   const titleRef = useRef<HTMLInputElement>(null);
-  const adoptedKeyRef = useRef(-1);
+  const mountedRef = useRef(false);
   const [toolbarSlot, setToolbarSlot] = useState<HTMLElement | null>(null);
-  const [source, setSource] = useState<EditorSource>({
-    content: note.content,
-    version: note.version,
-    request: "auto",
-    key: 0,
-  });
-  const [sourceReason, setSourceReason] = useState<SourceReason>(null);
-  const [mode, setMode] = useState<"visual" | "source" | null>(null);
-  const [restored, setRestored] = useState(false);
-  const [draftConflict, setDraftConflict] = useState<Draft | null>(null);
   const [dialog, setDialog] = useState<"move" | "delete" | "edit-visually" | null>(null);
 
-  const sync = useNoteSync(note, (fresh) => {
-    reloadEditor(fresh.content, fresh.version);
-    toast.show({ message: "Updated from disk" });
+  const session = useEditorSession(note, titleRef, (fresh) => {
+    // A late save of this tab's own (e.g. the keepalive from the last visit) is not news from elsewhere.
+    if (!isSavedHere(ref, fresh.version)) toast.show({ message: "Updated from disk" });
   });
+  const { sync, source, mode, sourceReason } = session;
   const { autosaver, state } = sync;
-  useRegisterActiveNote(ref, () => autosaver.flush());
+  // A rename or move started by blurring the title may still be in flight when a download or a folder
+  // action asks for a flush; waiting for it keeps that action from using the old name mid-rename.
+  const pendingRelocate = useRef<Promise<unknown> | null>(null);
+  useRegisterActiveNote(ref, async () => {
+    await pendingRelocate.current;
+    await autosaver.flush();
+  });
+  const startDownload = useDownload();
 
-  function reloadEditor(content: string, version: string, request = source.request) {
-    sync.detach();
-    setSource((s) => ({ content, version, request, key: s.key + 1 }));
-  }
-
-  function handleReady(ready: EditorReady) {
-    sync.attach(ready.handle);
-    setMode(ready.mode);
-    setSourceReason(ready.sourceReason);
-    if (adoptedKeyRef.current === source.key) return; // Strict Mode re-ran the editor's effect
-    const firstOpen = adoptedKeyRef.current === -1;
-    adoptedKeyRef.current = source.key;
-    const draft = firstOpen ? readDraft(ref) : null; // read before adopt(), which may clear it
-    autosaver.adopt(ready.baseline, source.version);
-    if (!firstOpen) return;
-    if (draft) recoverDraft(draft, ready);
-    focusOnOpen(ready);
-  }
-
-  /** §8.3 step 5: a draft left by a crash or a failed save. */
-  function recoverDraft(draft: Draft, ready: EditorReady) {
-    if (draft.content === note.content || draft.content === ready.baseline) return clearDraft(ref);
-    if (draft.baseVersion !== note.version) {
-      writeDraft(ref, draft); // adopt() just cleared it; keep it on this device until the user decides
-      return setDraftConflict(draft);
-    }
-    ready.handle.setContent(draft.content);
-    autosaver.markDirty();
-    setRestored(true);
-  }
-
-  function focusOnOpen(ready: EditorReady) {
-    const isNew = isUntitledName(note.name) && splitFrontmatter(note.content).body.trim() === "";
-    if (isNew) {
-      titleRef.current?.focus();
-      titleRef.current?.select();
-    } else if (window.matchMedia("(pointer: fine)").matches) {
-      ready.handle.focusStart(); // on phones, don't pop the keyboard just for opening a note
-    }
-  }
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   /** Save, then reload the editor in the other mode from what is now on disk. */
   async function switchMode(request: EditorRequest) {
@@ -121,7 +84,7 @@ function EditableNote({ note, folders }: { note: Note; folders: string[] }) {
     }
     // Nothing saved since this editor opened → show the file as it is, not our normalized version.
     const onDisk = autosaver.getVersion() === source.version ? source.content : sync.getContent();
-    reloadEditor(onDisk, autosaver.getVersion(), request);
+    session.reloadEditor(onDisk, autosaver.getVersion(), request);
   }
 
   function toggleMode() {
@@ -130,33 +93,50 @@ function EditableNote({ note, folders }: { note: Note; folders: string[] }) {
     else void switchMode("auto");
   }
 
-  /** Saves pending edits, runs a file operation, and navigates to where the note now lives. */
+  /**
+   * Saves pending edits, runs a file operation, and follows the note to where it now lives, unless the
+   * user has already headed elsewhere (clicking a link blurs the title, which is what started a rename).
+   * The editor stays editable throughout; text typed meanwhile is handed to the note's new name.
+   */
   async function relocate(to: NoteRef, request: () => Promise<unknown>): Promise<string | null> {
-    sync.editor()?.setEditable(false);
+    const leaving = watchForLeaving();
+    sync.setRelocating(true);
     try {
       await autosaver.flush();
       await request();
     } catch (err) {
-      sync.editor()?.setEditable(true);
+      sync.setRelocating(false);
       if (isApiError(err, "name_taken")) return `A note named "${to.name}" already exists in ${to.folder}.`;
       return messageOf(err);
+    } finally {
+      leaving.stop();
     }
+    const stay = mountedRef.current && !leaving.hasLeft();
     moveDraft(ref, to);
-    sync.abandon();
+    recordMove(ref, to);
+    sync.handOff(to, stay);
     startTransition(() => {
-      router.replace(noteHref(to));
-      router.refresh();
+      if (stay) router.replace(noteHref(to));
+      router.refresh(); // the sidebar shows the new name either way
     });
     return null;
   }
 
+  function track(pending: Promise<string | null>): Promise<string | null> {
+    pendingRelocate.current = pending;
+    return pending;
+  }
   const rename = (newName: string) =>
-    relocate({ folder: note.folder, name: newName }, () =>
-      api.updateNote({ folder: note.folder, name: note.name, newName }),
+    track(
+      relocate({ folder: note.folder, name: newName }, () =>
+        api.updateNote({ folder: note.folder, name: note.name, newName }),
+      ),
     );
   const move = (newFolder: string) =>
-    relocate({ folder: newFolder, name: note.name }, () =>
-      api.updateNote({ folder: note.folder, name: note.name, newFolder }),
+    track(
+      relocate({ folder: newFolder, name: note.name }, () =>
+        api.updateNote({ folder: note.folder, name: note.name, newFolder }),
+      ),
     );
 
   /** Throws on failure, so the confirm dialog stays open and shows the message. */
@@ -172,11 +152,6 @@ function EditableNote({ note, folders }: { note: Note; folders: string[] }) {
       router.replace(LIBRARY_HREF);
       router.refresh();
     });
-  }
-
-  async function download() {
-    await autosaver.flush().catch(() => {});
-    window.location.assign(downloadNoteHref(ref));
   }
 
   /** "Rename" in the ⋯ menu: the title is the file name, so renaming is editing it. */
@@ -202,7 +177,7 @@ function EditableNote({ note, folders }: { note: Note; folders: string[] }) {
             canEditVisually={sourceReason?.kind !== "large"}
             onRename={focusTitle}
             onMove={() => setDialog("move")}
-            onDownload={download}
+            onDownload={() => void startDownload(downloadNoteHref(ref))}
             onToggleMode={toggleMode}
             onDelete={() => setDialog("delete")}
           />
@@ -213,28 +188,29 @@ function EditableNote({ note, folders }: { note: Note; folders: string[] }) {
         <ConflictBanner
           note={note}
           sync={sync}
-          draft={draftConflict}
-          onDraftResolved={() => setDraftConflict(null)}
-          onReload={reloadEditor}
+          draft={session.draftConflict}
+          onKeepDraft={session.keepDraft}
+          onDraftResolved={session.dismissDraftConflict}
+          onReload={session.reloadEditor}
         />
         {sourceReason && (
           <SourceModeNotice reason={sourceReason} onEditVisually={() => setDialog("edit-visually")} />
         )}
-        {restored && (
-          <Notice onDismiss={() => setRestored(false)}>Restored unsaved changes from this device.</Notice>
+        {session.restored && (
+          <Notice onDismiss={session.dismissRestored}>Restored unsaved changes from this device.</Notice>
         )}
         <TitleInput
           name={note.name}
           inputRef={titleRef}
           onRename={rename}
-          onFocusBody={() => sync.editor()?.focusStart()}
+          onFocusBody={() => sync.editor()?.focus("start")}
         />
         <NoteEditor
           key={source.key}
           content={source.content}
           request={source.request}
           toolbarSlot={toolbarSlot}
-          onReady={handleReady}
+          onReady={session.handleReady}
           onChange={() => autosaver.markDirty()}
         />
       </article>

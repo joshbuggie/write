@@ -1,0 +1,9 @@
+````markdown
+```js
+nested fence
+```
+````
+
+````
+```
+````
