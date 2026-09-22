@@ -1,0 +1,303 @@
+# Contributing to write
+
+Thanks for helping. This guide gets a React developer from clone to a merged PR. It covers setup, how
+the app fits together, the handful of rules that keep it reliable, and step-by-step recipes for the
+most common changes.
+
+- [Setup](#setup)
+- [Everyday commands](#everyday-commands)
+- [Architecture map](#architecture-map)
+- [Rules](#rules)
+- [Next.js 16 gotchas](#nextjs-16-gotchas)
+- [Recipes](#recipes)
+- [Testing](#testing)
+- [Manual QA checklist](#manual-qa-checklist)
+- [Pull requests and releases](#pull-requests-and-releases)
+
+---
+
+## Setup
+
+You need Node.js 24 (see `.nvmrc`). The app itself runs on Node 20.9+, but the test runner needs 22.12+.
+
+```bash
+nvm use          # or install Node 24 some other way
+npm ci
+npm run dev      # http://localhost:3000
+```
+
+- **Your notes land in `./data`**, which is gitignored. Delete it to start fresh; the next page load
+  recreates `notebook/Welcome.md`. Use `WRITE_DATA_DIR=/some/dir npm run dev` to try another folder.
+- **To try sign-in**, run `WRITE_PASSWORD=x npm run dev`.
+- `npm run dev` also keeps the Next.js block in `AGENTS.md` up to date. Commit that change if it
+  appears.
+
+### Testing on an iPhone
+
+Start the dev server bound to your computer's LAN address, then open it in Safari on a phone on the same
+Wi-Fi:
+
+```bash
+npm run dev -- -H "$(ipconfig getifaddr en0)"   # macOS; on Linux use `hostname -I`
+# then open http://<that-ip>:3000 on the phone
+```
+
+The `-H` matters. The Next.js dev server blocks dev assets requested from hostnames it doesn't know
+(`allowedDevOrigins`), and it only trusts `localhost` and the hostname it was started with. The Safari
+Web Inspector (Safari → Develop → your iPhone) shows the phone's console.
+
+---
+
+## Everyday commands
+
+| Command                           | What it does                                                                            |
+| --------------------------------- | --------------------------------------------------------------------------------------- |
+| `npm run dev`                     | Dev server with fast refresh                                                            |
+| `npm test` / `npm run test:watch` | Vitest (Node environment only, so no browser download)                                  |
+| `npm run lint`                    | ESLint, including the architecture boundaries below. Zero warnings allowed.             |
+| `npm run typecheck`               | `next typegen` (route types such as `PageProps<…>`) followed by `tsc --noEmit`          |
+| `npm run format`                  | Prettier, which also sorts Tailwind classes                                             |
+| `npm run check`                   | lint, typecheck, test and format check. **Run this before every PR.** CI runs the same. |
+| `npm run build` / `npm start`     | Production build and server                                                             |
+
+To build the Docker image locally, run `docker build -t write .`. It sets `BUILD_STANDALONE=1` itself.
+
+---
+
+## Architecture map
+
+write is a small Next.js App Router app. There is no database: the filesystem **is** the data model.
+
+```
+Browser ──RSC render / router.refresh()──► app/notes/layout.tsx, pages ──► lib/server/loaders ──► lib/server/storage ──► fs
+   ├──fetch JSON (lib/api-client)──► app/api/*/route.ts ──► lib/server/http.handle() (auth, CSRF, errors) ──► storage
+   └──<a> click → location.assign──► app/api/download/route.ts ──► storage (bytes | zip)
+src/proxy.ts: optional auth gate in front of everything except health/login/static.
+```
+
+- **Reads** happen in Server Components. Pages call loaders, which call storage. After a change, the
+  client calls `router.refresh()` to get fresh props. There is no client-side store for the tree.
+- **Writes and downloads** go through Route Handlers under `/api`. The client calls them with the typed
+  `api` object in `lib/api-client.ts`. We don't use Server Actions. Autosave needs `keepalive`, aborts and
+  retries, and a plain HTTP API can also be driven with `curl`.
+
+### Where things live
+
+| Path                                       | What it is                                                                                                 |
+| ------------------------------------------ | ---------------------------------------------------------------------------------------------------------- |
+| `src/lib/types.ts`, `constants.ts`         | Shared domain types (`Note`, `Tree`, …) and limits. Imported everywhere.                                   |
+| `src/lib/names.ts`                         | Name rules for notes and folders (`validateName`, `nameKey`, `compareNames`). Shared by UI and server.     |
+| `src/lib/routes.ts`                        | **The only place URLs are built or parsed** (`noteHref`, `decodeSegment`, download links).                 |
+| `src/lib/api-contract.ts`, `api-client.ts` | The HTTP contract (request/response types, error codes) and the typed browser `fetch` wrapper.             |
+| `src/lib/server/storage/`                  | **The only code that touches the filesystem.** Notes, folders, trash, zip export, atomic writes, the lock. |
+| `src/lib/server/http.ts`, `validate.ts`    | `handle()` wraps every route with auth, CSRF checks and error mapping; hand-written body type guards.      |
+| `src/lib/server/auth.ts`, `src/proxy.ts`   | Optional password: HMAC session cookie, Bearer token, and the request gate.                                |
+| `src/lib/server/loaders.ts`                | What Server Components call to read data (`loadTree`, `loadNote`, …).                                      |
+| `src/app/api/*/route.ts`                   | One route file per resource: `tree`, `folders`, `notes`, `download`, `health`, `auth`.                     |
+| `src/lib/markdown/`                        | Framework-free Markdown engine: Tiptap extensions, escaping, front matter, fidelity check, paste.          |
+| `src/lib/autosave.ts`, `drafts.ts`         | Framework-free autosave state machine, plus crash-safety drafts in `localStorage`.                         |
+| `src/components/note/`                     | The note screen: `NoteView` orchestrates the editor, autosave, title/rename and conflict banner.           |
+| `src/components/editor/`                   | The visual (Tiptap) and source (textarea) editors, toolbar, link dialog, `editor.css`.                     |
+| `src/components/shell/`, `sidebar/`        | App shell, `ShellProvider` context, sidebar and phone library.                                             |
+| `src/components/ui/`                       | Small UI kit: `Button`, `IconButton`, `Dialog`, `Menu`, `Toast`, `TextField`, `DownloadLink`.              |
+| `src/app/globals.css`                      | Design tokens (colors for light and dark) exposed as Tailwind utilities.                                   |
+
+### Key ideas, in the order you'll meet them
+
+1. **A note is a file.** `NoteRef = { folder, name }`, where `name` is the filename without `.md`. The
+   title _is_ the filename, so renaming a note renames the file.
+2. **Versions and conflicts.** The server computes `version` as a short sha256 of the bytes on disk.
+   Every save sends the `baseVersion` it started from. If the file changed on disk in the meantime, the
+   server answers `409 version_conflict` together with the current note, and the UI shows the conflict
+   banner. The client never hashes anything.
+3. **Never write on open.** When a note opens, the editor serializes it once. That result is the
+   baseline, and autosave only saves when the content differs from it. Opening or clicking around never
+   touches a file.
+4. **Autosave** (`createAutosaver`) is a plain TypeScript state machine: `saved → dirty → saving → saved`,
+   plus `offline`, `error` and `conflict`. It debounces for 750 ms, keeps at most one save in flight,
+   retries with backoff and writes a `localStorage` draft before every save. `use-note-sync.ts` wires it
+   to React.
+5. **Fidelity.** Some Markdown can't survive the visual editor (raw HTML, footnotes, math). On open,
+   `analyzeFidelity` compares the original with the round trip. Lossy notes open in source mode (a
+   textarea) instead of silently dropping content. Front matter is split off before the editor sees the
+   body and re-joined verbatim on save.
+6. **Escaping.** Tiptap's default Markdown escaping would write `&amp;` and `\_` into people's files. We
+   patch it per editor instance (`lib/markdown/escape.ts`). A test fails loudly if a Tiptap upgrade breaks
+   the patch.
+
+---
+
+## Rules
+
+These keep the app safe with other people's files. Most are enforced by lint or tests.
+
+1. **Only `src/lib/server/storage/` touches the filesystem.** ESLint blocks `fs` imports anywhere else, and
+   blocks `@/lib/server/*` imports from client-reachable code (`src/components`, `src/lib` outside
+   `server`).
+2. **URLs are built only in `src/lib/routes.ts`.** Page `params` arrive still percent-encoded in Next 16.3,
+   so pages decode them **exactly once** with `noteRefFromParams` / `decodeSegment`. Route Handler params
+   arrive decoded, and they are **never** used for names: API names travel in the query string or the
+   JSON body.
+3. **Mutations go through `/api`, wrapped in `handle()`.** That gives you auth, CSRF protection
+   (`Sec-Fetch-Site` plus JSON-only bodies) and consistent `ApiErrorBody` errors for free. No Server
+   Actions.
+4. **Read Markdown with `serializeBody(editor)`, never `editor.getMarkdown()`.** Only `serializeBody`
+   applies our escaping and final newline rules.
+5. **Every Markdown extension needs round-trip fixtures** in `src/lib/markdown/__fixtures__/`.
+6. **Colors come from the design tokens only**: `bg-canvas`, `text-muted`, `border-line`, `bg-accent` and
+   the others in `globals.css`. No hex values and no Tailwind palette colors (`gray-500`) in components.
+   That's what makes dark mode work.
+7. **Keep files under about 200 lines.** Split by responsibility, not by layer. Give each export a
+   one-line JSDoc that explains _why_ it exists.
+8. **No new dependency without an issue first.** We deliberately have no state library, schema library or
+   UI framework. Native `<dialog>`, a one-line `cn()` and hand-written type guards cover it.
+
+Also: no `console.log` in committed code (`console.error` for real server errors is fine), and never
+`100vh` (use `dvh`).
+
+---
+
+## Next.js 16 gotchas
+
+This project uses Next.js 16, which differs from older tutorials and from most AI training data. When in
+doubt, read the docs that ship with the installed version in `node_modules/next/dist/docs/`.
+
+- **`src/proxy.ts` replaces `middleware.ts`.** It exports `proxy` and runs on the Node runtime. Its
+  config can't set `runtime`.
+- **`params` and `searchParams` are Promises.** `await` them. Page params arrive percent-encoded, so decode
+  them with `decodeSegment` (see rule 2).
+- **`connection()` from `next/server`** marks a render as dynamic. Every loader calls it before touching
+  the filesystem, so nothing gets frozen into the build as static HTML.
+- **`/* turbopackIgnore: true */`** is on the `path.resolve` of the data dir in
+  `storage/config.ts`. Without it, Turbopack's file tracing tries to include the whole project in the
+  build.
+- **`next typegen`** generates the global `PageProps<"/route">`, `LayoutProps` and `RouteContext`
+  types. `npm run typecheck` runs it first. If `tsc` complains that those types are missing, run
+  `npx next typegen`.
+- **`next build` doesn't lint** (and `next lint` no longer exists). Use `npm run lint`, or
+  `npm run check`.
+- **`cacheComponents` stays off.** With it on, hidden routes stay mounted, and so do their editors and
+  autosave timers.
+- **Standalone output only in Docker.** `output: "standalone"` is enabled only when `BUILD_STANDALONE=1`,
+  because the standalone server changes into `.next/standalone`, and a relative `./data` would then land
+  inside the build output.
+
+---
+
+## Recipes
+
+### Add a toolbar button
+
+All formatting actions come from one list, `src/components/editor/toolbar-items.ts`. The desktop and
+phone toolbars both render from it.
+
+1. Pick an icon from `lucide-react` (named import).
+2. Add an entry shaped like the existing ones. For example, a Heading 4 button:
+
+   ```ts
+   {
+     id: "h4",
+     label: "Heading 4",
+     icon: Heading4,
+     shortcut: "⌘⌥4",                                  // shown in the tooltip only
+     group: "block",                                   // reuse an existing group; groups get dividers
+     isActive: (editor) => editor.isActive("heading", { level: 4 }),
+     run: (editor) => editor.chain().focus().toggleHeading({ level: 4 }).run(),
+   },
+   ```
+
+3. If the command needs a Tiptap extension the editor doesn't load yet, follow the next recipe first.
+4. Check both toolbars: desktop (sticky under the header) and phone (docked above the keyboard, 44×44
+   targets). The buttons keep editor focus with `onPointerDown={(e) => e.preventDefault()}`, so the
+   keyboard stays open.
+
+### Add a Markdown extension
+
+1. Add it to `createExtensions()` in `src/lib/markdown/extensions.ts`. Use only packages that are
+   already installed (rule 8). The extension must define `parseMarkdown` and `renderMarkdown`, or its
+   content is lost on save.
+2. Add fixtures to `src/lib/markdown/__fixtures__/`: `<case>.md` as input and, if the output is
+   normalized, `<case>.expected.md`. Run `npx vitest run src/lib/markdown` and check idempotence and
+   escaping.
+3. If the syntax used to be "lossy", update the detectors in `src/lib/markdown/fidelity.ts` so those notes
+   stop opening in source mode.
+4. Style it in `src/components/editor/editor.css` using token variables only (`var(--line)`,
+   `var(--muted)`, …).
+5. Optionally add a toolbar button (recipe above). Update the table in README "How your Markdown is kept".
+
+### Add an API endpoint
+
+1. **Contract:** add request/response types to `src/lib/api-contract.ts`, and the path to `API` if it's a
+   new resource.
+2. **Storage:** if it needs the filesystem, add a function in the right `src/lib/server/storage/*.ts`
+   module and export it from `storage/index.ts`. Mutations run inside `withWriteLock`, write with
+   `atomicWrite`, and throw `StorageError` with a precise code.
+3. **Route:** add a guard to `src/lib/server/validate.ts`, then the handler, which is only the happy path:
+
+   ```ts
+   // src/app/api/folders/route.ts
+   export const POST = handle(async (req) => {
+     const { name } = await readJson(req, isCreateFolderRequest); // 415/413/400 handled for you
+     const body: FolderResponse = { folder: await createFolder(name) };
+     return json(body, 201);
+   });
+   ```
+
+   Names come from `new URL(req.url).searchParams` (`requireParam`) or the body, never from route params.
+
+4. **Client:** add a method to `api` in `src/lib/api-client.ts`, then call it from the UI followed by
+   `router.refresh()`.
+5. **Tests:** add cases to `src/app/api/api.test.ts`. They call the exported handler directly with
+   `new Request(url, init)` inside `withTempDataDir`.
+6. **Auth:** nothing to do. `handle()` and the proxy already require a session, unless you pass
+   `{ public: true }`, which you almost never should.
+
+---
+
+## Testing
+
+- **Vitest, Node environment only** (`vitest.config.mts`). Tests live next to the code as `*.test.ts`.
+- **Server tests** wrap each test in `withTempDataDir()` (`src/lib/server/storage/test-utils.ts`), which
+  creates a fresh temp dir, points `WRITE_DATA_DIR` at it and removes it afterwards. They never touch
+  `./data`.
+- **Markdown tests** are driven by fixtures. When you change escaping or an extension, read the fixture
+  diffs carefully: they show exactly what would change in people's files.
+- **Autosave tests** inject fake timers and a fake `save()`. There's no DOM.
+- UI is verified manually (below). Browser end-to-end tests are planned for later.
+
+## Manual QA checklist
+
+Run through whatever your change touches, at desktop width and at 390×844 (iPhone), in light and dark
+mode.
+
+- [ ] **iPhone:** the toolbar docks above the keyboard and ⌄ hides it; nothing hides under the notch or
+      home indicator; focusing an input doesn't zoom the page; the library → note → back flow works.
+- [ ] **Rename:** commit with Enter and on blur; Escape reverts; an invalid name shows an inline error; a
+      taken name shows `A note named "X" already exists in <folder>.`; the URL updates.
+- [ ] **Conflict:** open a note, edit the same file in vim and save it. Refocus the tab: a clean note shows
+      "Updated from disk"; a note with unsaved edits shows the conflict banner, and Keep mine, Use disk
+      version and Save mine as a copy all work.
+- [ ] **Offline:** turn off the network (DevTools → Network → Offline), type, and check the status says
+      "Offline · kept on this device". Reload: the draft is restored. Go back online and it saves.
+- [ ] **No write on open:** open and close a note without typing, and check that the file's mtime
+      (`ls -l --time-style=full-iso`, or `stat` on macOS) is unchanged.
+- [ ] **Downloads:** the note ⬇ gives the exact bytes (`cmp` it with the file on disk); folder and
+      "Download all" zips unzip with `ditto -x -k`; downloading right after typing includes the latest
+      edit.
+- [ ] **Front matter:** edit a note with YAML front matter, then `diff` it: the front matter is untouched.
+- [ ] **Auth** (if touched): with `WRITE_PASSWORD=x`, pages redirect to `/login`, the API returns 401, and
+      `curl -H "Authorization: Bearer x" localhost:3000/api/tree` works.
+
+---
+
+## Pull requests and releases
+
+- Keep PRs small and focused. Describe what changed for users, and include screenshots (desktop and
+  phone) for UI changes.
+- `npm run check` must pass. CI also builds the app and the Docker image, and fails if anything from
+  `./data` ends up in the build output.
+- New dependencies need an issue first (rule 8).
+- **Releases:** pushing a tag like `v1.2.3` runs `.github/workflows/release.yml`. It builds the Docker
+  image for `linux/amd64` and `linux/arm64` and pushes `ghcr.io/<owner>/<repo>:1.2.3` and `:latest`.
+
+By contributing you agree that your contributions are licensed under the [MIT License](LICENSE).

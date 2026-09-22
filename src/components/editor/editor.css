@@ -1,0 +1,253 @@
+/*
+ * Editor typography (§10.4). The ProseMirror root carries `prose max-w-none write-prose`.
+ * `.write-prose <element>` selectors outrank the typography plugin's `.prose :where(...)` rules,
+ * so these win regardless of stylesheet order. Colors come only from the design tokens.
+ */
+
+.prose.write-prose {
+  --tw-prose-body: var(--ink);
+  --tw-prose-headings: var(--ink);
+  --tw-prose-lead: var(--ink);
+  --tw-prose-bold: var(--ink);
+  --tw-prose-links: var(--accent);
+  --tw-prose-counters: var(--muted);
+  --tw-prose-bullets: var(--subtle);
+  --tw-prose-quotes: var(--muted);
+  --tw-prose-quote-borders: var(--line-strong);
+  --tw-prose-code: var(--ink);
+  --tw-prose-pre-code: var(--ink);
+  --tw-prose-pre-bg: var(--sidebar);
+  --tw-prose-hr: var(--line);
+  --tw-prose-th-borders: var(--line);
+  --tw-prose-td-borders: var(--line);
+  --tw-prose-captions: var(--muted);
+  font-size: 17px;
+  line-height: 1.65;
+  color: var(--ink);
+  outline: none;
+  caret-color: var(--accent);
+  overflow-wrap: break-word;
+}
+
+@media (min-width: 80rem) {
+  .prose.write-prose {
+    font-size: 18px;
+    line-height: 1.7;
+  }
+}
+
+/* The title sits right above the body, so the first block never gets a heading-sized gap. */
+.prose.write-prose > :first-child {
+  margin-top: 0.85em;
+}
+
+/* Paragraphs */
+.write-prose p {
+  margin: 0.85em 0;
+}
+
+/* Headings */
+.write-prose h1,
+.write-prose h2,
+.write-prose h3,
+.write-prose h4,
+.write-prose h5,
+.write-prose h6 {
+  color: var(--ink);
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  margin-top: 1.6em;
+  margin-bottom: 0.5em;
+}
+.write-prose h1 {
+  font-size: 1.6em;
+  line-height: 1.25;
+}
+.write-prose h2 {
+  font-size: 1.3em;
+  line-height: 1.3;
+}
+.write-prose h3 {
+  font-size: 1.1em;
+  line-height: 1.4;
+}
+.write-prose h4,
+.write-prose h5,
+.write-prose h6 {
+  font-size: 1em;
+  line-height: inherit;
+}
+
+/* Links */
+.write-prose a {
+  color: var(--accent);
+  font-weight: inherit;
+  text-decoration-line: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+  text-decoration-color: color-mix(in srgb, var(--accent) 40%, transparent);
+}
+
+/* Inline code */
+.write-prose code {
+  font-family: var(--font-mono);
+  font-size: 0.88em;
+  font-weight: inherit;
+  background: var(--hover);
+  padding: 0.125rem 0.25rem;
+  border-radius: 0.25rem;
+}
+.write-prose code::before,
+.write-prose code::after {
+  content: none;
+}
+
+/* Code blocks */
+.write-prose pre {
+  font-family: var(--font-mono);
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--ink);
+  background: var(--sidebar);
+  border: 1px solid var(--line);
+  border-radius: 0.5rem;
+  padding: 1rem;
+  overflow-x: auto;
+}
+.write-prose pre code {
+  background: transparent;
+  padding: 0;
+  border-radius: 0;
+  font-size: inherit;
+}
+
+/* Blockquote */
+.write-prose blockquote {
+  border-left: 3px solid var(--line-strong);
+  color: var(--muted);
+  font-style: normal;
+  font-weight: inherit;
+  padding-left: 1em;
+  margin: 0.85em 0;
+}
+.write-prose blockquote p:first-of-type::before,
+.write-prose blockquote p:last-of-type::after {
+  content: none;
+}
+
+/* Divider */
+.write-prose hr {
+  border-color: var(--line);
+  margin: 2em 0;
+}
+
+/* Tables: Tiptap wraps them in .tableWrapper, which scrolls sideways on narrow screens. */
+.write-prose .tableWrapper {
+  overflow-x: auto;
+  margin: 1em 0;
+}
+.write-prose table {
+  margin: 0;
+  font-size: 15px;
+  border-collapse: collapse;
+  table-layout: auto;
+}
+.write-prose th,
+.write-prose td {
+  border: 1px solid var(--line);
+  padding: 0.375rem 0.625rem;
+  vertical-align: top;
+  min-width: 4em;
+}
+.write-prose th {
+  background: var(--sidebar);
+  font-weight: 600;
+  text-align: left;
+}
+.write-prose th p,
+.write-prose td p {
+  margin: 0;
+}
+.write-prose .selectedCell {
+  background: var(--selection);
+}
+
+/* Task lists: no bullets, a 16px checkbox aligned with the first line of text. */
+.write-prose ul[data-type="taskList"] {
+  list-style: none;
+  padding-left: 0.25em;
+}
+.write-prose ul[data-type="taskList"] ul[data-type="taskList"] {
+  padding-left: 1.5em;
+}
+.write-prose ul[data-type="taskList"] > li {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5em;
+  padding-left: 0;
+  margin: 0.25em 0;
+}
+.write-prose ul[data-type="taskList"] > li > label {
+  flex: none;
+  display: flex;
+  align-items: center;
+  height: 1.65em;
+  user-select: none;
+}
+.write-prose ul[data-type="taskList"] > li > label input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+.write-prose ul[data-type="taskList"] > li > div {
+  flex: 1;
+  min-width: 0;
+}
+.write-prose ul[data-type="taskList"] > li > div > p {
+  margin: 0;
+}
+.write-prose ul[data-type="taskList"] > li[data-checked="true"] > div {
+  color: var(--muted);
+  text-decoration-line: line-through;
+  text-decoration-color: var(--subtle);
+}
+
+/* Lists */
+.write-prose ul,
+.write-prose ol {
+  margin: 0.85em 0;
+}
+.write-prose li p {
+  margin: 0.25em 0;
+}
+
+/* Images: relative src values render broken in v1 (no asset serving yet); that's accepted. */
+.write-prose img {
+  display: inline-block;
+  max-width: 100%;
+  border-radius: 6px;
+  margin: 0;
+}
+.write-prose img.ProseMirror-selectednode {
+  outline: 2px solid var(--selection);
+}
+
+/* Placeholder on an empty note */
+.write-prose p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  color: var(--subtle);
+  float: left;
+  height: 0;
+  pointer-events: none;
+}
+
+/* ProseMirror selection helpers */
+.write-prose .ProseMirror-selectednode {
+  outline: 2px solid var(--selection);
+  outline-offset: 2px;
+}
+.write-prose .ProseMirror-gapcursor::after {
+  border-top-color: var(--accent);
+}

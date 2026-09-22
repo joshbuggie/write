@@ -1,0 +1,6 @@
+- [ ] buy milk
+- [x] call mom
+  - [ ] nested open
+  - [x] nested done
+    - [ ] deeper
+- [ ] last

@@ -13,6 +13,9 @@
 # testing
 /coverage
 
+# your notes when running locally (WRITE_DATA_DIR defaults to ./data)
+/data
+
 # next.js
 /.next/
 /out/
@@ -32,6 +35,7 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+!.env.example
 
 # vercel
 .vercel
@@ -39,3 +43,6 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# local agent/editor tooling
+/.claude/

@@ -1,0 +1,87 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Lint, typecheck, test, build
+    runs-on: ubuntu-latest
+    env:
+      NEXT_TELEMETRY_DISABLED: "1"
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - run: npm ci --no-audit --no-fund
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
+      - name: Format
+        run: npm run format:check
+
+      # A canary note in ./data proves the build never traces user notes into the output.
+      - name: Seed a canary note
+        run: mkdir -p data/notebook && echo "# trace canary" > data/notebook/trace-canary.md
+
+      - name: Build (standalone, like the Docker image)
+        run: npm run build
+        env:
+          BUILD_STANDALONE: "1"
+
+      - name: Check the build contains no notes
+        run: |
+          test -f .next/standalone/server.js
+          if find .next -name 'trace-canary.md' | grep -q .; then
+            echo "::error::A note from ./data was traced into the build output."
+            exit 1
+          fi
+
+  docker:
+    name: Docker image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build image (not pushed)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          load: true
+          tags: write:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Smoke test the container
+        run: |
+          mkdir -p "$RUNNER_TEMP/data" && sudo chown 1000:1000 "$RUNNER_TEMP/data"
+          docker run -d --name write-ci -p 3000:3000 -v "$RUNNER_TEMP/data:/data" write:ci
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:3000/api/health; then echo; exit 0; fi
+            sleep 1
+          done
+          docker logs write-ci
+          exit 1

@@ -1,0 +1,14 @@
+# Quick start: `mkdir -p data && docker compose up -d`, then open http://localhost:3000
+services:
+  write:
+    build: .
+    # image: ghcr.io/<owner>/write:latest   # use a published image instead of building locally
+    init: true
+    restart: unless-stopped
+    ports:
+      - "3000:3000" # behind a reverse proxy prefer "127.0.0.1:3000:3000"
+    environment:
+      WRITE_PASSWORD: ${WRITE_PASSWORD:-} # set this whenever others can reach the server
+    volumes:
+      - ./data:/data # your notes, as plain .md files on the host — run `mkdir -p data` first
+    # user: "1000:1000"                    # set to the owner of ./data if that isn't uid 1000

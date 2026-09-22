@@ -1,26 +1,132 @@
 @import "tailwindcss";
+@plugin "@tailwindcss/typography";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  color-scheme: light dark;
+  --canvas: #fcfcfb; /* page / editor background */
+  --surface: #ffffff; /* menus, dialogs, inputs */
+  --sidebar: #f5f5f3;
+  --hover: #efefec;
+  --active: #e7e6e2;
+  --ink: #1d1d1b; /* primary text */
+  --muted: #6b6a66; /* secondary text, icons */
+  --subtle: #9b9a95; /* placeholders, meta */
+  --line: #e6e5e1; /* hairlines */
+  --line-strong: #d3d2cd;
+  --accent: #2f6fdb;
+  --accent-ink: #ffffff; /* text on accent */
+  --accent-soft: #e8effc;
+  --danger: #c93a32;
+  --danger-soft: #fbeceb;
+  --warning: #8a5a00;
+  --warning-soft: #fdf4dc;
+  --success: #2f7d4f;
+  --selection: #cddcf8;
+  --shadow-pop: 0 1px 2px rgb(0 0 0 / 0.04), 0 8px 24px rgb(0 0 0 / 0.08);
+  --kb: 0px; /* virtual keyboard inset, set by use-keyboard-inset */
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+    --canvas: #161615;
+    --surface: #1f1f1e;
+    --sidebar: #121211;
+    --hover: #252524;
+    --active: #2e2e2c;
+    --ink: #e9e7e3;
+    --muted: #a3a19b;
+    --subtle: #72706b;
+    --line: #2a2a28;
+    --line-strong: #3b3b38;
+    --accent: #7ea6f6;
+    --accent-ink: #0e1116;
+    --accent-soft: #1c2638;
+    --danger: #f07b72;
+    --danger-soft: #3a1f1d;
+    --warning: #e0b454;
+    --warning-soft: #33290f;
+    --success: #6cc38e;
+    --selection: #2b3f66;
+    --shadow-pop: 0 1px 2px rgb(0 0 0 / 0.4), 0 8px 24px rgb(0 0 0 / 0.5);
   }
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+@theme inline {
+  --color-canvas: var(--canvas);
+  --color-surface: var(--surface);
+  --color-sidebar: var(--sidebar);
+  --color-hover: var(--hover);
+  --color-active: var(--active);
+  --color-ink: var(--ink);
+  --color-muted: var(--muted);
+  --color-subtle: var(--subtle);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-accent: var(--accent);
+  --color-accent-ink: var(--accent-ink);
+  --color-accent-soft: var(--accent-soft);
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
+  --color-warning: var(--warning);
+  --color-warning-soft: var(--warning-soft);
+  --color-success: var(--success);
+  --shadow-pop: var(--shadow-pop);
+  --font-sans:
+    ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial,
+    sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
+  --font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+}
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+  body {
+    background: var(--canvas);
+    color: var(--ink);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+  }
+  ::selection {
+    background: var(--selection);
+  }
+  :focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+  button,
+  a,
+  [role="button"] {
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+  }
+  /* Native <dialog> backdrop (components/ui/dialog.tsx). Always a darkening veil, in both themes. */
+  dialog::backdrop {
+    background: rgb(0 0 0 / 0.28);
+  }
+  @media (prefers-color-scheme: dark) {
+    dialog::backdrop {
+      background: rgb(0 0 0 / 0.55);
+    }
+  }
+  /* Keep the page behind an open modal from scrolling (iOS rubber-bands through the backdrop otherwise). */
+  html:has(dialog:modal) {
+    overflow: hidden;
+  }
+  /* iOS zooms into inputs under 16px */
+  @media (max-width: 767px) {
+    input,
+    textarea,
+    select {
+      font-size: max(16px, 1rem);
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      transition-duration: 0ms !important;
+      animation-duration: 0ms !important;
+    }
+  }
 }

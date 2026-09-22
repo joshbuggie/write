@@ -1,0 +1,150 @@
+"use client";
+
+import { useEffect, useId, useRef, useState } from "react";
+import type React from "react";
+import { Button } from "./button";
+
+type DialogProps = {
+  open: boolean;
+  onClose: () => void;
+  title: string;
+  description?: React.ReactNode;
+  children?: React.ReactNode;
+  footer?: React.ReactNode;
+};
+
+/**
+ * Modal built on native <dialog> + showModal(), so focus trapping, Esc and the top layer come from the
+ * browser. Closes on Esc and on a backdrop click. Below `md` it renders as a bottom sheet.
+ * Content only renders while open, so forms inside start fresh every time.
+ */
+export function Dialog({ open, onClose, title, description, children, footer }: DialogProps) {
+  const ref = useRef<HTMLDialogElement>(null);
+  const titleId = useId();
+  const descriptionId = useId();
+  // Latest props for the native event handlers, so a close we caused ourselves doesn't call onClose again.
+  const latest = useRef({ open, onClose });
+  useEffect(() => {
+    latest.current = { open, onClose };
+  });
+  // A drag that starts inside the sheet and ends on the backdrop must not close it.
+  const pressedBackdrop = useRef(false);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    if (open && !el.open) el.showModal();
+    if (!open && el.open) el.close();
+  }, [open]);
+
+  return (
+    <dialog
+      ref={ref}
+      aria-labelledby={titleId}
+      aria-describedby={description ? descriptionId : undefined}
+      onClose={() => {
+        if (latest.current.open) latest.current.onClose();
+      }}
+      onPointerDown={(e) => {
+        pressedBackdrop.current = e.target === e.currentTarget;
+      }}
+      onClick={(e) => {
+        if (e.target === e.currentTarget && pressedBackdrop.current) e.currentTarget.close();
+      }}
+      className={
+        "mx-0 mt-auto mb-0 w-full max-w-none overflow-y-auto overscroll-contain rounded-t-[14px] bg-surface text-ink " +
+        "shadow-pop md:m-auto md:w-[calc(100%-2rem)] md:max-w-md md:rounded-xl md:border md:border-line"
+      }
+    >
+      {open && (
+        <div className="px-5 pt-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] md:pb-5">
+          <h2 id={titleId} className="text-[17px] font-semibold tracking-tight md:text-[16px]">
+            {title}
+          </h2>
+          {description && (
+            <div id={descriptionId} className="mt-1.5 text-[15px] leading-relaxed text-muted md:text-[14px]">
+              {description}
+            </div>
+          )}
+          {children && <div className="mt-4">{children}</div>}
+          {footer && <DialogFooter>{footer}</DialogFooter>}
+        </div>
+      )}
+    </dialog>
+  );
+}
+
+/** Button row at the bottom of a dialog: stacked full-width on phones (primary on top), right-aligned from md. */
+export function DialogFooter({ children }: { children: React.ReactNode }) {
+  return <div className="mt-5 flex flex-col-reverse gap-2 md:flex-row md:justify-end">{children}</div>;
+}
+
+type ConfirmDialogProps = {
+  open: boolean;
+  onClose: () => void;
+  onConfirm: () => void | Promise<void>;
+  title: string;
+  description?: React.ReactNode;
+  confirmLabel: string;
+  destructive?: boolean;
+};
+
+/**
+ * Yes/no confirmation. Shows a pending spinner while `onConfirm` runs and closes when it resolves.
+ * If it throws, the dialog stays open and shows the error message, so the user can retry or cancel.
+ */
+export function ConfirmDialog({
+  open,
+  onClose,
+  onConfirm,
+  title,
+  description,
+  confirmLabel,
+  destructive = false,
+}: ConfirmDialogProps) {
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function confirm() {
+    setPending(true);
+    setError(null);
+    try {
+      await onConfirm();
+      onClose();
+    } catch (err) {
+      setError(err instanceof Error && err.message ? err.message : "Something went wrong.");
+    } finally {
+      setPending(false);
+    }
+  }
+
+  function close() {
+    setError(null);
+    onClose();
+  }
+
+  return (
+    <Dialog
+      open={open}
+      onClose={close}
+      title={title}
+      description={description}
+      footer={
+        <>
+          <Button onClick={close} disabled={pending}>
+            Cancel
+          </Button>
+          <Button variant={destructive ? "danger" : "primary"} pending={pending} onClick={confirm}>
+            {confirmLabel}
+          </Button>
+        </>
+      }
+    >
+      {error && (
+        <p role="alert" className="text-[14px] text-danger">
+          {error}
+        </p>
+      )}
+    </Dialog>
+  );
+}

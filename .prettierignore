@@ -1,0 +1,11 @@
+# Build output and dependencies (also covered by .gitignore)
+.next
+node_modules
+coverage
+
+# Your notes when running locally
+data
+
+# Generated or byte-exact files
+package-lock.json
+src/lib/markdown/__fixtures__
