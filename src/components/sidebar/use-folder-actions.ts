@@ -7,6 +7,7 @@ import { useDownload } from "@/components/ui/download-link";
 import { useToast } from "@/components/ui/toast";
 import { api } from "@/lib/api-client";
 import { MAX_NOTE_BYTES } from "@/lib/constants";
+import { forgetFolderDrafts } from "@/lib/drafts";
 import { downloadFolderHref, LIBRARY_HREF, noteHref } from "@/lib/routes";
 import type { NoteRef } from "@/lib/types";
 import { importSummary, noteNameFromFileName } from "./import-notes";
@@ -36,6 +37,7 @@ export function useFolderActions(folder: string, openRef: NoteRef | null) {
   async function remove(): Promise<void> {
     if (holdsOpenNote) await flushActiveNote();
     await api.deleteFolder(folder);
+    forgetFolderDrafts(folder); // its notes are gone; a new note with a same name must open clean
     startTransition(() => {
       if (holdsOpenNote) router.replace(LIBRARY_HREF);
       router.refresh();

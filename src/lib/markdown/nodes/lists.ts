@@ -28,6 +28,21 @@ function keepTaskMarkerAsText(item: MarkdownToken): MarkdownToken {
   return { ...item, tokens: restore(item.tokens) };
 }
 
+/** The marker each list was last written with, so a list of the same kind right after it can differ. */
+const writtenWith = new WeakMap<JSONContent, string>();
+
+/**
+ * The marker for a list: the first one, unless the list right before is of the same kind and used it
+ * (then the other one, so the two don't merge). Three lists in a row alternate.
+ */
+function markerAfter(
+  previous: JSONContent | null | undefined,
+  type: string,
+  [first, other]: [string, string],
+) {
+  return previous?.type === type && (writtenWith.get(previous) ?? first) === first ? other : first;
+}
+
 /**
  * Ordered lists are read by marked's own CommonMark list tokenizer. Tiptap's tokenizer measured item
  * content from the wrong column (fenced code under "1." gained a space on every save, a task list under
@@ -54,19 +69,23 @@ export const WriteOrderedList = OrderedList.extend({
 
   renderMarkdown(node, h, ctx) {
     const markdown = h.renderChildren(node.content ?? [], "\n");
-    // "1." and "1)" lists are different lists, so a second list right after the first stays separate.
-    return ctx.previousNode?.type === "orderedList" ? markdown.replace(/^(\d+)\.(?= |$)/gm, "$1)") : markdown;
+    // "1." and "1)" lists are different lists, so a list right after another one stays separate.
+    const delimiter = markerAfter(ctx.previousNode, "orderedList", [".", ")"]);
+    writtenWith.set(node, delimiter);
+    return delimiter === "." ? markdown : markdown.replace(/^(\d+)\.(?= |$)/gm, "$1)");
   },
 });
 
 /**
  * Bullet list. Markdown only starts a new list when the bullet character changes, so right after another
- * bullet list it uses "*" (task lists there use "+").
+ * bullet list it uses the other one of "-" and "*" (task lists there use "+").
  */
 export const WriteBulletList = BulletList.extend({
   renderMarkdown(node, h, ctx) {
     const markdown = h.renderChildren(node.content ?? [], "\n");
-    return ctx.previousNode?.type === "bulletList" ? markdown.replace(/^-(?= |$)/gm, "*") : markdown;
+    const bullet = markerAfter(ctx.previousNode, "bulletList", ["-", "*"]);
+    writtenWith.set(node, bullet);
+    return bullet === "-" ? markdown : markdown.replace(/^-(?= |$)/gm, bullet);
   },
 });
 

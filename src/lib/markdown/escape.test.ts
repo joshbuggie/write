@@ -40,6 +40,28 @@ describe("encodeText", () => {
   });
 });
 
+describe("encodeText and bare URLs", () => {
+  it.each([
+    ["see https://x.com/~u/ now", "see https://x.com/~u/ now"],
+    ["https://x.com/a*b*c", "https://x.com/a*b*c"],
+    ["https://x.com/a__b__c and a_b", "https://x.com/a__b__c and a_b"],
+    ["www.x.com/a_b_ now", "www.x.com/a_b_ now"],
+    ["*x* https://x.com/~u", "\\*x\\* https://x.com/~u"],
+  ])("leaves the URL in %j as typed: marked links it backslashes and all", (input, output) => {
+    expect(encodeText(input)).toBe(output);
+  });
+
+  it("escapes a URL like other text inside a link's text, where marked doesn't link it", () => {
+    expect(encodeText("https://x.com/a*b*c", { inLink: true })).toBe("https://x.com/a\\*b\\*c");
+  });
+
+  it("escapes a URL like other text and keeps marked from linking it, when asked", () => {
+    expect(encodeText("see https://x.com/a*b and www.x.com, me@x.com", { plainAddresses: true })).toBe(
+      "see https\\://x.com/a\\*b and www\\.x.com, me\\@x.com",
+    );
+  });
+});
+
 describe("escapeBlockStarts", () => {
   it.each([
     ["# not heading", "\\# not heading"],

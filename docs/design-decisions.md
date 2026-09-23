@@ -165,7 +165,8 @@ files.
   5. The bytes are identical to what's on disk: success, nothing written ([D9](#d9)).
   6. Otherwise, write atomically and return the new version.
 - A **forced** save (`force: true`, the banner's "Keep mine") over a file whose version differs from the
-  `baseVersion` first copies the bytes on disk to `.trash/<timestamp>/<folder>/<name>.md` ([D10](#d10)).
+  `baseVersion` first copies the bytes on disk to `.trash/<timestamp>-<hex>/<folder>/<name>.md`
+  ([D10](#d10)).
 - A conflict is one JSON contract (`409` plus `current`), not `If-Match` and `412`.
 
 <a id="d9"></a>
@@ -231,6 +232,14 @@ files.
   one synchronous step, so parallel requests can't buy extra guesses. The budget is global rather than
   per IP, because `X-Forwarded-For` can be forged. Devices already signed in keep working, since a valid
   session cookie is not a password check. A script with a stale Bearer password keeps the lockout going.
+- **Accepted tradeoff:** because the budget is global, anyone who can reach `/api/auth/login` can keep new
+  sign-ins locked with 10 wrong passwords every 15 minutes. Bearer requests stay locked too, since a
+  Bearer header is a password guess like any other. Per-IP budgets would need trusted-proxy
+  configuration to be safe, which self-hosters rarely get right. We chose "guessing is capped, signed-in
+  devices keep working" over "strangers can't delay a new sign-in", and the README tells internet-facing
+  installs to use a long random password and a VPN or reverse-proxy auth in front.
+- The 429 carries `Retry-After`, and its message names the same wait in minutes (`lockoutResponse`
+  computes both from one clock reading), so the sign-in page can show "Try again in N minutes" as is.
 - The lockout lives in memory on `globalThis`, shared by the proxy and the route handlers, which fits the
   one-process-per-data-folder rule ([D7](#d7)).
 - Code: `src/lib/server/auth.ts` and `src/app/api/auth/`.
@@ -244,7 +253,10 @@ files.
   redirected to `/login?next=…`. An API request gets a JSON `401` (or `429` during a lockout,
   [D12](#d12)), so the client can show "Signed out" instead of following a redirect to HTML.
 - `next` only ever redirects within the app: `safeNextPath` (`src/lib/routes.ts`) rejects control
-  characters, whitespace and backslashes, then parses the value and requires the same origin.
+  characters, whitespace and backslashes, then parses the value, requires the same origin and returns the
+  re-serialized path. That path is checked again, because parsing resolves dot segments: `/.//evil.com`
+  and `/a/%2e%2e//evil.com` both serialize to the protocol-relative `//evil.com`, which a browser treats
+  as another host. The login page (server redirect) and the login form (`router.replace`) both use it.
 - Handlers (`handle()`) and loaders check auth again. The proxy's matcher is easy to get subtly wrong, so
   it shouldn't be the only check.
 - The note size cap (5 MiB) stays below the proxy's 10 MB request body buffer.
@@ -272,6 +284,18 @@ files.
   serializer **per instance** (`patchMarkdownManager` in `src/lib/markdown/escape.ts`) and escapes
   typed text that would otherwise reopen as markup (`WriteParagraph`). A test fails loudly if a Tiptap
   upgrade breaks the patch.
+- **Bare URLs** (`http://`, `https://`, `ftp://`, `www.`) in typed text are not escaped inside the URL
+  (`autolinkSpans` in `src/lib/markdown/autolinks.ts`), because marked links everything up to the next
+  space, backslashes included: `a_b_` would reopen as a link to `a\_b\_`. Where a bare URL would swallow
+  a code span, a link or an emphasis delimiter right after it, it is written as `https\://…` (or
+  `www\.…`) so it isn't linked and the formatting survives. A bare URL or email that marked does link
+  re-opens as a link (an accepted normalization, like `<autolinks>`), so a later save writes `[url](url)`.
+- **Read-back:** inline formatting and paragraphs with a bare URL are read back with marked
+  (`src/lib/markdown/nodes/read-back.ts`). If marked reads different marks, other delimiter styles are
+  tried, and failing that the text is simplified where marked first misread it: the URL is kept from
+  being linked, or else the nearest emphasis stretch is given up, never text. What's left is written
+  again, so a second save writes the same bytes. Paragraphs are written in independent parts, so this
+  stays close to linear (`src/lib/markdown/nodes/inline.ts`).
 - Always read Markdown with `serializeBody(editor)`, never `editor.getMarkdown()`, because only
   `serializeBody` applies the escaping and final-newline rules.
 - The document schema is `createSchemaExtensions()` in `src/lib/markdown/extensions.ts`. Both the editor
@@ -293,12 +317,20 @@ files.
   - **lossy:** the note contains raw HTML or HTML comments, footnote definitions, math the round trip
     changes, link reference definitions nothing uses (bookmarks, `[//]: #` comments), backslash escapes
     whose removal would make Obsidian-style syntax live (`\#tag`, `\[\[x]]`, `\=\=`, `\%\%`, `\$`), or
-    the rendered structure differs. Code blocks are compared byte for byte.
+    the rendered structure differs. Code blocks are compared byte for byte. A list marker alone on a
+    line with trailing whitespace at the start of a paragraph (`1. ` or `- `, as older versions of write
+    wrote an empty item) is **structure** too: CommonMark and GitHub read it as an empty list item, marked
+    as text (`hasMisreadEmptyItem`).
 - **Lossy notes open in source mode** (a textarea holding the whole file) with a banner. "Edit visually
   anyway" asks for confirmation first. Editing never silently destroys content.
-- Notes over 256 KiB, or with a single paragraph over 16 KiB (`hasOversizedParagraph`), always open in
-  source mode, because parsing is superlinear. Notes over 5 MiB or that
-  aren't valid UTF-8 are read-only ([D18](#d18)).
+- **Large notes open in source mode**, because inline parsing is superlinear: notes over 256 KiB, and
+  notes where one inline run is over 16 K characters (`hasOversizedParagraph`). It measures real runs
+  from marked's block lexer, which is linear: each paragraph, list item's text, heading and table cell
+  counts separately, and fenced or indented code never counts, so long tight lists, tables and quotes
+  still open visually. Quotes or lists nested more than 32 levels on one line (`> > > …`) also open in
+  source mode, because they could overflow marked's stack. Notes over 5 MiB or that aren't valid UTF-8
+  are read-only ([D18](#d18)). Both callers, `note-editor.tsx` (the "Large note" notice) and Markdown
+  paste ([D22](#d22)), use the same check.
 - Switching modes from the ⋯ menu flushes first, then remounts the inner editor from the last saved
   content with a recomputed baseline.
 
@@ -321,7 +353,9 @@ In order, in `src/components/note/` and `src/components/editor/note-editor.tsx`:
 
 1. **Read-only:** a note over 5 MiB or not valid UTF-8 renders `ReadOnlyNote`: the reason, a text preview
    for files that aren't UTF-8, and a download button. write never modifies it.
-2. **Mode:** over 256 KiB, or a paragraph over 16 KiB, goes to source mode. Otherwise the visual editor is created and the fidelity
+2. **Mode:** over 256 KiB, an inline run (paragraph, list item, heading or table cell) over 16 K
+   characters, or quotes and lists nested more than 32 deep goes to source mode ([D16](#d16)). Otherwise
+   the visual editor is created and the fidelity
    check ([D16](#d16)) runs **synchronously on the first render**. The editor is loaded with
    `next/dynamic(…, { ssr: false })` and `immediatelyRender: true`, so there is no flash of the wrong mode
    and Tiptap is code-split out of the app shell.
@@ -332,14 +366,18 @@ In order, in `src/components/note/` and `src/components/editor/note-editor.tsx`:
    Drafts are restored by **remounting the editor with the draft text**, so the fidelity check applies to
    them too (a draft with HTML opens in source mode). A draft based on an older version is parked under
    its own key (`write:draft-conflict:v1:`), which autosave never touches, and shows the conflict banner's
-   "draft" variant ([D20](#d20)) until you pick one of its choices.
+   "draft" variant ([D20](#d20)) until you pick one of its choices. A pending draft conflict is also
+   dropped, together with the regular draft, when the note or its folder is deleted, when the note is
+   renamed away from its old name, and when an empty Untitled note is discarded (once the server confirms)
+   (`forgetDrafts` / `forgetFolderDrafts` in `src/lib/drafts.ts`). "Save mine as a copy" keeps the
+   original's conflict, since that file still exists.
 5. **Newest known state:** the editor opens from the newest content and version this tab knows
    (`src/components/note/known-notes.ts`), not from page props that may be stale (back/forward replays
    cached props). A revalidation `GET` on mount catches a stale page restored by the browser; it retries
    transient failures (after 2, 5 and 15 s) and runs again on a back/forward-cache `pageshow`.
 6. **Focus:** an empty `Untitled` note focuses and selects its title. On touch devices nothing is
    focused automatically, so the keyboard doesn't jump up. After a rename made while typing in the body,
-   the caret goes back where it was in the body ([D21](#d21)).
+   the new name's editor gets the old editor's exact document and caret ([D21](#d21)).
 
 <a id="d19"></a>
 
@@ -400,8 +438,13 @@ In order, in `src/components/note/` and `src/components/editor/note-editor.tsx`:
   to the new URL, unless you already went elsewhere (clicked another note, "‹ Notes" or Back), in which
   case only the sidebar refreshes.
 - The editor stays editable while the rename lands. Text typed meanwhile is handed to the new name as a
-  draft and restored quietly there, with the caret put back if the body had focus. Downloads and folder
-  actions wait for a rename in flight before they flush.
+  draft and restored quietly there. The new name's editor also gets the old editor's exact document
+  (ProseMirror JSON, `src/components/editor/editor-snapshot.ts`), not just the Markdown draft, so a
+  trailing Enter or space typed while the rename lands is kept; the snapshot is only applied when it
+  serializes to the same text, so it can never change the file, and it adds no undo step. The caret is put
+  back if the body had focus. Downloads and folder actions wait for a rename in flight before they flush,
+  and the header and ⋯ menu download works out its URL only after the rename lands, so it fetches the new
+  name ([D23](#d23)).
 - The page is keyed by folder and name, so the editor remounts and undo history resets. Keeping the
   editor alive across a rename was deferred to keep v1 simple. On iPhone the keyboard may stay closed after
   the remount, because iOS only raises it for a focus inside a user gesture.
@@ -416,6 +459,13 @@ In order, in `src/components/note/` and `src/components/editor/note-editor.tsx`:
   in `src/lib/markdown/markdown-paste.ts`) is parsed as Markdown, unless the editor would drop part of it
   (the same fidelity check as opening a note, [D16](#d16)): then it is pasted as plain text with a toast.
   Inside a code block, text is pasted raw. Pasted files and images are ignored with a toast, because uploads aren't supported yet.
+- **Table cells** hold one line of inline text. Blocks pasted or dropped into a cell are flattened to one
+  line, joined with spaces (`src/lib/markdown/nodes/table-cells.ts`). A drop is judged by where it lands,
+  not by the caret, so blocks dropped outside a table stay blocks even while the caret is in a cell.
+- **Enter over a selection that spans blocks** (two list items, a heading and a list…) deletes the
+  selection and then splits at the caret, like a word processor: `- al|pha`, `- be|ta` becomes `- al`,
+  `- ta` (`src/lib/markdown/nodes/enter-over-selection.ts`). Selections touching a table cell are left to
+  the cell's own Enter handling.
 - **Links** don't open on a plain click, so clicking a link places the caret to edit it. ⌘-click opens
   http, https and mailto links in a new tab with `noopener`. ⌘K opens the link dialog.
 - **Underline is off**, and there's no ⌘U. Its Markdown form (`++x++`) isn't portable.
@@ -437,6 +487,9 @@ In order, in `src/components/note/` and `src/components/editor/note-editor.tsx`:
   fetches the file and saves it through a temporary object URL, under the filename from
   `Content-Disposition`. `DownloadLink` stays a real anchor, so modified clicks and "Save link as…" still
   work.
+- `useDownload` takes a `DownloadTarget`: a URL, or a function that returns one. `flushThenDownload`
+  (`src/lib/download.ts`) resolves it only after the flush, which waits for a rename or move in flight, so
+  the open note's download (header and ⋯ menu) is named after where that rename leaves it.
 - **A failed download** (for example, the note was renamed elsewhere, or you were signed out) shows an
   error toast and leaves the app where it was, instead of replacing the page with an error.
 - The same `GET /api/download` works from `curl` with a Bearer token, for scripted backups.

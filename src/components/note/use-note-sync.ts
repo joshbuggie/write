@@ -6,7 +6,7 @@ import type { EditorHandle } from "@/components/editor/note-editor";
 import { api, isApiError, saveNoteBodyBytes } from "@/lib/api-client";
 import { createAutosaver, type Autosaver, type SaveState } from "@/lib/autosave";
 import { UNTITLED } from "@/lib/constants";
-import { clearDraft, writeDraft } from "@/lib/drafts";
+import { clearDraft, forgetDrafts, writeDraft } from "@/lib/drafts";
 import { noteHref } from "@/lib/routes";
 import type { Note, NoteRef } from "@/lib/types";
 import { expectHandover, forgetMove, latestKnown, movedTo, recordDiskState } from "./known-notes";
@@ -36,16 +36,21 @@ export type NoteSync = {
   editor: () => EditorHandle | null;
   /** Full file text as it is in the editor right now. */
   getContent: () => string;
-  /** Stop saving this note for good (deleted, closed, saved as a copy) and drop its draft. */
-  abandon: () => void;
+  /**
+   * Stop saving this note for good (deleted, closed, saved as a copy) and drop its draft. With `gone`
+   * (the file was deleted), a pending draft conflict goes too, or it would greet the next note created
+   * under this name.
+   */
+  abandon: (opts?: { gone?: boolean }) => void;
   /** A rename or move is in progress, so leaving must not discard the note under it. */
   setRelocating: (relocating: boolean) => void;
   /**
    * The note now lives at `to`: stop saving under the old name, and hand text typed since the last save
-   * (and, with `keepFocus`, the caret) to the editor that opens there. The editor stays editable, so
+   * to the editor that opens there. With `stay` (the app follows the note there), that editor also gets
+   * this one's exact document and, if the body had focus, its caret. The editor stays editable, so
    * nothing typed while the rename lands is lost.
    */
-  handOff: (to: NoteRef, keepFocus: boolean) => void;
+  handOff: (to: NoteRef, stay: boolean) => void;
 };
 
 /**
@@ -63,7 +68,7 @@ export function useNoteSync(note: Note, onDiskChange: (fresh: Note) => void): No
   const standInRef = useRef(opened.content);
   const abandonedRef = useRef(false);
   const relocatingRef = useRef(false);
-  const handoffRef = useRef<{ to: NoteRef; keepFocus: boolean } | null>(null);
+  const handoffRef = useRef<{ to: NoteRef; stay: boolean; focus: boolean } | null>(null);
   const requestedVersionRef = useRef<string | null>(null);
   const teardownRef = useRef<number | undefined>(undefined);
   const [missing, setMissing] = useState(false);
@@ -99,12 +104,18 @@ export function useNoteSync(note: Note, onDiskChange: (fresh: Note) => void): No
   const actions = useMemo(() => {
     const ref = { folder, name };
     const getContent = () => handleRef.current?.getContent() ?? standInRef.current;
-    const stop = () => {
+    /** `gone`: no file has this name any more, so nothing parked under it (see forgetDrafts) is wanted. */
+    const stop = (gone: boolean) => {
       abandonedRef.current = true;
       autosaver.dispose();
-      clearDraft(ref);
+      if (gone) forgetDrafts(ref);
+      else clearDraft(ref);
     };
-    /** Unsaved text becomes the renamed note's draft, which its editor restores on open. */
+    /**
+     * Unsaved text becomes the renamed note's draft, which its editor restores on open. The draft is
+     * Markdown, which can't hold a trailing empty paragraph or space, so the editor's exact state goes
+     * along too (see EditorSnapshot). Runs again at unmount, so it includes the very last keystroke.
+     */
     const handOverEdits = () => {
       const handoff = handoffRef.current;
       if (!handoff) return;
@@ -112,7 +123,8 @@ export function useNoteSync(note: Note, onDiskChange: (fresh: Note) => void): No
       if (content !== null)
         writeDraft(handoff.to, { content, baseVersion: autosaver.getVersion(), savedAt: Date.now() });
       const handle = handleRef.current;
-      if (handoff.keepFocus && handle) expectHandover(handoff.to, handle.getCaret());
+      if (handoff.stay && handle)
+        expectHandover(handoff.to, { snapshot: handle.snapshot(), focus: handoff.focus });
     };
     return {
       getContent,
@@ -125,15 +137,15 @@ export function useNoteSync(note: Note, onDiskChange: (fresh: Note) => void): No
         if (handleRef.current) standInRef.current = handleRef.current.getContent();
         handleRef.current = null;
       },
-      abandon: () => {
+      abandon: ({ gone = false }: { gone?: boolean } = {}) => {
         if (abandonedRef.current) return;
         handleRef.current?.setEditable(false);
-        stop();
+        stop(gone);
       },
-      handOff: (to: NoteRef, keepFocus: boolean) => {
+      handOff: (to: NoteRef, stay: boolean) => {
         if (abandonedRef.current) return;
-        stop();
-        handoffRef.current = { to, keepFocus: keepFocus && !!handleRef.current?.hasFocus() };
+        stop(true); // the drafts already moved to `to`; the old name is free now
+        handoffRef.current = { to, stay, focus: stay && !!handleRef.current?.hasFocus() };
         handOverEdits();
       },
       /** An empty "Untitled" note was never really written; leaving it should not leave a file behind. */
@@ -156,7 +168,11 @@ export function useNoteSync(note: Note, onDiskChange: (fresh: Note) => void): No
       isThrowaway: actions.isThrowaway,
       discard: () => {
         clearDraft(ref);
-        api.discardIfEmpty(ref).then(({ deleted }) => deleted && refreshTree(), ignore);
+        api.discardIfEmpty(ref).then(({ deleted }) => {
+          if (!deleted) return; // the file isn't empty after all: an unresolved draft conflict stays
+          forgetDrafts(ref);
+          refreshTree();
+        }, ignore);
       },
     });
     window.addEventListener("keydown", onKeyDown);
@@ -201,7 +217,7 @@ export function useNoteSync(note: Note, onDiskChange: (fresh: Note) => void): No
     () => {
       const to = movedTo({ folder, name });
       if (to && !abandonedRef.current && !autosaver.hasUnsavedChanges()) {
-        actions.abandon(); // a cached page of a note this tab renamed: go where it lives now
+        actions.abandon({ gone: true }); // a cached page of a note this tab renamed: go where it lives now
         router.replace(noteHref(to));
       } else {
         setMissing(true);

@@ -1,5 +1,6 @@
 "use client";
 
+import type { JSONContent } from "@tiptap/core";
 import { useMemo } from "react";
 import { VISUAL_EDITOR_MAX_BYTES } from "@/lib/constants";
 import { hasOversizedParagraph, type LossReason } from "@/lib/markdown/fidelity";
@@ -14,6 +15,21 @@ export type EditorMode = "visual" | "source";
 export type SourceReason = { kind: "large" } | { kind: "lossy"; reasons: LossReason[] } | null;
 
 /**
+ * What an editor hands to the one that replaces it when a rename remounts the page (see
+ * docs/design-decisions.md#d21). The text alone is not enough: Markdown can't hold a trailing empty
+ * paragraph or a trailing space, so an editor reloaded from it would lose the Enter or space typed just
+ * before the rename landed, and the next word would join the previous line.
+ */
+export type EditorSnapshot = {
+  /** getContent() when the snapshot was taken. The snapshot only applies to an editor showing this text. */
+  content: string;
+  /** Where the caret was, for focus(). */
+  caret: number;
+  /** The visual editor's exact document (ProseMirror JSON). The source editor's text is already exact. */
+  doc?: JSONContent;
+};
+
+/**
  * The few things the note screen needs from whichever editor is mounted. Keeps autosave, rename and
  * conflict handling independent of Tiptap vs. textarea. There is deliberately no setContent: other text
  * (a draft, the disk version) is loaded by remounting, so it passes the same fidelity check as a file.
@@ -23,13 +39,18 @@ export type EditorHandle = {
   getContent(): string;
   setEditable(editable: boolean): void;
   /**
-   * Focuses the body with the caret at its start, or at a position from getCaret(). Synchronous, so a
-   * key typed right after Enter in the title can't land in the title.
+   * Focuses the body with the caret at its start, or at a snapshot's caret. Synchronous, so a key typed
+   * right after Enter in the title can't land in the title.
    */
   focus(at: "start" | number): void;
   hasFocus(): boolean;
-  /** The caret position, so it can be put back after the editor remounts (e.g. under a new name). */
-  getCaret(): number;
+  /** The exact state to carry into the editor that remounts under a new name. */
+  snapshot(): EditorSnapshot;
+  /**
+   * Puts back a snapshot's exact document, without marking the note edited, when this editor shows the
+   * same text. Otherwise (the text changed meanwhile) it does nothing. Doesn't move the focus.
+   */
+  restore(snapshot: EditorSnapshot): void;
 };
 
 export type EditorReady = {

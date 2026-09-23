@@ -7,6 +7,7 @@ most common changes.
 - [Setup](#setup)
 - [Everyday commands](#everyday-commands)
 - [Architecture map](#architecture-map)
+- [Markdown engine map](#markdown-engine-map)
 - [Design decisions](docs/design-decisions.md) (separate file)
 - [Rules](#rules)
 - [Next.js 16 gotchas](#nextjs-16-gotchas)
@@ -94,25 +95,25 @@ src/proxy.ts: optional auth gate in front of everything except health/login/stat
 
 ### Where things live
 
-| Path                                       | What it is                                                                                                                                                           |
-| ------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `src/lib/types.ts`, `constants.ts`         | Shared domain types (`Note`, `Tree`, …) and limits. Imported everywhere.                                                                                             |
-| `src/lib/names.ts`                         | Name rules for notes and folders (`validateName`, `nameKey`, `compareNames`). Shared by UI and server.                                                               |
-| `src/lib/routes.ts`                        | **The only place URLs are built or parsed** (`noteHref`, `decodeSegment`, download links).                                                                           |
-| `src/lib/api-contract.ts`, `api-client.ts` | The HTTP contract (request/response types, error codes) and the typed browser `fetch` wrapper.                                                                       |
-| `src/lib/server/storage/`                  | **The only code that touches the filesystem.** Notes, folders, trash, zip export, atomic writes, the lock.                                                           |
-| `src/lib/server/http.ts`, `validate.ts`    | `handle()` wraps every route with auth, CSRF checks and error mapping; hand-written body type guards.                                                                |
-| `src/lib/server/auth.ts`, `src/proxy.ts`   | Optional password: HMAC session cookie, Bearer token, and the request gate.                                                                                          |
-| `src/lib/server/loaders.ts`                | What Server Components call to read data (`loadTree`, `loadNote`, …).                                                                                                |
-| `src/app/api/*/route.ts`                   | One route file per resource: `tree`, `folders`, `notes`, `download`, `health`, `auth`.                                                                               |
-| `src/lib/markdown/`                        | Framework-free Markdown engine: Tiptap extensions, escaping, front matter, fidelity check, paste.                                                                    |
-| `src/lib/markdown/nodes/`                  | The schema's node overrides (`Write*`): they only allow structure Markdown can store. `inline.ts` is the inline serializer, which checks its own output with marked. |
-| `src/lib/autosave.ts`, `drafts.ts`         | Framework-free autosave state machine, plus crash-safety drafts in `localStorage`.                                                                                   |
-| `src/components/note/`                     | The note screen: `NoteView` orchestrates the editor, autosave, title/rename and conflict banner.                                                                     |
-| `src/components/editor/`                   | The visual (Tiptap) and source (textarea) editors, toolbar, link dialog, `editor.css`.                                                                               |
-| `src/components/shell/`, `sidebar/`        | App shell, `ShellProvider` context, sidebar and phone library.                                                                                                       |
-| `src/components/ui/`                       | Small UI kit: `Button`, `IconButton`, `Dialog`, `Menu`, `Toast`, `TextField`, `DownloadLink`.                                                                        |
-| `src/app/globals.css`                      | Design tokens (colors for light and dark) exposed as Tailwind utilities.                                                                                             |
+| Path                                       | What it is                                                                                                                                                       |
+| ------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/lib/types.ts`, `constants.ts`         | Shared domain types (`Note`, `Tree`, …) and limits. Imported everywhere.                                                                                         |
+| `src/lib/names.ts`                         | Name rules for notes and folders (`validateName`, `nameKey`, `compareNames`). Shared by UI and server.                                                           |
+| `src/lib/routes.ts`                        | **The only place URLs are built or parsed** (`noteHref`, `decodeSegment`, download links).                                                                       |
+| `src/lib/api-contract.ts`, `api-client.ts` | The HTTP contract (request/response types, error codes) and the typed browser `fetch` wrapper.                                                                   |
+| `src/lib/server/storage/`                  | **The only code that touches the filesystem.** Notes, folders, trash, zip export, atomic writes, the lock.                                                       |
+| `src/lib/server/http.ts`, `validate.ts`    | `handle()` wraps every route with auth, CSRF checks and error mapping; hand-written body type guards.                                                            |
+| `src/lib/server/auth.ts`, `src/proxy.ts`   | Optional password: HMAC session cookie, Bearer token, and the request gate.                                                                                      |
+| `src/lib/server/loaders.ts`                | What Server Components call to read data (`loadTree`, `loadNote`, …).                                                                                            |
+| `src/app/api/*/route.ts`                   | One route file per resource: `tree`, `folders`, `notes`, `download`, `health`, `auth`.                                                                           |
+| `src/lib/markdown/`                        | Framework-free Markdown engine: Tiptap extensions, escaping, front matter, fidelity check, paste.                                                                |
+| `src/lib/markdown/nodes/`                  | The schema's node overrides (`Write*`) and the inline serializer. See the [Markdown engine map](#markdown-engine-map).                                           |
+| `src/lib/autosave.ts`, `drafts.ts`         | Framework-free autosave state machine, plus crash-safety drafts in `localStorage`.                                                                               |
+| `src/components/note/`                     | The note screen: `NoteView` orchestrates the editor, autosave, title/rename and conflict banner.                                                                 |
+| `src/components/editor/`                   | The visual (Tiptap) and source (textarea) editors, toolbar, link dialog, `editor.css`, and the snapshot a rename hands to the new editor (`editor-snapshot.ts`). |
+| `src/components/shell/`, `sidebar/`        | App shell, `ShellProvider` context, sidebar and phone library.                                                                                                   |
+| `src/components/ui/`                       | Small UI kit: `Button`, `IconButton`, `Dialog`, `Menu`, `Toast`, `TextField`, `DownloadLink`.                                                                    |
+| `src/app/globals.css`                      | Design tokens (colors for light and dark) exposed as Tailwind utilities.                                                                                         |
 
 ### Key ideas, in the order you'll meet them
 
@@ -139,6 +140,50 @@ src/proxy.ts: optional auth gate in front of everything except health/login/stat
 
 ---
 
+## Markdown engine map
+
+The Markdown engine (`src/lib/markdown/`) turns a note file into an editor document and back. Its one
+job is that **what you see in the editor is exactly what re-opens from the file**. Most of it lives in
+`nodes/`, one file per concern, so each rule about what Markdown can store has a single home.
+
+**The pipeline.** A file is split into front matter and body (`file-format.ts`). `analyzeFidelity`
+decides whether the body can open visually (`fidelity.ts`). The body is parsed by the schema
+(`extensions.ts`, built from `nodes/`). On save, `serializeBody` (`serialize.ts`) writes it back through
+the escaping patch (`escape.ts`) and the node renderers below, and `composeFile` re-joins the front matter.
+
+| File                                            | What it does                                                                                                                                                                                                                                                                                                                                                   |
+| ----------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `extensions.ts`                                 | `createSchemaExtensions()` (the document schema: every node and mark), `createExtensions()` (editor-only extras) and the headless `createMarkdownManager()`.                                                                                                                                                                                                   |
+| `serialize.ts`                                  | `serializeBody(editor)`, the only way to read Markdown from an editor.                                                                                                                                                                                                                                                                                         |
+| `escape.ts`                                     | Escapes typed text only where it would otherwise parse as syntax, and patches Tiptap's own escaping per editor instance.                                                                                                                                                                                                                                       |
+| `autolinks.ts`                                  | Where marked would link a bare URL or email (GFM autolink literals), so escaping leaves those URLs alone.                                                                                                                                                                                                                                                      |
+| `file-format.ts`                                | Splits off front matter (kept verbatim) and applies the final-newline rule.                                                                                                                                                                                                                                                                                    |
+| `fidelity.ts`                                   | Classifies a note as exact, normalized or lossy; lossy notes open in source mode. Also the oversized-paragraph check.                                                                                                                                                                                                                                          |
+| `markdown-paste.ts`                             | Pasting Markdown text: parse it, or paste plain text when the editor would drop part of it.                                                                                                                                                                                                                                                                    |
+| `write-paragraph.ts`                            | Paragraphs, including blank ones, written with the inline serializer.                                                                                                                                                                                                                                                                                          |
+| `nodes/inline.ts`, `inline-render.ts`           | The inline serializer: text with its marks (bold, italic, strike, code, links) for paragraphs, headings and table cells. Where Markdown can't place a delimiter it moves or gives up a mark, never writes HTML. `inline-render.ts` renders and settles the delimiters; `inline.ts` picks the style, writes a paragraph in independent parts and reads it back. |
+| `nodes/inline-atoms.ts`, `inline-syntax.ts`     | Helpers for it: inline content as one "atom" per character, and code spans, link destinations and bracket escaping.                                                                                                                                                                                                                                            |
+| `nodes/flanking.ts`, `read-back.ts`             | Self-checks: CommonMark's delimiter rules, and re-parsing the output with marked to confirm it reads back as the same marks.                                                                                                                                                                                                                                   |
+| `nodes/heading.ts`, `image.ts`, `code-block.ts` | Headings (single line, escaped closing `#`s), images, and code fences that outlast any backtick run inside.                                                                                                                                                                                                                                                    |
+| `nodes/lists.ts`, `list-item.ts`, `tasks.ts`    | Bullet, numbered and task lists: parsing marked's list tokens, and blank-line rules inside items.                                                                                                                                                                                                                                                              |
+| `nodes/containers.ts`                           | Document, blockquote and table nodes; drops blank paragraphs Markdown can't keep at the end of a container.                                                                                                                                                                                                                                                    |
+| `nodes/table-cells.ts`, `table-markdown.ts`     | Table cells hold one line of inline text (pasted or dropped blocks are flattened); GFM table output.                                                                                                                                                                                                                                                           |
+| `nodes/hard-break.ts`, `horizontal-rule.ts`     | Line breaks, refused in headings, table cells and on a task's checkbox line; dividers, refused in table cells.                                                                                                                                                                                                                                                 |
+| `nodes/enter-over-selection.ts`                 | Enter over a selection that spans blocks deletes it first, then splits at the caret.                                                                                                                                                                                                                                                                           |
+| `nodes/changed-blocks.ts`                       | Finds the top-level blocks a transaction touched, for the clean-up plugins above.                                                                                                                                                                                                                                                                              |
+
+**The rule for any change here**, however small:
+
+1. Add or update fixtures in `src/lib/markdown/__fixtures__/`: `<case>.md`, plus `<case>.expected.md` if
+   the output is normalized. A note that must open in source mode goes in `__fixtures__/fidelity/` as
+   `<reason>.<case>.md`.
+2. The round-trip fuzz test must pass, including a deeper local run:
+   `FUZZ_SEEDS=5000 FUZZ_STEPS=80 npx vitest run src/lib/markdown/roundtrip-fuzz.test.ts`.
+3. `npx vitest run src/lib/markdown` must pass. Read every fixture diff: it shows exactly what would change
+   in people's files. If a normalization changes, update the table in README "How your Markdown is kept".
+
+---
+
 ## Rules
 
 These keep the app safe with other people's files. Most are enforced by lint or tests.
@@ -156,7 +201,8 @@ These keep the app safe with other people's files. Most are enforced by lint or 
    (`src/components/ui/download-link.tsx`), which calls `downloadFile` in `src/lib/download.ts`.
 4. **Read Markdown with `serializeBody(editor)`, never `editor.getMarkdown()`.** Only `serializeBody`
    applies our escaping and final newline rules.
-5. **Every Markdown extension needs round-trip fixtures** in `src/lib/markdown/__fixtures__/`.
+5. **Every Markdown change needs round-trip fixtures** in `src/lib/markdown/__fixtures__/` and a passing
+   round-trip fuzz test (see the [Markdown engine map](#markdown-engine-map)).
 6. **Colors come from the design tokens only**: `bg-canvas`, `text-muted`, `border-line`, `bg-accent` and
    the others in `globals.css`. No hex values and no Tailwind palette colors (`gray-500`) in components.
    That's what makes dark mode work.
@@ -309,8 +355,11 @@ mode.
       edit. Rename the file on disk, then click ⬇: an error toast appears and the app stays put.
 - [ ] **Front matter:** edit a note with YAML front matter, then `diff` it: the front matter is untouched.
 - [ ] **Auth** (if touched): with `WRITE_PASSWORD=x`, pages redirect to `/login`, the API returns 401, and
-      `curl -H "Authorization: Bearer x" localhost:3000/api/tree` works. Repeated wrong passwords (on
-      `/login` or as a Bearer token) start getting `429`.
+      `curl -H "Authorization: Bearer x" localhost:3000/api/tree` works. After 10 wrong passwords (on
+      `/login` or as a Bearer token) the next attempt gets `429` with `Retry-After`, `/login` shows "Too
+      many sign-in attempts. Try again in 15 minutes.", and an already signed-in tab keeps working.
+      Restart the server to lift the lockout. `/login?next=%2F.%2F%2Fexample.com` must land on `/`, not
+      example.com.
 
 ---
 

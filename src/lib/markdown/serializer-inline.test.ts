@@ -126,6 +126,204 @@ describe("inline fuzz with punctuation at mark edges", () => {
   });
 });
 
+describe("bare URLs, www. addresses and emails", () => {
+  // marked links them on re-open (GFM autolinks), which is accepted: the next save writes the link.
+  it.each([
+    [
+      [
+        text("see "),
+        text("important", "bold"),
+        text(" and "),
+        text("this", "italic"),
+        text(" at https://x.com/docs"),
+      ],
+      "see **important** and *this* at https://x.com/docs",
+    ],
+    [[text("see "), text("important", "bold"), text(" at www.x.com")], "see **important** at www.x.com"],
+    [[text("email me@x.com or "), text("bold", "bold")], "email me@x.com or **bold**"],
+    [
+      [text("Read "), text("this", "bold"), text(" at https://x.com/docs today")],
+      "Read **this** at https://x.com/docs today",
+    ],
+  ])("don't cost the paragraph its formatting (%#)", (content, markdown) => {
+    const md = save(paragraph(...content));
+    expect(md).toBe(markdown + "\n");
+    const reopened = manager.parse(md);
+    const withoutLinks = (nodes: JSONContent[] = []) =>
+      nodes.map((node) => ({ ...node, marks: node.marks?.filter((mark) => mark.type !== "link") }));
+    expect(
+      same(
+        {
+          ...reopened,
+          content: [{ type: "paragraph", content: withoutLinks(reopened.content?.[0]?.content) }],
+        },
+        paragraph(...content),
+      ),
+    ).toBe(true);
+  });
+
+  it.each([
+    ["see https://x.com/~u/ now", "https://x.com/~u/"],
+    ["https://x.com/a*b*c", "https://x.com/a*b*c"],
+    ["https://x.com/a__b__c", "https://x.com/a__b__c"],
+    ["www.x.com/a_b_ now", "http://www.x.com/a_b"],
+  ])("keep their characters: %j is written as typed and links to %s", (typed, href) => {
+    const md = save(paragraph(text(typed)));
+    expect(md).toBe(typed + "\n");
+    const nodes = manager.parse(md).content?.[0]?.content ?? [];
+    expect(nodes.map((node) => node.text).join("")).toBe(typed);
+    expect(nodes.flatMap((node) => node.marks ?? []).map((mark) => mark.attrs?.href)).toEqual([href]);
+  });
+
+  it("are escaped as usual inside a link's text, where marked doesn't link them", () => {
+    const doc = paragraph(text("https://x.com/a*b*c", link("https://z.com")));
+    expect(save(doc)).toBe("[https://x.com/a\\*b\\*c](https://z.com)\n");
+    expect(same(manager.parse(save(doc)), doc)).toBe(true);
+  });
+
+  it.each([
+    [[text("see www.x."), text("com", "code"), text(" now")], "see www\\.x.`com` now"],
+    [[text("see https://x.com/"), text("docs", "bold"), text(" now")], "see https\\://x.com/**docs** now"],
+    [
+      [text("see https://x.com/"), text("docs", link("https://y.com")), text(" now")],
+      "see https\\://x.com/[docs](https://y.com) now",
+    ],
+  ])("aren't linked where they would swallow the syntax after them (%#)", (content, markdown) => {
+    const doc = paragraph(...content);
+    expect(save(doc)).toBe(markdown + "\n");
+    expect(same(manager.parse(save(doc)), doc)).toBe(true);
+    expect(save(manager.parse(save(doc)))).toBe(save(doc));
+  });
+
+  it("gives up only the formatting marked misreads, not the rest of the paragraph", () => {
+    // marked can't read "**a *b*c**" (nor with "_"), so the italic goes; the other bold stays.
+    const doc = paragraph(
+      text("x "),
+      text("a ", "bold"),
+      text("b", "bold", "italic"),
+      text("c", "bold"),
+      text(" y "),
+      text("far", "bold"),
+    );
+    expect(save(doc)).toBe("x **a bc** y **far**\n");
+  });
+});
+
+describe("inline fuzz with bare addresses", () => {
+  // Seeded, like the fuzz above, with URLs, www. addresses and emails among the formatted pieces.
+  const pieces = [
+    "https://x.com/docs",
+    "www.x.com",
+    "me@x.com",
+    "https://x.com/~u/a_b_",
+    "a",
+    " ",
+    "。",
+    "*",
+    "_",
+    "`",
+    ".",
+    "/",
+  ];
+  const markSets = [["bold"], ["italic"], ["strike"], ["code"], ["bold", "italic"]];
+  let seed = 23;
+  const random = () => {
+    seed = (seed + 0x6d2b79f5) | 0;
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+  const pick = <T>(items: T[]) => items[Math.floor(random() * items.length)];
+  /** Each character with its emphasis and code marks; links are what GFM adds on re-open. */
+  const chars = (doc: JSONContent) =>
+    (doc.content?.[0]?.content ?? []).flatMap((node) =>
+      Array.from(node.text ?? "", (char) => ({
+        char,
+        marks: (node.marks ?? [])
+          .map((mark) => mark.type)
+          .filter((type) => type !== "link")
+          .sort(),
+      })),
+    );
+  const trimmed = (list: ReturnType<typeof chars>) =>
+    list
+      .map((c) => c.char)
+      .join("")
+      .trim();
+
+  it("keeps every character, never invents formatting, and settles within a few saves", () => {
+    let kept = 0;
+    let total = 0;
+    for (let i = 0; i < 1500; i++) {
+      const content = Array.from({ length: 5 }, () => {
+        const piece = Array.from({ length: 1 + Math.floor(random() * 3) }, () => pick(pieces)).join("");
+        return random() < 0.5 ? text(piece, ...pick(markSets)) : text(piece);
+      });
+      const doc = schema.nodeFromJSON(paragraph(...content)).toJSON() as JSONContent;
+      const markdown = save(doc);
+      const reopened = manager.parse(markdown);
+      const [before, after] = [chars(doc), chars(reopened)];
+      expect({ markdown, text: trimmed(after) }).toEqual({ markdown, text: trimmed(before) });
+      const offset = before.findIndex((c) => !/\s/.test(c.char)) - after.findIndex((c) => !/\s/.test(c.char));
+      after.forEach((c, k) => {
+        const invented = c.marks.filter((mark) => !before[k + offset]?.marks.includes(mark));
+        expect({ markdown, at: k, invented }).toEqual({ markdown, at: k, invented: [] });
+      });
+      before.forEach((c, k) => {
+        if (/\s/.test(c.char)) return; // formatting on spaces at a mark's edge can't be written
+        total += c.marks.length;
+        kept += c.marks.filter((mark) => after[k - offset]?.marks.includes(mark)).length;
+      });
+      // A bare URL is a link once re-opened, so the next save writes it as one, which can let another
+      // URL be written bare; that settles within a few saves, keeping the text.
+      let saved = markdown;
+      for (let round = 0; round < 4 && save(manager.parse(saved)) !== saved; round++) {
+        saved = save(manager.parse(saved));
+        expect({ saved, text: trimmed(chars(manager.parse(saved))) }).toEqual({
+          saved,
+          text: trimmed(before),
+        });
+      }
+      expect(save(manager.parse(saved))).toBe(saved);
+    }
+    expect(kept / total).toBeGreaterThan(0.9);
+  });
+});
+
+describe("near-linear time on paragraphs full of formatting (runs on every save)", () => {
+  /** `runs` text runs of 1–4 pieces each, with random bold, italic and strikethrough (or none). */
+  function formattedParagraph(runs: number, pieces: string[]): JSONContent {
+    let seed = 1;
+    const random = () => {
+      seed = (seed + 0x6d2b79f5) | 0;
+      let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+    const pick = <T>(items: T[]) => items[Math.floor(random() * items.length)];
+    const markSets = [[], ["bold"], ["italic"], ["strike"], ["bold", "italic"]];
+    return paragraph(
+      ...Array.from({ length: runs }, () =>
+        text(
+          Array.from({ length: 1 + Math.floor(random() * 4) }, () => pick(pieces)).join(""),
+          ...pick(markSets),
+        ),
+      ),
+    );
+  }
+
+  it.each([
+    ["punctuation and spaces", ["a", "。", "「x」", ":", "*", "b c", "."]],
+    ["CJK text without spaces", ["中文", "。", "「強調」", "、", "重要"]],
+  ])("writes a paragraph with about 2,000 mark edges in %s quickly", (_, pieces) => {
+    const doc = formattedParagraph(2000, pieces);
+    const start = performance.now();
+    save(doc);
+    // About 30 ms on a laptop; this bound only catches a return of the quadratic behavior (minutes).
+    expect(performance.now() - start).toBeLessThan(750);
+  });
+});
+
 describe("links", () => {
   it.each([
     ["a]b", "https://y.com", "[a\\]b](https://y.com)"],
@@ -135,6 +333,8 @@ describe("links", () => {
     ["[x](y)", "https://y.com", "[\\[x\\]\\(y)](https://y.com)"],
     ["Foo", "https://en.wikipedia.org/wiki/Foo_(bar)", "[Foo](https://en.wikipedia.org/wiki/Foo_(bar))"],
     ["[b]", "https://y.com", "[[b]](https://y.com)"],
+    // marked reads one level of brackets in link text, so deeper pairs are escaped.
+    ["a [[x] y] z", "https://y.com", "[a [\\[x\\] y] z](https://y.com)"],
   ])("%j → %s re-opens as the same link", (label, href, markdown) => {
     const doc = paragraph(text(label, link(href)));
     expect(save(doc)).toBe(markdown + "\n");

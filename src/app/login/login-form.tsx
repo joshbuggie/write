@@ -7,12 +7,15 @@ import { TextField } from "@/components/ui/text-field";
 import { api, isApiError } from "@/lib/api-client";
 import { safeNextPath } from "@/lib/routes";
 
-/** Turns a failed login into a short, human message. The server's 401/429 text says wrong vs locked out. */
+/**
+ * Turns a failed login into a short, human message. The server's 401/429 text says wrong vs locked out;
+ * during a lockout it names the wait ("Try again in 15 minutes.", the same value as Retry-After).
+ */
 function loginErrorMessage(err: unknown): string {
   // Only the server's own JSON message is shown; a body-less response gets the generic wording.
   const serverMessage = isApiError(err) ? err.body?.error?.message : undefined;
   if (isApiError(err, "unauthorized")) return serverMessage || "Wrong password.";
-  if (isApiError(err, "rate_limited")) return serverMessage || "Too many wrong passwords. Try again later.";
+  if (isApiError(err, "rate_limited")) return serverMessage || "Too many sign-in attempts. Try again later.";
   if (isApiError(err, "network")) return "Can't reach the server.";
   return "Couldn't sign in. Try again.";
 }

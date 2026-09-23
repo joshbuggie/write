@@ -38,17 +38,29 @@ const NEXT_BASE = "http://next.invalid";
 const UNSAFE_IN_NEXT = /[\p{Cc}\s\\]/u;
 
 /**
+ * True for a path a browser resolves against the current origin. "//host" and "/\\host" are
+ * protocol-relative: they keep the scheme but switch to another host.
+ */
+function isOriginRelativePath(path: string): boolean {
+  return path.startsWith("/") && !path.startsWith("//") && !path.startsWith("/\\");
+}
+
+/**
  * Open-redirect guard for ?next=: returns a same-origin path, or "/" for anything else. Prefix checks
  * aren't enough (see UNSAFE_IN_NEXT), so the value is parsed the way a browser would and its origin
  * compared. The re-serialized path is returned, so nothing the parser dropped can reach a Location header.
+ * Parsing also resolves dot segments ("/.//evil.com", "/a/%2e%2e//evil.com" become "//evil.com"), so the
+ * serialized result is checked again before it is returned.
  */
 export function safeNextPath(next: string | null | undefined): string {
-  if (!next || !next.startsWith("/") || UNSAFE_IN_NEXT.test(next)) return "/";
+  if (!next || !isOriginRelativePath(next) || UNSAFE_IN_NEXT.test(next)) return "/";
   let url: URL;
   try {
     url = new URL(next, NEXT_BASE);
   } catch {
     return "/";
   }
-  return url.origin === NEXT_BASE ? url.pathname + url.search + url.hash : "/";
+  if (url.origin !== NEXT_BASE) return "/";
+  const path = url.pathname + url.search + url.hash;
+  return isOriginRelativePath(path) ? path : "/";
 }

@@ -12,6 +12,7 @@ import { IGNORED_FILES_EVENT, PASTED_AS_TEXT_EVENT } from "@/lib/markdown/markdo
 import { analyzeFidelity } from "@/lib/markdown/fidelity";
 import { composeFile, splitFrontmatter } from "@/lib/markdown/file-format";
 import { serializeBody } from "@/lib/markdown/serialize";
+import { restoreSnapshot, takeSnapshot, visualContent } from "./editor-snapshot";
 import { LinkDialog, openLinkSafely } from "./link-dialog";
 import type { EditorReady } from "./note-editor";
 import { EditorSkeleton } from "./editor-skeleton";
@@ -109,11 +110,12 @@ export function VisualEditor({ content, allowLossy, toolbarSlot, onReady, onChan
       // What "unchanged" means for this note: its normalized serialization, not the raw file.
       baseline: composeFile(parts.frontmatter, opened.roundTripped),
       handle: {
-        getContent: () => composeFile(parts.frontmatter, serializeBody(current)),
+        getContent: () => visualContent(current, parts.frontmatter),
         setEditable: (editable) => current.setEditable(editable),
         focus: (at) => focusAt(current, at),
         hasFocus: () => current.isFocused,
-        getCaret: () => current.state.selection.head,
+        snapshot: () => takeSnapshot(current, parts.frontmatter),
+        restore: (snapshot) => void restoreSnapshot(current, snapshot, parts.frontmatter),
       },
     });
   });

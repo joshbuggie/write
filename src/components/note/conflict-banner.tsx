@@ -92,7 +92,7 @@ export function ConflictBanner(props: ConflictBannerProps) {
     if (variant === "draft") {
       onDraftResolved();
     } else if (variant === "deleted") {
-      sync.abandon();
+      sync.abandon({ gone: true });
       router.push(LIBRARY_HREF);
     } else if (current) {
       onReload(current.content, current.version);
@@ -125,7 +125,7 @@ export function ConflictBanner(props: ConflictBannerProps) {
     if (variant === "draft") {
       onDraftResolved();
     } else {
-      sync.abandon();
+      sync.abandon({ gone }); // "changed" and "own" leave the original file in place
     }
     startTransition(() => {
       router.push(noteHref(copy));

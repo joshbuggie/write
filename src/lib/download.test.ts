@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { isApiError } from "./api-client";
-import { downloadFile, filenameFromDisposition } from "./download";
+import { downloadFile, filenameFromDisposition, flushThenDownload } from "./download";
 
 /** Minimal stand-in for the one DOM API downloadFile touches: a hidden <a download> appended to <body>. */
 function fakeDocument() {
@@ -108,5 +108,45 @@ describe("downloadFile", () => {
     );
     expect(isApiError(await downloadFile("/x").catch((e: unknown) => e), "network")).toBe(true);
     expect(dom.clicks).toEqual([]);
+  });
+});
+
+describe("flushThenDownload", () => {
+  it("names the note where a rename in flight leaves it, not where it was when clicked", async () => {
+    let finishRename!: () => void;
+    let name = "Front matter";
+    const rename = new Promise<void>((resolve) => {
+      finishRename = () => {
+        name = "Front matter 2";
+        resolve();
+      };
+    });
+    const fetched: string[] = [];
+    const done = flushThenDownload(
+      () => rename, // the open note's flush waits for the rename first
+      () => `/api/download?folder=Personal&name=${encodeURIComponent(name)}`,
+      async (href) => {
+        fetched.push(href);
+      },
+    );
+    await Promise.resolve();
+    expect(fetched).toEqual([]); // nothing is fetched under the old name
+    finishRename();
+    await done;
+    expect(fetched).toEqual(["/api/download?folder=Personal&name=Front%20matter%202"]);
+  });
+
+  it("downloads a fixed href after the flush", async () => {
+    const order: string[] = [];
+    await flushThenDownload(
+      async () => {
+        order.push("flush");
+      },
+      "/api/download?all=1",
+      async (href) => {
+        order.push(href);
+      },
+    );
+    expect(order).toEqual(["flush", "/api/download?all=1"]);
   });
 });

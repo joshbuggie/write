@@ -103,9 +103,51 @@ export function writeDraftConflict(ref: NoteRef, draft: Draft, storage?: Storage
   writeKey(draftKey(ref, CONFLICT_KEY_PREFIX), draft, storage);
 }
 
-/** Called only by the conflict banner's explicit choices (or when the note is abandoned). */
+/**
+ * The pending draft was resolved: a conflict-banner choice, or on open it matched the file. A note that
+ * goes away uses forgetDrafts instead.
+ */
 export function clearDraftConflict(ref: NoteRef, storage?: Storage): void {
   clearKey(draftKey(ref, CONFLICT_KEY_PREFIX), storage);
+}
+
+/**
+ * The note is gone (deleted, discarded, closed for good) or its drafts already moved to its new name:
+ * drop both its regular draft and any pending draft conflict. A parked conflict left behind would show
+ * the conflict banner on the next note created with the same name (often "Untitled"), and "Keep mine"
+ * would replace that new note with the old note's text.
+ */
+export function forgetDrafts(ref: NoteRef, storage?: Storage): void {
+  clearDraft(ref, storage);
+  clearDraftConflict(ref, storage);
+}
+
+/** A folder was deleted: forget the drafts of every note that was in it (see forgetDrafts). */
+export function forgetFolderDrafts(folder: string, storage?: Storage): void {
+  const store = resolveStorage(storage);
+  if (!store) return;
+  try {
+    const keys = Array.from({ length: store.length }, (_, i) => store.key(i));
+    for (const key of keys) {
+      const ref = refOfKey(key);
+      if (ref?.folder === folder) forgetDrafts(ref, store);
+    }
+  } catch {
+    // Storage unavailable: there are no drafts to forget.
+  }
+}
+
+/** The note a draft key belongs to, or null for keys that aren't drafts. */
+function refOfKey(key: string | null): NoteRef | null {
+  const prefix = [KEY_PREFIX, CONFLICT_KEY_PREFIX].find((p) => key?.startsWith(p));
+  if (!key || !prefix) return null;
+  try {
+    const parsed: unknown = JSON.parse(key.slice(prefix.length));
+    if (!Array.isArray(parsed) || typeof parsed[0] !== "string" || typeof parsed[1] !== "string") return null;
+    return { folder: parsed[0], name: parsed[1] };
+  } catch {
+    return null;
+  }
 }
 
 /** Follows a rename or move so unsaved drafts (regular and pending-conflict) stay attached to the note. */

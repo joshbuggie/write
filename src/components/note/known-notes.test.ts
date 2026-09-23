@@ -91,9 +91,10 @@ describe("moves", () => {
 
 describe("handovers", () => {
   it("is consumed once, by the note it was meant for", () => {
-    expectHandover(ref, 7);
+    const handover = { snapshot: { content: "Line one", caret: 7 }, focus: true };
+    expectHandover(ref, handover);
     expect(takeHandover({ folder: "notebook", name: "Other" })).toBeNull();
-    expect(takeHandover(ref)).toBe(7);
+    expect(takeHandover(ref)).toBe(handover);
     expect(takeHandover(ref)).toBeNull();
   });
 });

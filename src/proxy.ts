@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { ERROR_STATUS, type ApiErrorBody } from "@/lib/api-contract";
-import { authenticateRequest, lockoutMessage, lockoutRetryAfterS } from "@/lib/server/auth";
+import { authenticateRequest, lockoutResponse } from "@/lib/server/auth";
 import { loginHref } from "@/lib/routes";
 
 /**
@@ -17,8 +17,12 @@ export function proxy(request: NextRequest): NextResponse | Response {
   const { pathname, search } = request.nextUrl;
   if (pathname === "/api" || pathname.startsWith("/api/")) {
     const headers: Record<string, string> = { "Cache-Control": "no-store" };
-    if (status === "rate_limited") headers["Retry-After"] = String(lockoutRetryAfterS());
-    const message = status === "rate_limited" ? lockoutMessage() : "Sign in to continue.";
+    let message = "Sign in to continue.";
+    if (status === "rate_limited") {
+      const lockout = lockoutResponse();
+      headers["Retry-After"] = String(lockout.retryAfterS);
+      message = lockout.message;
+    }
     const body: ApiErrorBody = { error: { code: status, message } };
     return NextResponse.json(body, { status: ERROR_STATUS[status], headers });
   }

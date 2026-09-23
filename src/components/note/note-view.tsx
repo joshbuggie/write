@@ -59,13 +59,16 @@ function EditableNote({ note, folders }: { note: Note; folders: string[] }) {
   const { sync, source, mode, sourceReason } = session;
   const { autosaver, state } = sync;
   // A rename or move started by blurring the title may still be in flight when a download or a folder
-  // action asks for a flush; waiting for it keeps that action from using the old name mid-rename.
-  const pendingRelocate = useRef<Promise<unknown> | null>(null);
+  // action asks for a flush; waiting for it keeps that action from using the old name mid-rename. It
+  // resolves with where the note lives afterwards (the old ref if it failed).
+  const pendingRelocate = useRef<Promise<NoteRef> | null>(null);
   useRegisterActiveNote(ref, async () => {
     await pendingRelocate.current;
     await autosaver.flush();
   });
   const startDownload = useDownload();
+  /** This note's download URL once any rename or move in flight has landed (see DownloadTarget). */
+  const downloadHref = async () => downloadNoteHref((await pendingRelocate.current) ?? ref);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -122,21 +125,19 @@ function EditableNote({ note, folders }: { note: Note; folders: string[] }) {
     return null;
   }
 
-  function track(pending: Promise<string | null>): Promise<string | null> {
-    pendingRelocate.current = pending;
+  /** Runs a relocate and remembers it as the one in flight; resolves with an error message or null. */
+  function track(to: NoteRef, request: () => Promise<unknown>): Promise<string | null> {
+    const pending = relocate(to, request);
+    pendingRelocate.current = pending.then((failure) => (failure ? ref : to));
     return pending;
   }
   const rename = (newName: string) =>
-    track(
-      relocate({ folder: note.folder, name: newName }, () =>
-        api.updateNote({ folder: note.folder, name: note.name, newName }),
-      ),
+    track({ folder: note.folder, name: newName }, () =>
+      api.updateNote({ folder: note.folder, name: note.name, newName }),
     );
   const move = (newFolder: string) =>
-    track(
-      relocate({ folder: newFolder, name: note.name }, () =>
-        api.updateNote({ folder: note.folder, name: note.name, newFolder }),
-      ),
+    track({ folder: newFolder, name: note.name }, () =>
+      api.updateNote({ folder: note.folder, name: note.name, newFolder }),
     );
 
   /** Throws on failure, so the confirm dialog stays open and shows the message. */
@@ -147,7 +148,7 @@ function EditableNote({ note, folders }: { note: Note; folders: string[] }) {
     } catch (err) {
       if (!isApiError(err, "not_found")) throw err; // already gone is as good as deleted
     }
-    sync.abandon();
+    sync.abandon({ gone: true });
     startTransition(() => {
       router.replace(LIBRARY_HREF);
       router.refresh();
@@ -170,6 +171,7 @@ function EditableNote({ note, folders }: { note: Note; folders: string[] }) {
     <>
       <NoteHeader
         noteRef={ref}
+        resolveDownloadHref={downloadHref}
         status={<SaveStatus state={state} onRetry={() => autosaver.retry()} onShowConflict={showConflict} />}
         menu={
           <NoteMenu
@@ -177,7 +179,7 @@ function EditableNote({ note, folders }: { note: Note; folders: string[] }) {
             canEditVisually={sourceReason?.kind !== "large"}
             onRename={focusTitle}
             onMove={() => setDialog("move")}
-            onDownload={() => void startDownload(downloadNoteHref(ref))}
+            onDownload={() => void startDownload(downloadHref)}
             onToggleMode={toggleMode}
             onDelete={() => setDialog("delete")}
           />

@@ -167,10 +167,11 @@ data/                          ← WRITE_DATA_DIR
   with a dot, and can't be Windows device names like `CON`. Two names that differ only in case count as
   the same name. This keeps your folder safe to sync or unzip on macOS, Windows and Linux. Files that
   already exist with other names still open fine.
-- **Deleting moves to `.trash`.** A deleted note goes to `.trash/<timestamp>/<folder>/<name>.md`, and a
-  deleted folder to `.trash/<timestamp>/<folder>/`. Nothing is purged automatically: to restore something,
-  move it back; to reclaim space, delete the old `.trash` entries. **Keep mine** in a conflict also puts
-  the version it replaces into `.trash`, at `.trash/<timestamp>/<folder>/<name>.md`.
+- **Deleting moves to `.trash`.** A deleted note goes to `.trash/<timestamp>-<hex>/<folder>/<name>.md`,
+  and a deleted folder to `.trash/<timestamp>-<hex>/<folder>/`. The short random `<hex>` keeps two deletes
+  in the same millisecond apart. Nothing is purged automatically: to restore something, move it back; to
+  reclaim space, delete the old `.trash` entries. **Keep mine** in a conflict also puts the version it
+  replaces into `.trash`, at `.trash/<timestamp>-<hex>/<folder>/<name>.md`.
 - **Interrupted renames come back.** Changing only the case of a name (`plan` → `Plan`) takes two steps.
   If the server stops between them, the note or folder reappears as "Recovered note" or "Recovered folder"
   the next time write loads, so you can rename it back.
@@ -212,17 +213,18 @@ connection doesn't lose your typing. The next time you open the note you get you
 write never rewrites a file just because you opened it. It saves only after you make a real edit. When it
 saves, the editor writes standard Markdown, which can differ slightly from what you typed elsewhere:
 
-| What's in your file                                                                                                                                                                                                                                                        | What happens                                                                                                                                                        |
-| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `#` headings, **bold**/_italic_/~~strike~~/`code`, links (with titles), blockquotes, `---`, nested and numbered lists (including the start number), nested task lists, fenced code with a language, images, and text like `&`, `<`, `snake_case`, `[[wiki links]]`, `[^1]` | **Kept exactly.**                                                                                                                                                   |
-| Tables (column padding), `_em_` → `*em*`, `* item` → `- item`, underlined (setext) headings → `#` headings, bare URLs and `<autolinks>` → `[url](url)`, reference links → inline links, loose lists → tight lists, runs of blank lines                                     | **Normalized** to the equivalent standard form. This only happens the first time you edit that note.                                                                |
-| YAML (`---`) or TOML (`+++`) front matter at the top of the file                                                                                                                                                                                                           | **Kept byte for byte.** It's shown read-only as "Properties" above the note, and can be edited in Markdown mode.                                                    |
-| Raw HTML, HTML comments, footnote definitions, math (`$…$`, `$$…$$`), link definitions nothing links to (bookmark lists, `[//]: #` comments), backslash escapes other apps rely on (`\#tag`, `\[\[x]]`, `\$5`)                                                             | The visual editor can't keep these, so the note **opens as Markdown source** instead, with a banner. Choose "Edit visually anyway" only if you're fine losing them. |
+| What's in your file                                                                                                                                                                                                                                                                                                                                                           | What happens                                                                                                                                                        |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `#` headings, **bold**/_italic_/~~strike~~/`code`, links (with titles), blockquotes, `---`, nested and numbered lists (including the start number), nested task lists, fenced code with a language, images, and text like `&`, `<`, `snake_case`, `[[wiki links]]`, `[^1]`                                                                                                    | **Kept exactly.**                                                                                                                                                   |
+| Tables (column padding), `_em_` → `*em*`, `* item` → `- item`, underlined (setext) headings → `#` headings, closing `##` on headings dropped, `~~~` and indented code → ` ``` ` fences, a `\` line break → two trailing spaces, a lone `~` → `\~`, bare URLs and `<autolinks>` → `[url](url)`, reference links → inline links, loose lists → tight lists, runs of blank lines | **Normalized** to the equivalent standard form. This only happens the first time you edit that note.                                                                |
+| YAML (`---`) or TOML (`+++`) front matter at the top of the file                                                                                                                                                                                                                                                                                                              | **Kept byte for byte.** It's shown read-only as "Properties" above the note, and can be edited in Markdown mode.                                                    |
+| Raw HTML, HTML comments, footnote definitions, math (`$…$`, `$$…$$`), link definitions nothing links to (bookmark lists, `[//]: #` comments), backslash escapes other apps rely on (`\#tag`, `\[\[x]]`, `\$5`)                                                                                                                                                                | The visual editor can't keep these, so the note **opens as Markdown source** instead, with a banner. Choose "Edit visually anyway" only if you're fine losing them. |
 
 A few more rules:
 
-- **Large notes** (over 256 KB, or with a single paragraph over 16 KB) always open in Markdown source mode,
-  which stays fast.
+- **Large notes** (over 256 KB, or with a single paragraph, list item, heading or table cell over 16 KB)
+  always open in Markdown source mode, which stays fast. Long lists, tables and code blocks don't count, so
+  they still open visually. Quotes or lists nested more than 32 levels deep also open as source.
 - **Pasting Markdown** the visual editor can't fully keep (HTML, a linked badge, an unused link
   definition…) pastes it as plain text instead, with a message, so nothing is silently dropped.
 - **Very large files** (over 5 MB) and **files that aren't valid UTF-8** open read-only, with a download
@@ -296,11 +298,26 @@ Machine, `rsync` or `git`. That also captures `.trash`.
 - **Cross-site requests are blocked** even without a password. Every change has to be a same-origin JSON
   request, which the browser checks with `Sec-Fetch-Site`, so a malicious web page can't write to a write
   server on your LAN.
-- **Sign-in** uses an HTTP-only session cookie. After 10 wrong passwords (at the sign-in page or in an
-  `Authorization: Bearer` header) within 15 minutes, password checks are refused with
-  `429 Too Many Requests` for 15 minutes, even the right password. Devices that are already signed in
-  keep working. A script with a stale Bearer password keeps triggering the lockout, so update it when you
-  change the password. Choose a long passphrase anyway. Changing `WRITE_PASSWORD` signs out every device.
+- **Sign-in** uses an HTTP-only session cookie that lasts 30 days. Changing `WRITE_PASSWORD` signs out
+  every device.
+- **Wrong passwords lock sign-in for everyone, for a while.** After 10 wrong passwords within 15 minutes
+  (at the sign-in page or in an `Authorization: Bearer` header), every password check is refused for
+  15 minutes with `429 Too Many Requests` and a `Retry-After` header, even the right password. The sign-in
+  page says "Too many sign-in attempts. Try again in N minutes." What that means for you:
+  - **Devices that are already signed in keep working** during a lockout: a session cookie isn't a
+    password check. Only new sign-ins and Bearer scripts have to wait. Restarting write lifts a lockout.
+  - The limit is shared by all clients, not counted per IP address, because the client's address can be
+    forged without a trusted proxy in front. The upside: guessing is capped at 10 tries per 15 minutes no
+    matter how many machines an attacker uses. The downside: anyone who can reach the sign-in page can
+    keep it locked by sending 10 wrong passwords every 15 minutes, which stops you from signing in on
+    a new device (never from using one that is already signed in).
+  - So **use a long, random password** (a password manager's 20+ characters, or five random words), and
+    if write is reachable from the internet, **prefer keeping it private**: behind a VPN such as
+    [Tailscale](https://tailscale.com), or behind a reverse proxy that does its own sign-in (forward auth
+    such as Authelia, Authentik or Cloudflare Access). Then strangers can't reach the sign-in page at all.
+    HTTP Basic auth works too, but is unreliable in iPhone Home Screen apps.
+  - A script with a stale Bearer password keeps triggering the lockout, so update your scripts when you
+    change the password.
 - **Run one instance per data folder.** write serializes writes within one process. Two servers on the
   same folder could overwrite each other's saves.
 - Hosting under a subpath (like `example.com/notes/`) isn't supported. Use a subdomain.
@@ -369,7 +386,7 @@ decode UTF-8 names correctly. Double-click the zip in Finder, or run `ditto -x -
 Run `sudo chown -R 1000:1000 ./data`, or set `user:` in `docker-compose.yml` to the owner of the folder.
 
 **Why did a note open in Markdown source mode?** It contains something the visual editor can't keep (raw
-HTML, footnotes, math, unused link definitions), or it's over 256 KB or has a paragraph over 16 KB. See [How your Markdown is kept](#how-your-markdown-is-kept).
+HTML, footnotes, math, unused link definitions), or it's over 256 KB, has a paragraph over 16 KB, or nests quotes or lists more than 32 deep. See [How your Markdown is kept](#how-your-markdown-is-kept).
 
 **Why is a note read-only?** It's over 5 MB or not valid UTF-8. write won't risk changing it; download it
 or edit it with another app.

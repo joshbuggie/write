@@ -7,6 +7,7 @@ import { Marked, type marked } from "marked";
 import { patchMarkdownManager } from "./escape";
 import { MarkdownPaste } from "./markdown-paste";
 import { WriteCodeBlock } from "./nodes/code-block";
+import { EnterOverSelection } from "./nodes/enter-over-selection";
 import { WriteBlockquote, WriteDocument, WriteTable } from "./nodes/containers";
 import { WriteHardBreak } from "./nodes/hard-break";
 import { WriteHeading } from "./nodes/heading";
@@ -82,6 +83,7 @@ export function createExtensions(opts: { placeholder?: string } = {}): AnyExtens
     ...createSchemaExtensions(),
     Placeholder.configure({ placeholder: opts.placeholder ?? "Start writing…" }),
     MarkdownPaste,
+    EnterOverSelection,
     Markdown.configure({ marked: freshMarked(), indentation: INDENTATION }),
     Extension.create({
       name: "writeEscapes",

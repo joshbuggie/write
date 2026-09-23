@@ -2,6 +2,7 @@ import { Extension, type Editor } from "@tiptap/core";
 import { TableCell, TableHeader } from "@tiptap/extension-table";
 import { Fragment, Slice, type Node, type ResolvedPos, type Schema } from "@tiptap/pm/model";
 import { Plugin, PluginKey } from "@tiptap/pm/state";
+import type { EditorView } from "@tiptap/pm/view";
 
 const CELLS = new Set(["tableCell", "tableHeader"]);
 
@@ -28,9 +29,22 @@ function flattenToParagraph(slice: Slice, schema: Schema): Slice {
 }
 
 /**
+ * Where the drop being handled lands, per view. ProseMirror calls transformPasted for a drop before it
+ * knows the drop position (the selection is still the dragged text or the old caret), so it's noted
+ * when the drop event arrives, just before ProseMirror handles it, and forgotten right after.
+ */
+const dropTargets = new WeakMap<EditorView, number>();
+
+/** Where pasted or dropped content goes: the drop position during a drop, otherwise the selection. */
+function insertionPoint(view: EditorView): ResolvedPos {
+  const drop = dropTargets.get(view);
+  return drop === undefined ? view.state.selection.$from : view.state.doc.resolve(drop);
+}
+
+/**
  * Typing in a table cell, before the default handlers: Enter moves to the next cell like Tab (adding a
- * row at the end), and paste becomes one line, since blocks would split the table (a cell holds a single
- * paragraph). Runs before the markdown paste handler, which would insert parsed blocks.
+ * row at the end), and paste or drop becomes one line, since blocks would split the table (a cell holds
+ * a single paragraph). Runs before the markdown paste handler, which would insert parsed blocks.
  */
 const TableCellInput = Extension.create({
   name: "tableCellInput",
@@ -56,10 +70,17 @@ const TableCellInput = Extension.create({
             if (text) view.dispatch(view.state.tr.insertText(text));
             return true;
           },
+          handleDOMEvents: {
+            drop(view, event) {
+              const target = view.posAtCoords({ left: event.clientX, top: event.clientY });
+              if (target) dropTargets.set(view, target.pos);
+              // ProseMirror handles the drop synchronously after this handler returns.
+              queueMicrotask(() => dropTargets.delete(view));
+              return false;
+            },
+          },
           transformPasted(slice, view) {
-            return isInTableCell(view.state.selection.$from)
-              ? flattenToParagraph(slice, view.state.schema)
-              : slice;
+            return isInTableCell(insertionPoint(view)) ? flattenToParagraph(slice, view.state.schema) : slice;
           },
         },
       }),

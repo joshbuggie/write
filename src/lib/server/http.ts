@@ -1,6 +1,6 @@
 import { ERROR_STATUS, type ApiErrorBody, type ErrorCode } from "@/lib/api-contract";
 import { MAX_NOTE_BYTES } from "@/lib/constants";
-import { authenticateRequest, lockoutMessage, lockoutRetryAfterS } from "./auth";
+import { authenticateRequest, lockoutResponse } from "./auth";
 import { StorageError } from "./storage";
 
 /**
@@ -52,7 +52,8 @@ function errorJson(
 
 /** 429 for a password check refused by the brute-force lockout; Retry-After tells scripts when to retry. */
 export function rateLimitedError(): HttpError {
-  return new HttpError("rate_limited", lockoutMessage(), { "Retry-After": String(lockoutRetryAfterS()) });
+  const { retryAfterS, message } = lockoutResponse();
+  return new HttpError("rate_limited", message, { "Retry-After": String(retryAfterS) });
 }
 
 /** Maps any thrown value to an ApiErrorBody response. Unknown errors are logged and never leak details. */

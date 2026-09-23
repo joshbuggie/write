@@ -25,6 +25,27 @@ export async function downloadFile(href: string): Promise<void> {
 }
 
 /**
+ * What to download: an /api/download URL, or a function that works it out once the open note is saved.
+ * The function form is for the open note itself: a rename or move may still be in flight when the user
+ * clicks, and the URL must name the note where it ends up, not where it was.
+ */
+export type DownloadTarget = string | (() => string | Promise<string>);
+
+/**
+ * Saves the open note (`flush`, which also waits for a rename or move in flight), then resolves the target
+ * and downloads it. Resolving after the flush is what makes a download clicked mid-rename fetch the new
+ * name instead of failing with "not found".
+ */
+export async function flushThenDownload(
+  flush: () => Promise<void>,
+  target: DownloadTarget,
+  download: (href: string) => Promise<void> = downloadFile,
+): Promise<void> {
+  await flush();
+  await download(typeof target === "string" ? target : await target());
+}
+
+/**
  * The file name from a Content-Disposition header: the exact UTF-8 `filename*` first (the server sends it
  * for every download), then the ASCII `filename` fallback. Null when the header has neither.
  */

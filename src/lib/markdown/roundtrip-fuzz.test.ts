@@ -1,6 +1,8 @@
 import { Editor, type JSONContent } from "@tiptap/core";
 import { TextSelection } from "@tiptap/pm/state";
 import { afterEach, describe, expect, it } from "vitest";
+import { Marked } from "marked";
+import { isAutolinkLiteral } from "./autolinks";
 import { createExtensions, createMarkdownManager } from "./extensions";
 import { serializeBody } from "./serialize";
 
@@ -13,6 +15,8 @@ import { serializeBody } from "./serialize";
  * "The same document" is exact for blocks, text, links, code and line breaks, after the whitespace rules
  * markdown itself imposes (see canonical). Bold, italic and strikethrough are never invented; they may
  * only be given up where marked can't read them back (see renderInlineMarkdown), which must stay rare.
+ * A bare URL or email typed as plain text re-opens as a link (GFM autolinks it), and the next save
+ * writes that link; nothing else may change on a second save.
  */
 
 function generator(seed: number) {
@@ -48,6 +52,12 @@ const WORDS = [
   "a_b",
   "2*3",
   "[x]",
+  // Bare addresses, which marked links on re-open (accepted: see withoutAutolinks).
+  "https://x.com/docs",
+  "https://x.com/~u/a_b_",
+  "www.x.com",
+  "www.x.com/a*b",
+  "me@x.com",
 ];
 const HREFS = ["https://example.com", "https://y.com/a)b", "notes/a b.md", "https://w.org/Foo_(bar)"];
 
@@ -123,8 +133,9 @@ const STEPS: Step[] = [
   { name: "strike", run: (e, r) => (selectWords(e, r), e.commands.toggleStrike()) },
   { name: "code", run: (e, r) => (selectWords(e, r), e.commands.toggleCode()) },
   { name: "link", run: (e, r) => (selectWords(e, r), e.commands.setLink({ href: r.pick(HREFS) })) },
-  // Enter over a range hits a Tiptap splitBlock bug (it throws on some ranges), unrelated to markdown.
   { name: "enter", run: (e) => (collapse(e), press(e, "Enter")) },
+  // Over a range that may span blocks, it deletes the range first (see EnterOverSelection).
+  { name: "enterOverWords", run: (e, r) => (selectWords(e, r), press(e, "Enter")) },
   { name: "shiftEnter", run: (e) => press(e, "Enter", true) },
   { name: "backspace", run: (e) => press(e, "Backspace") },
   { name: "heading", run: (e, r) => e.commands.toggleHeading({ level: r.pick([1, 2, 3] as const) }) },
@@ -244,6 +255,61 @@ function withoutEmphasis(node: JSONContent): JSONContent {
   return { ...node, marks: marks?.length ? marks : undefined, content };
 }
 
+/** Whether a link is one GFM makes from bare text: the address itself, "www." or an email. */
+const isAutolink = (text: string, href: unknown) =>
+  href === text || href === `http://${text}` || href === `mailto:${text}`;
+
+const hrefOf = (node: JSONContent) => node.marks?.find((mark) => mark.type === "link")?.attrs?.href;
+
+/**
+ * How many characters at the start of a link's text GFM linked by itself: all of them for a bare URL
+ * or email, or the address at the start of a link it merged into (ProseMirror joins adjacent links to
+ * the same address: "me@x.com" before a link to mailto:me@x.com).
+ */
+function autolinkedLength(text: string, href: unknown): number {
+  if (isAutolink(text, href)) return text.length;
+  const address = String(href).replace(/^(?:mailto:|http:\/\/)/, "");
+  return isAutolink(address, href) && text.startsWith(address) ? address.length : 0;
+}
+
+/**
+ * The document without the links GFM adds to bare URLs and emails (and the editor adds while typing).
+ * A link's text may span several text nodes (formatting changes inside it), so they're judged together.
+ */
+function withoutAutolinks(node: JSONContent): JSONContent {
+  const content = node.content?.map(withoutAutolinks);
+  if (!content) return node;
+  const out: JSONContent[] = [];
+  for (let start = 0; start < content.length;) {
+    const href = hrefOf(content[start]);
+    let end = start + 1;
+    while (href !== undefined && end < content.length && hrefOf(content[end]) === href) end++;
+    const linked = content.slice(start, end);
+    let unlink =
+      href === undefined ? 0 : autolinkedLength(linked.map((child) => child.text ?? "").join(""), href);
+    for (const child of linked) {
+      const text = child.text ?? "";
+      const cut = Math.min(unlink, text.length);
+      const marks = child.marks?.filter((mark) => mark.type !== "link");
+      if (cut > 0) out.push({ ...child, text: text.slice(0, cut), marks: marks?.length ? marks : undefined });
+      if (cut < text.length || !child.text) out.push(cut > 0 ? { ...child, text: text.slice(cut) } : child);
+      unlink -= cut;
+    }
+    start = end;
+  }
+  return { ...node, content: out };
+}
+
+/** Whether marked links a bare URL or email somewhere in the markdown. */
+function hasBareAddress(markdown: string): boolean {
+  const marked = new Marked({ gfm: true });
+  let found = false;
+  marked.walkTokens(marked.lexer(markdown), (token) => {
+    if (isAutolinkLiteral(token)) found = true;
+  });
+  return found;
+}
+
 /** The emphasis marks of every character, in document order. */
 function emphasisByCharacter(node: JSONContent, out: Set<string>[] = []): Set<string>[] {
   if (node.type === "text") {
@@ -254,10 +320,42 @@ function emphasisByCharacter(node: JSONContent, out: Set<string>[] = []): Set<st
   return out;
 }
 
+/**
+ * Asserts that `got` is `want` exactly but for emphasis, which may only be given up, never invented.
+ * Returns how many characters kept or lost a bold, italic or strikethrough mark.
+ */
+function expectSameDocument(context: object, got: JSONContent, want: JSONContent) {
+  // Everything but emphasis exactly: blocks, text, links, code, line breaks.
+  expect({ ...context, doc: withoutEmphasis(got) }).toEqual({ ...context, doc: withoutEmphasis(want) });
+  // Emphasis is never invented, only given up where marked can't read it back (counted by the caller).
+  const wanted = emphasisByCharacter(want);
+  const found = emphasisByCharacter(got);
+  const invented = found.flatMap((marks, i) => [...marks].filter((mark) => !wanted[i].has(mark)));
+  expect({ ...context, invented }).toEqual({ ...context, invented: [] });
+  const count = { kept: 0, lost: 0 };
+  wanted.forEach((marks, i) => marks.forEach((mark) => (found[i].has(mark) ? count.kept++ : count.lost++)));
+  return count;
+}
+
 const editors: Editor[] = [];
 afterEach(() => {
   editors.splice(0).forEach((editor) => editor.destroy());
 });
+
+/**
+ * An editor opened on the markdown, as the app opens a note: from initial content, so the link
+ * extension's autolinking (which runs on edits, setContent included) doesn't touch it.
+ */
+function openNote(markdown: string) {
+  const editor = new Editor({
+    element: null,
+    extensions: createExtensions(),
+    content: markdown,
+    contentType: "markdown",
+  });
+  editors.push(editor);
+  return editor;
+}
 
 function buildDocument(seed: number, steps: number) {
   const rnd = generator(seed);
@@ -291,24 +389,34 @@ describe("editing round-trip fuzz", () => {
   it.each(SEEDS)("seed %i re-opens as the same document", (seed) => {
     const { editor, log } = buildDocument(seed, STEP_COUNT);
     const markdown = serializeBody(editor);
-    const want = canonical(editor.state.doc.toJSON());
-    const got = canonical(editor.schema.nodeFromJSON(manager.parse(markdown)).toJSON());
+    const reopen = (md: string) =>
+      withoutAutolinks(canonical(editor.schema.nodeFromJSON(manager.parse(md)).toJSON()));
+    const want = withoutAutolinks(canonical(editor.state.doc.toJSON()));
+    const got = reopen(markdown);
     const context = { seed, steps: log.join(" "), markdown };
 
-    // Everything but emphasis exactly: blocks, text, links, code, line breaks.
-    expect({ ...context, doc: withoutEmphasis(got) }).toEqual({ ...context, doc: withoutEmphasis(want) });
-    // Emphasis is never invented, only given up where marked can't read it back (counted below).
-    const wanted = emphasisByCharacter(want);
-    const found = emphasisByCharacter(got);
-    const invented = found.flatMap((marks, i) => [...marks].filter((mark) => !wanted[i].has(mark)));
-    expect({ ...context, invented }).toEqual({ ...context, invented: [] });
-    wanted.forEach((marks, i) =>
-      marks.forEach((mark) => (found[i].has(mark) ? emphasis.kept++ : emphasis.lost++)),
-    );
+    const { kept, lost } = expectSameDocument(context, got, want);
+    emphasis.kept += kept;
+    emphasis.lost += lost;
 
-    // Saving the re-opened document writes the same bytes.
-    editor.commands.setContent(markdown, { contentType: "markdown" });
-    expect(serializeBody(editor)).toBe(markdown);
+    // Saving the re-opened document writes the same bytes, but for bare URLs, which are links now: the
+    // next save writes them as links (the same document, but a link may give up formatting at its
+    // edges), which can let another URL be written bare. That settles within a few saves.
+    let saved = markdown;
+    let doc = got;
+    for (let round = 0; round < 4; round++) {
+      const resaved = serializeBody(openNote(saved));
+      if (resaved === saved) break;
+      expect({ ...context, saved, bareUrl: hasBareAddress(saved) }).toEqual({
+        ...context,
+        saved,
+        bareUrl: true,
+      });
+      const next = reopen(resaved);
+      expectSameDocument({ ...context, resaved }, next, doc);
+      [saved, doc] = [resaved, next];
+    }
+    expect(serializeBody(openNote(saved))).toBe(saved);
   });
 
   it("gives up emphasis only in the rare nestings marked can't read", () => {

@@ -427,8 +427,15 @@ describe("auth", () => {
       }
       const locked = await attempt("pw");
       expect(locked.status).toBe(429);
-      expect(await errorCode(locked)).toBe("rate_limited");
-      expect(Number(locked.headers.get("retry-after"))).toBeGreaterThan(0);
+      // The login form shows this message as is, so it must carry the same wait as Retry-After.
+      const retryAfterS = Number(locked.headers.get("retry-after"));
+      expect(retryAfterS).toBeGreaterThan(0);
+      expect(await locked.json()).toEqual({
+        error: {
+          code: "rate_limited",
+          message: `Too many sign-in attempts. Try again in ${Math.ceil(retryAfterS / 60)} minutes.`,
+        },
+      });
     }));
 
   it("parallel wrong passwords (login and Bearer) share one budget", () =>

@@ -154,10 +154,16 @@ export function lockoutRetryAfterS(now: number = Date.now()): number {
   return Math.max(0, Math.ceil((guardState().lockedUntil - now) / 1000));
 }
 
-/** User-facing text for a 429, shared by the login route and the proxy. */
-export function lockoutMessage(now: number = Date.now()): string {
-  const minutes = Math.max(1, Math.ceil(lockoutRetryAfterS(now) / 60));
-  return `Too many wrong passwords. Try again in ${minutes} minute${minutes === 1 ? "" : "s"}.`;
+/**
+ * Everything a 429 needs, computed from one clock reading so the Retry-After header and the minutes in
+ * the message always agree. The login form shows `message` as is, so it must stand on its own for the
+ * owner, who may be locked out by someone else's guesses.
+ */
+export function lockoutResponse(now: number = Date.now()): { retryAfterS: number; message: string } {
+  const retryAfterS = lockoutRetryAfterS(now);
+  const minutes = Math.max(1, Math.ceil(retryAfterS / 60));
+  const message = `Too many sign-in attempts. Try again in ${minutes} minute${minutes === 1 ? "" : "s"}.`;
+  return { retryAfterS, message };
 }
 
 /** Test helper: forget all recorded failures and lift any lockout. */

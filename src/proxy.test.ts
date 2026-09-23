@@ -53,7 +53,12 @@ describe("proxy", () => {
       const locked = guess("pw");
       expect(locked.status).toBe(429);
       expect(Number(locked.headers.get("retry-after"))).toBeGreaterThan(0);
-      expect(await locked.json()).toEqual({ error: { code: "rate_limited", message: expect.any(String) } });
+      expect(await locked.json()).toEqual({
+        error: {
+          code: "rate_limited",
+          message: expect.stringMatching(/^Too many sign-in attempts. Try again in \d+ minutes?\.$/),
+        },
+      });
       // A signed-in browser is unaffected.
       expect(passes(proxy(request("/api/tree", { cookie: `write_session=${createSessionToken()}` })))).toBe(
         true,

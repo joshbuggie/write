@@ -1,6 +1,8 @@
 import { Editor, getSchema, type JSONContent } from "@tiptap/core";
 import { Slice } from "@tiptap/pm/model";
 import { TextSelection } from "@tiptap/pm/state";
+import { dropPoint } from "@tiptap/pm/transform";
+import type { EditorView } from "@tiptap/pm/view";
 import { afterEach, describe, expect, it } from "vitest";
 import { TOOLBAR_ITEMS } from "@/components/editor/toolbar-items";
 import { createExtensions, createMarkdownManager } from "./extensions";
@@ -39,13 +41,19 @@ function editorWith(markdown: string): Editor {
   return editor;
 }
 
-/** Puts the caret right after the first occurrence of `after` in the document text. */
-function caretAfter(editor: Editor, after: string): void {
+/** The position right after the first occurrence of `after` in the document text. */
+function positionAfter(editor: Editor, after: string): number {
   let target = -1;
   editor.state.doc.descendants((node, pos) => {
     const index = node.isText ? (node.text ?? "").indexOf(after) : -1;
     if (target === -1 && index !== -1) target = pos + index + after.length;
   });
+  return target;
+}
+
+/** Puts the caret right after the first occurrence of `after` in the document text. */
+function caretAfter(editor: Editor, after: string): void {
+  const target = positionAfter(editor, after);
   editor.commands.command(({ tr }) => (tr.setSelection(TextSelection.create(tr.doc, target)), true));
 }
 
@@ -231,6 +239,34 @@ describe("table cells hold one line of text", () => {
     expect(pasted.content.firstChild?.textContent).toBe("p q");
   });
 
+  /**
+   * Drops `blocks` at `pos` the way ProseMirror does: the drop event first, then transformPasted, then
+   * the slice goes where it fits. A headless editor has no layout, so the view answers with `pos`.
+   */
+  function drop(editor: Editor, pos: number, blocks: JSONContent[]) {
+    const view = { state: editor.state, posAtCoords: () => ({ pos, inside: -1 }) } as unknown as EditorView;
+    const input = editor.state.plugins.find((plugin) => plugin.props.handleDOMEvents?.drop)!;
+    input.props.handleDOMEvents!.drop!.call(input, view, { clientX: 0, clientY: 0 } as DragEvent);
+    const doc = editor.schema.nodeFromJSON({ type: "doc", content: blocks });
+    const slice = input.props.transformPasted!.call(input, Slice.maxOpen(doc.content), view, false);
+    const at = dropPoint(editor.state.doc, pos, slice) ?? pos;
+    editor.view.dispatch(editor.state.tr.replaceRange(at, at, slice));
+  }
+
+  it("drops blocks into a cell as one line, wherever the caret is", () => {
+    const editor = editorWith(table + "\nPara two\n");
+    caretAfter(editor, "Para two");
+    drop(editor, positionAfter(editor, "1"), [paragraph("p"), paragraph("q")]);
+    expect(serializeBody(editor)).toBe("| a    | b   |\n| ---- | --- |\n| 1p q | 2   |\n\nPara two\n");
+  });
+
+  it("keeps blocks dropped outside the table as blocks, even with the caret in a cell", () => {
+    const editor = editorWith(table + "\nPara two\n");
+    caretAfter(editor, "1");
+    drop(editor, positionAfter(editor, "Para two"), [paragraph("p"), paragraph("q")]);
+    expect(serializeBody(editor)).toBe(table + "\nPara twop\n\nq\n");
+  });
+
   it("keeps the first row as the header row", () => {
     const editor = inCell();
     editor.commands.command(({ tr, state }) => {
@@ -298,5 +334,44 @@ describe("empty list items", () => {
     };
     expect(manager.serialize(doc)).toBe("- &nbsp;\n\n  x");
     expect(normalized(manager.parse(manager.serialize(doc)))).toEqual(normalized(doc));
+  });
+});
+
+describe("Enter over a selection that spans blocks", () => {
+  it.each([
+    ["- alpha\n- beta\n", "- al\n- ta\n"],
+    ["1. alpha\n2. beta\n", "1. al\n2. ta\n"],
+    ["- [ ] alpha\n- [ ] beta\n", "- [ ] al\n- [ ] ta\n"],
+    ["# alpha\n\nbeta\n", "# al\n\n# ta\n"],
+  ])("deletes the selection in %j, then splits at the caret", (markdown, saved) => {
+    const editor = editorWith(markdown);
+    const [from, to] = [positionAfter(editor, "al"), positionAfter(editor, "be")];
+    editor.commands.command(({ tr }) => (tr.setSelection(TextSelection.create(tr.doc, from, to)), true));
+    expect(press(editor, "Enter")).toBe(true);
+    expect(serializeBody(editor)).toBe(saved);
+  });
+
+  it.each([
+    "- alpha\n  - beta\n    - gamma\n",
+    "- [ ] alpha\n  - [ ] beta\n- [x] gamma\n",
+    "1. alpha\n   - beta\n2. gamma\n",
+    "> - alpha\n> - beta\n\npara\n",
+    "# head\n\n- alpha\n- beta\n",
+    "- a\n\n  ```\n  code\n  ```\n- b\n",
+  ])("never throws for any range of %j, and what it saves re-opens the same", (markdown) => {
+    const editor = editorWith(markdown);
+    const initial = editor.state;
+    const size = initial.doc.content.size;
+    for (let from = 0; from < size; from++) {
+      for (let to = from + 1; to <= size; to++) {
+        editor.view.updateState(initial);
+        editor.commands.command(({ tr }) => {
+          tr.setSelection(TextSelection.between(tr.doc.resolve(from), tr.doc.resolve(to)));
+          return true;
+        });
+        expect(() => press(editor, "Enter")).not.toThrow();
+        expect(roundTrip(serializeBody(editor))).toBe(serializeBody(editor));
+      }
+    }
   });
 });

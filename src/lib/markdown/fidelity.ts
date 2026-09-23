@@ -1,4 +1,4 @@
-import { Marked, type Token, type TokensList } from "marked";
+import { Lexer, Marked, type Token, type Tokens, type TokensList } from "marked";
 import { finalizeMarkdown } from "./file-format";
 
 export type LossReason = "html" | "footnotes" | "math" | "references" | "escapes" | "structure";
@@ -16,14 +16,60 @@ const FOOTNOTE_DEFINITION = /^\[\^[^\]]+\]:/m;
 export const MAX_VISUAL_PARAGRAPH_CHARS = 16 * 1024;
 
 /**
- * Cheap, linear pre-check to run before parsing a note (or a paste) for the visual editor: true when
- * some paragraph outside fenced code is too long to parse without freezing the tab.
+ * The longest text marked reads as one inline run: a paragraph, a list item's text, a heading or a
+ * table cell. Each is inline-lexed on its own, so a long list, table or quote is many short runs.
+ * Only the block level is lexed here, which is linear; the inline level is the slow part.
+ */
+function longestInlineRun(markdown: string): number {
+  let longest = 0;
+  const visit = (tokens: Token[]) =>
+    tokens.forEach((token) => {
+      if (token.type === "paragraph" || token.type === "text" || token.type === "heading") {
+        longest = Math.max(longest, token.text.length);
+      } else if (token.type === "table") {
+        const cells = [token.header, ...token.rows].flat() as Tokens.TableCell[];
+        cells.forEach((cell) => (longest = Math.max(longest, cell.text.length)));
+      } else if (token.type === "list") {
+        (token as Tokens.List).items.forEach((item) => visit(item.tokens));
+      } else if (token.type === "blockquote") {
+        visit(token.tokens ?? []);
+      }
+    });
+  visit(new Lexer({ gfm: true }).blockTokens(markdown.replace(/\r\n?/g, "\n")));
+  return longest;
+}
+
+/** Quotes or list items nested deeper than this on one line ("> > > …") open as source: marked recurses per level. */
+const MAX_NESTING = 32;
+const CONTAINER_MARKER = /^[ \t]*(?:>|(?:[-+*]|\d{1,9}[.)])(?=[ \t]|$))[ \t]?/;
+
+/** Whether a line opens more nested quotes or list items than MAX_NESTING. Linear. */
+function nestsTooDeep(markdown: string): boolean {
+  return markdown.split("\n").some((line) => {
+    let rest = line;
+    for (let depth = 0; depth <= MAX_NESTING; depth++) {
+      const marker = CONTAINER_MARKER.exec(rest);
+      if (!marker) return false;
+      rest = rest.slice(marker[0].length);
+    }
+    return true;
+  });
+}
+
+/**
+ * Pre-check to run before parsing a note (or a paste) for the visual editor: true when some paragraph
+ * (or list item, heading, table cell) is too long to parse without freezing the tab, or quotes and
+ * lists nest so deep that parsing could overflow the stack.
  */
 export function hasOversizedParagraph(markdown: string): boolean {
-  return markdown
-    .replace(FENCED_CODE, "")
-    .split(/\n[ \t]*\n/)
-    .some((block) => block.length > MAX_VISUAL_PARAGRAPH_CHARS);
+  if (nestsTooDeep(markdown)) return true;
+  // No paragraph can be longer than the whole text: most notes never need the lexer here.
+  if (markdown.length <= MAX_VISUAL_PARAGRAPH_CHARS) return false;
+  try {
+    return longestInlineRun(markdown) > MAX_VISUAL_PARAGRAPH_CHARS;
+  } catch {
+    return true; // marked gave up on it (too deeply nested), and so would the editor
+  }
 }
 
 const normalizeLabel = (label: string) => label.replace(/\s+/g, " ").toLowerCase();
@@ -115,6 +161,26 @@ function dropsMeaningfulEscapes(original: string, roundTripped: string): boolean
   );
 }
 
+/** A list marker with only whitespace after it: an empty list item where it starts a block. */
+const EMPTY_ITEM_WITH_SPACE = /^ {0,3}(?:[-+*]|\d{1,9}[.)])[ \t]+$/;
+
+/**
+ * An empty list item written with a trailing space ("1. " alone on a line, as older versions of write
+ * saved it) at the start of a paragraph. CommonMark and GitHub read an empty list item there, but marked
+ * (and so the editor) reads text, which the round trip would escape ("1\.") and keep as a paragraph.
+ */
+function hasMisreadEmptyItem(tokens: Token[]): boolean {
+  return tokens.some((token) => {
+    if (token.type === "paragraph" || token.type === "text") {
+      return EMPTY_ITEM_WITH_SPACE.test(token.raw.split("\n")[0]);
+    }
+    if (token.type === "list") {
+      return (token as Tokens.List).items.some((item) => hasMisreadEmptyItem(item.tokens));
+    }
+    return token.type === "blockquote" && hasMisreadEmptyItem(token.tokens ?? []);
+  });
+}
+
 /** Whitespace around block-level tags, which differs between loose and tight lists. */
 const BLOCK_TAG_WITH_SPACE =
   /\s*(<\/?(?:ul|ol|li|blockquote|h[1-6]|pre|hr|table|thead|tbody|tr|th|td)\b[^>]*>)\s*/g;
@@ -168,6 +234,7 @@ export function analyzeFidelity(originalBody: string, roundTripped: string): Fid
   }
   if (hasUnusedDefinition(tokens, usedLabels)) reasons.push("references");
   if (dropsMeaningfulEscapes(original, output)) reasons.push("escapes");
+  if (hasMisreadEmptyItem(tokens)) reasons.push("structure");
   if (reasons.length > 0) return { kind: "lossy", reasons };
 
   const roundTrippedTokens = new Marked({ gfm: true }).lexer(roundTripped);

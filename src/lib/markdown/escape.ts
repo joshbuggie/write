@@ -1,3 +1,5 @@
+import { autolinkSpans, LINK_START } from "./autolinks";
+
 /**
  * Conservative markdown escaping for text the user typed in the visual editor.
  *
@@ -12,23 +14,45 @@ const BACKSLASH_BEFORE_PUNCT_OR_END = /\\(?=[!-/:-@[-`{-~]|$)/g;
 /**
  * Escape one text node's content (never code: the manager skips code contexts before calling us).
  * The text is escaped in isolation, so anything at the node's edges is treated as "could combine".
+ * Bare URLs (see autolinkSpans) are left as typed, because marked links them with every backslash
+ * inside ("https://x.com/\~u" would change the link); `inLink` turns that off for a link's own text,
+ * where marked doesn't autolink and a "*" would be read as emphasis.
+ * `plainAddresses` escapes URLs like other text and keeps marked from linking them (see LINK_START),
+ * for the rare URL that would swallow the syntax after it.
  */
-export function encodeText(text: string): string {
-  const escaped = text
-    // A backslash only needs doubling before punctuation, or at the end where the next node may start with it.
-    .replace(BACKSLASH_BEFORE_PUNCT_OR_END, "\\\\")
-    // & only where it would form an entity; < only where a tag, comment or autolink could start.
-    .replace(/&(?=#?[A-Za-z0-9]+;)/g, "&amp;")
-    .replace(/<(?=[A-Za-z/!?])/g, "&lt;")
-    .replace(/`/g, "\\`")
-    // * and ~ can't open or close emphasis when surrounded by whitespace ("5 * 3").
-    .replace(/[*~]/g, (c, i: number, s: string) =>
-      /\s/.test(s[i - 1] ?? "") && /\s/.test(s[i + 1] ?? "") ? c : "\\" + c,
-    )
-    // _ can't open or close emphasis between two letters/digits, so snake_case stays readable.
-    .replace(/(?<![\p{L}\p{N}])_|_(?![\p{L}\p{N}])/gu, "\\_");
+export function encodeText(text: string, { inLink = false, plainAddresses = false } = {}): string {
+  if (plainAddresses) {
+    // Split where a link would start; escaping the pieces alone escapes them the same way.
+    const pieces = text.split(LINK_START).map(escapeProse);
+    return escapeLinkBrackets(pieces.join("\\"));
+  }
+  let escaped = "";
+  let last = 0;
+  for (const [start, end] of inLink ? [] : autolinkSpans(text)) {
+    escaped += escapeProse(text.slice(last, start)) + escapeEntities(text.slice(start, end));
+    last = end;
+  }
   // [ and ] only where a link or reference definition could form; keeps [[wiki]] and [^1].
-  return escapeLinkBrackets(escaped);
+  return escapeLinkBrackets(escaped + escapeProse(text.slice(last)));
+}
+
+/** & only where it would form an entity; < only where a tag, comment or autolink could start. */
+const escapeEntities = (text: string) =>
+  text.replace(/&(?=#?[A-Za-z0-9]+;)/g, "&amp;").replace(/<(?=[A-Za-z/!?])/g, "&lt;");
+
+/** Everything but brackets (escapeLinkBrackets looks at the whole text node). */
+function escapeProse(text: string): string {
+  // A backslash only needs doubling before punctuation, or at the end where the next node may start with it.
+  return (
+    escapeEntities(text.replace(BACKSLASH_BEFORE_PUNCT_OR_END, "\\\\"))
+      .replace(/`/g, "\\`")
+      // * and ~ can't open or close emphasis when surrounded by whitespace ("5 * 3").
+      .replace(/[*~]/g, (c, i: number, s: string) =>
+        /\s/.test(s[i - 1] ?? "") && /\s/.test(s[i + 1] ?? "") ? c : "\\" + c,
+      )
+      // _ can't open or close emphasis between two letters/digits, so snake_case stays readable.
+      .replace(/(?<![\p{L}\p{N}])_|_(?![\p{L}\p{N}])/gu, "\\_")
+  );
 }
 
 /** What may follow a "]" to form a link, a reference link or a reference definition. */
@@ -147,6 +171,7 @@ export function escapeLetterListMarker(markdown: string): string {
 }
 
 let escapeTablePipes = false;
+let plainAddresses = false;
 
 /**
  * Render table cell content with every `|` escaped (code spans included, as GFM requires), so a pipe
@@ -162,7 +187,27 @@ export function withEscapedTablePipes<T>(render: () => T): T {
   }
 }
 
+/**
+ * Render text with bare addresses written so marked doesn't link them (see encodeText), for the
+ * inline serializer's retry when an address swallowed the syntax after it. Scoped like the pipes flag.
+ */
+export function withPlainAddresses<T>(render: () => T): T {
+  const previous = plainAddresses;
+  plainAddresses = true;
+  try {
+    return render();
+  } finally {
+    plainAddresses = previous;
+  }
+}
+
 const PATCHED = Symbol.for("write.escapePatched");
+
+/** Whether a text node (as the manager passes it) carries a link mark. */
+const hasLink = (node: unknown) =>
+  ((node as { marks?: Array<string | { type?: string }> } | null)?.marks ?? []).some(
+    (mark) => (typeof mark === "string" ? mark : mark.type) === "link",
+  );
 
 type PatchableManager = {
   encodeTextForMarkdown?: (text: string, node: unknown, parent?: unknown) => string;
@@ -180,7 +225,10 @@ export function patchMarkdownManager(manager: unknown): boolean {
   const original = m.encodeTextForMarkdown.bind(m);
   // Probe: the original returns "*" unchanged only inside code contexts (code mark / code block parent).
   m.encodeTextForMarkdown = (text, node, parent) => {
-    const encoded = original("*", node, parent) === "*" ? text : encodeText(text);
+    const encoded =
+      original("*", node, parent) === "*"
+        ? text
+        : encodeText(text, { inLink: hasLink(node), plainAddresses });
     return escapeTablePipes ? encoded.replace(/\|/g, "\\|") : encoded;
   };
   m[PATCHED] = true;

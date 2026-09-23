@@ -31,12 +31,17 @@ function canDo(role: "open" | "close", char: string, before: string, after: stri
   return right && (char !== "_" || !left || isPunctuation(after));
 }
 
+/** A delimiter marked would not read as intended: the atom and mark to give up so it parses next time. */
+export type Culprit = { atom: number; mark: string };
+
 /**
- * The first delimiter that marked would not read as intended, as the atom and mark to give up so the
- * next attempt parses; null when every delimiter run can do its job. Adjacent delimiters with the same
- * character form one run, so a run that must both close and open is always a culprit.
+ * Every delimiter run that marked would not read as intended, in order, each as the atom and mark to give
+ * up so the next attempt parses; empty when every delimiter run can do its job. Adjacent delimiters with
+ * the same character form one run, so a run that must both close and open is always a culprit. One pass,
+ * so a paragraph full of mark edges next to punctuation isn't rescanned once per culprit.
  */
-export function findUnparseableDelimiter(pieces: Piece[]): { atom: number; mark: string } | null {
+export function findUnparseableDelimiters(pieces: Piece[]): Culprit[] {
+  const culprits: Culprit[] = [];
   let before = ""; // the last character written so far
   for (let i = 0; i < pieces.length;) {
     const char = pieces[i].delimiter ? pieces[i].md[0] : "";
@@ -53,11 +58,12 @@ export function findUnparseableDelimiter(pieces: Piece[]): { atom: number; mark:
     const openers = run.filter((piece) => piece.delimiter!.role === "open");
     const closers = run.filter((piece) => piece.delimiter!.role === "close");
     if (openers.length && (closers.length || !canDo("open", char, before, after))) {
-      return openers.at(-1)!.delimiter!;
+      culprits.push(openers.at(-1)!.delimiter!);
+    } else if (closers.length && !canDo("close", char, before, after)) {
+      culprits.push(closers[0].delimiter!);
     }
-    if (closers.length && !canDo("close", char, before, after)) return closers[0].delimiter!;
     before = char;
     i = end;
   }
-  return null;
+  return culprits;
 }

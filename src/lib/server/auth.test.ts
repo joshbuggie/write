@@ -6,7 +6,7 @@ import {
   createSessionToken,
   isAuthEnabled,
   isSecureRequest,
-  lockoutMessage,
+  lockoutResponse,
   lockoutRetryAfterS,
   LOCKOUT_MS,
   resetPasswordGuard,
@@ -84,7 +84,18 @@ describe("attemptPassword", () => {
     expect(attemptPassword("guess", NOW + 10)).toBe("rate_limited");
     expect(attemptPassword("hunter2", NOW + 10)).toBe("rate_limited");
     expect(lockoutRetryAfterS(NOW + 9)).toBe(LOCKOUT_MS / 1000);
-    expect(lockoutMessage(NOW + 9)).toBe("Too many wrong passwords. Try again in 15 minutes.");
+    expect(lockoutResponse(NOW + 9)).toEqual({
+      retryAfterS: LOCKOUT_MS / 1000,
+      message: "Too many sign-in attempts. Try again in 15 minutes.",
+    });
+    // Minutes round up from the same seconds as Retry-After, and never say "0 minutes".
+    expect(lockoutResponse(NOW + 9 + LOCKOUT_MS - 61_000).message).toBe(
+      "Too many sign-in attempts. Try again in 2 minutes.",
+    );
+    expect(lockoutResponse(NOW + 9 + LOCKOUT_MS - 1_000)).toEqual({
+      retryAfterS: 1,
+      message: "Too many sign-in attempts. Try again in 1 minute.",
+    });
 
     // After the lockout the budget starts over.
     const after = NOW + 9 + LOCKOUT_MS;

@@ -13,7 +13,7 @@ import {
 } from "@/lib/drafts";
 import { splitFrontmatter } from "@/lib/markdown/file-format";
 import type { Note } from "@/lib/types";
-import { takeHandover } from "./known-notes";
+import { takeHandover, type Handover } from "./known-notes";
 import { isUntitledName, useNoteSync } from "./use-note-sync";
 
 /** What the inner editor is loaded from. Bumping `key` remounts it (mode switch, reload from disk, draft). */
@@ -27,8 +27,8 @@ type Restore = {
   baseline: string;
   /** Force-save it right away ("Keep mine" on a draft conflict). */
   force: boolean;
-  /** Where to put the caret afterwards (a rename handover), if anywhere in particular. */
-  caret: number | null;
+  /** What the editor had before a rename remounted it (its exact document and caret), if this is one. */
+  handover: Handover | null;
 };
 
 /**
@@ -60,6 +60,8 @@ export function useEditorSession(
   const adoptedKeyRef = useRef(-1);
   const lastKeyRef = useRef(0);
   const restoreRef = useRef<Restore | null>(null);
+  /** The rename handover given to the editor with this key, for a re-announced editor (see handleReady). */
+  const handedOverRef = useRef<{ key: number; handover: Handover } | null>(null);
 
   /** Remounts the editor with `content` as the clean baseline at `version`; returns the new key. */
   function reloadEditor(content: string, version: string, request = source.request) {
@@ -85,7 +87,7 @@ export function useEditorSession(
     sync.attach(ready.handle);
     setMode(ready.mode);
     setSourceReason(ready.sourceReason);
-    if (adoptedKeyRef.current === source.key) return; // Strict Mode re-ran the editor's effect
+    if (adoptedKeyRef.current === source.key) return resumeHandover(ready); // Strict Mode re-ran its effects
     const firstOpen = adoptedKeyRef.current === -1;
     adoptedKeyRef.current = source.key;
     const restore = restoreRef.current;
@@ -102,7 +104,7 @@ export function useEditorSession(
    */
   function openDrafts(draft: Draft | null, ready: EditorReady) {
     const disk = { content: opened.content, baseline: ready.baseline, version: source.version };
-    const caret = takeHandover(ref);
+    const handover = takeHandover(ref);
     const pending = readDraftConflict(ref);
     if (pending && draftAction(pending, disk) === "drop") clearDraftConflict(ref);
     else if (pending) setDraftConflict(pending);
@@ -110,13 +112,13 @@ export function useEditorSession(
     const action = draft ? draftAction(draft, disk) : "drop";
     if (draft && action === "restore") {
       writeDraft(ref, draft); // adopt() just cleared it, and the remount that restores it takes a moment
-      return restoreDraft(draft, { baseline: ready.baseline, force: false, caret });
+      return restoreDraft(draft, { baseline: ready.baseline, force: false, handover });
     }
     if (draft && action === "conflict") {
       writeDraftConflict(ref, draft); // kept apart from autosave's draft until the user decides
       setDraftConflict(draft);
     }
-    focusOnOpen(ready, caret);
+    focusOnOpen(ready, handover);
   }
 
   function finishRestore(restore: Restore, ready: EditorReady) {
@@ -131,12 +133,21 @@ export function useEditorSession(
       return;
     }
     autosaver.markDirty();
-    if (restore.caret === null) setRestored(true); // a rename's own handover is not news to the user
-    focusOnOpen(ready, restore.caret);
+    if (!restore.handover) setRestored(true); // a rename's own handover is not news to the user
+    focusOnOpen(ready, restore.handover);
   }
 
-  function focusOnOpen(ready: EditorReady, caret: number | null) {
-    if (caret !== null) return ready.handle.focus(caret); // the user was writing when a rename landed
+  /**
+   * After a rename, the editor first takes over the old one's exact document (Markdown drops a trailing
+   * empty paragraph or space), then its caret if the user was writing in the body, so the next keystroke
+   * lands exactly where it would have without the rename.
+   */
+  function focusOnOpen(ready: EditorReady, handover: Handover | null) {
+    if (handover) {
+      handedOverRef.current = { key: source.key, handover };
+      ready.handle.restore(handover.snapshot);
+    }
+    if (handover?.focus) return ready.handle.focus(handover.snapshot.caret);
     const isNew = isUntitledName(ref.name) && splitFrontmatter(opened.content).body.trim() === "";
     if (isNew) {
       titleRef.current?.focus();
@@ -144,6 +155,20 @@ export function useEditorSession(
     } else if (window.matchMedia("(pointer: fine)").matches) {
       ready.handle.focus("start"); // on phones, don't pop the keyboard just for opening a note
     }
+  }
+
+  /**
+   * The same editor announced itself again: Strict Mode re-ran its effects, which re-attaches Tiptap's DOM
+   * and drops the focus, or Tiptap replaced the instance. Either way a rename handover must reach the
+   * editor that stays. The restore is a no-op when it already has the document, and the focus is only
+   * taken back when nothing else holds it.
+   */
+  function resumeHandover(ready: EditorReady) {
+    const applied = handedOverRef.current;
+    if (applied?.key !== source.key) return;
+    ready.handle.restore(applied.handover.snapshot);
+    const idle = !document.activeElement || document.activeElement === document.body;
+    if (applied.handover.focus && idle) ready.handle.focus(applied.handover.snapshot.caret);
   }
 
   return {
@@ -160,7 +185,7 @@ export function useEditorSession(
     async keepDraft(draft: Draft) {
       await autosaver.flush().catch(() => {}); // so the copy in .trash has everything typed so far
       setDraftConflict(null);
-      restoreDraft(draft, { baseline: sync.getContent(), force: true, caret: null });
+      restoreDraft(draft, { baseline: sync.getContent(), force: true, handover: null });
     },
     /** "Use disk version" or "Save mine as a copy": the pending draft is resolved and can go. */
     dismissDraftConflict() {

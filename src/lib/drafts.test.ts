@@ -3,6 +3,8 @@ import {
   clearDraft,
   clearDraftConflict,
   draftAction,
+  forgetDrafts,
+  forgetFolderDrafts,
   moveDraft,
   readDraft,
   readDraftConflict,
@@ -117,6 +119,34 @@ describe("drafts", () => {
     expect(readDraftConflict(renamed, storage)).toEqual(draft);
   });
 
+  it("forgets a deleted note's pending draft conflict, so a new note with its name opens clean", () => {
+    const storage = new MemoryStorage();
+    writeDraft(ref, draft, storage);
+    writeDraftConflict(ref, { ...draft, baseVersion: "old" }, storage);
+    forgetDrafts(ref, storage);
+    expect(readDraft(ref, storage)).toBeNull();
+    expect(readDraftConflict(ref, storage)).toBeNull();
+    expect(storage.length).toBe(0);
+  });
+
+  it("forgets the drafts of every note in a deleted folder, and only those", () => {
+    const storage = new MemoryStorage();
+    const sibling = { folder: "notebook", name: "Untitled" };
+    const elsewhere = { folder: "notebook 2", name: "Groceries" };
+    writeDraft(ref, draft, storage);
+    writeDraftConflict(sibling, draft, storage);
+    writeDraft(elsewhere, draft, storage);
+    writeDraftConflict(elsewhere, draft, storage);
+    storage.setItem("write-sidebar", "open");
+    storage.setItem('write:draft:v1:["notebook"', "{}"); // corrupt key: left alone
+    forgetFolderDrafts("notebook", storage);
+    expect(readDraft(ref, storage)).toBeNull();
+    expect(readDraftConflict(sibling, storage)).toBeNull();
+    expect(readDraft(elsewhere, storage)).toEqual(draft);
+    expect(readDraftConflict(elsewhere, storage)).toEqual(draft);
+    expect(storage.length).toBe(4);
+  });
+
   it("keeps the draft when moving onto the same ref", () => {
     const storage = new MemoryStorage();
     writeDraft(ref, draft, storage);
@@ -136,6 +166,8 @@ describe("drafts", () => {
     expect(readDraft(ref, storage)).toBeNull();
     expect(() => clearDraft(ref, storage)).not.toThrow();
     expect(() => moveDraft(ref, { folder: "x", name: "y" }, storage)).not.toThrow();
+    expect(() => forgetDrafts(ref, storage)).not.toThrow();
+    expect(() => forgetFolderDrafts("notebook", storage)).not.toThrow();
   });
 
   it("uses localStorage by default and no-ops without it", () => {

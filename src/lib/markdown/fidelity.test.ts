@@ -50,6 +50,11 @@ describe("analyzeFidelity", () => {
     ["display math", "$$\n\\sum_i x_i\n$$\n\nThen *text*_\n", ["math"]],
     // Link reference definitions render as nothing, so only a textual check sees them disappear.
     ["a [//]: # comment", "Text\n\n[//]: # (This is a hidden comment)\n\nMore\n", ["references"]],
+    // "1. " alone is an empty item to CommonMark and GitHub, but text to marked: older versions wrote it.
+    ["an empty first item with a space", "1. \n2. first\n3. second\n", ["structure"]],
+    ["the same after a paragraph", "Intro\n\n10. \n11. a\n", ["structure"]],
+    ["an empty first bullet with a space", "- \n- first\n", ["structure"]],
+    ["the same in a quote", "> 1. \n> 2. first\n", ["structure"]],
     ["a [comment]: <> comment", "Text\n\n[comment]: <> (hidden)\n", ["references"]],
     [
       "bookmark definitions",
@@ -148,6 +153,33 @@ describe("lossy fixture notes", () => {
 describe("hasOversizedParagraph", () => {
   it("flags one huge paragraph, which marked parses in quadratic time", () => {
     expect(hasOversizedParagraph("# Log\n\n" + "x <1 _".repeat(3000) + "\n")).toBe(true);
+  });
+
+  it("flags a huge list item or table cell: each is parsed as one run of text", () => {
+    expect(hasOversizedParagraph("- " + "word ".repeat(4000) + "\n")).toBe(true);
+    expect(hasOversizedParagraph("| a |\n| --- |\n| " + "word ".repeat(4000) + "|\n")).toBe(true);
+  });
+
+  const lines = (count: number, line: (i: number) => string) =>
+    Array.from({ length: count }, (_, i) => line(i)).join("\n") + "\n";
+
+  it.each([
+    ["a long checklist", lines(650, (i) => `- [ ] item ${i} with some text`)],
+    ["a long table", "| a | b |\n| --- | --- |\n" + lines(700, (i) => `| row ${i} | value ${i} |`)],
+    ["a long quote", lines(700, (i) => `> paragraph ${i} of the quote\n>`)],
+    ["indented code", lines(1500, (i) => `    code line ${i}`)],
+    ["fenced code in a list item", "- item\n\n  ```\n" + "  const x = 1;\n".repeat(3000) + "  ```\n"],
+  ])("accepts %s, whose runs of text are short", (_, markdown) => {
+    expect(markdown.length).toBeGreaterThan(16 * 1024);
+    expect(hasOversizedParagraph(markdown)).toBe(false);
+  });
+
+  it("flags quotes or lists nested too deep to parse safely, quickly", () => {
+    for (const markdown of ["> ".repeat(10_000) + "x\n", "- ".repeat(10_000) + "x\n"]) {
+      const start = performance.now();
+      expect(hasOversizedParagraph(markdown)).toBe(true);
+      expect(performance.now() - start).toBeLessThan(100);
+    }
   });
 
   it("accepts long notes made of normal paragraphs and long code blocks", () => {

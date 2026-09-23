@@ -14,23 +14,26 @@ export function codeSpan(text: string): string {
 
 /**
  * Escape `[`/`]` that aren't part of a balanced pair in the text pieces from `from` on (code and images
- * keep theirs), so they can't end a link's text early ("a]b") or start a new link ("a[b").
+ * keep theirs), so they can't end a link's text early ("a]b") or start a new link ("a[b"). Pairs nested
+ * inside another pair are escaped too: marked reads one level of brackets in link text, not "[[x] y]".
  */
 function escapeUnbalancedBrackets(pieces: Piece[], from: number): void {
   const open: Array<[piece: number, offset: number]> = [];
   const unbalanced: Array<[piece: number, offset: number]> = [];
-  pieces.forEach((piece, p) => {
-    if (p < from || !piece.text) return;
+  for (let p = from; p < pieces.length; p++) {
+    const piece = pieces[p];
+    if (!piece.text) continue;
     for (let i = 0; i < piece.md.length; i++) {
       const char = piece.md[i];
       if (char === "\\") i++;
       else if (char === "[") open.push([p, i]);
       else if (char === "]") {
-        if (open.length) open.pop();
-        else unbalanced.push([p, i]);
+        const opening = open.pop();
+        if (!opening || open.length) unbalanced.push([p, i]);
+        if (opening && open.length) unbalanced.push(opening);
       }
     }
-  });
+  }
   // Insert from the end so earlier offsets stay valid.
   [...unbalanced, ...open]
     .sort(([pa, oa], [pb, ob]) => pb - pa || ob - oa)
@@ -47,9 +50,10 @@ function escapeUnbalancedBrackets(pieces: Piece[], from: number): void {
  */
 export function escapeLinkText(pieces: Piece[], from: number): void {
   escapeUnbalancedBrackets(pieces, from);
-  pieces.forEach((piece, p) => {
-    if (p >= from && piece.text) pieces[p] = { ...piece, md: piece.md.replace(/\](?=\()/g, "]\\") };
-  });
+  for (let p = from; p < pieces.length; p++) {
+    const piece = pieces[p];
+    if (piece.text) pieces[p] = { ...piece, md: piece.md.replace(/\](?=\()/g, "]\\") };
+  }
 }
 
 /** An image's alt text; marked un-escapes brackets in it and keeps every other backslash as written. */

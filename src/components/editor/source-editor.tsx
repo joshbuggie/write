@@ -42,7 +42,9 @@ export function SourceEditor({ content, sourceReason, onReady, onChange }: Sourc
           el.setSelectionRange(caret, caret);
         },
         hasFocus: () => document.activeElement === el,
-        getCaret: () => el.selectionStart,
+        // A textarea's text is exact, so the text (restored as a draft) is all a remount needs.
+        snapshot: () => ({ content: el.value, caret: el.selectionStart }),
+        restore: () => {},
       },
     });
   });

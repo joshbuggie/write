@@ -12,17 +12,20 @@
  * successful save, which is always the newest state (undoing back to the original text legitimately
  * brings an old hash back).
  */
+import type { EditorSnapshot } from "@/components/editor/note-editor";
 import type { Note, NoteRef } from "@/lib/types";
 
 type DiskState = { content: string; version: string };
 type Entry = DiskState & { seen: Set<string>; savedHere: Set<string> };
+/** What the editor under a note's new name takes over from the one that renamed it. */
+export type Handover = { snapshot: EditorSnapshot; focus: boolean };
 
 /** Plenty for one session's back/forward history; older notes simply fall back to their props. */
 const MAX_ENTRIES = 50;
 
 const entries = new Map<string, Entry>();
 const moves = new Map<string, NoteRef>();
-const handovers = new Map<string, number>();
+const handovers = new Map<string, Handover>();
 
 const keyOf = (ref: NoteRef) => JSON.stringify([ref.folder, ref.name]);
 
@@ -76,19 +79,20 @@ export function forgetMove(ref: NoteRef): void {
 }
 
 /**
- * A rename landed while the user was writing in the body. The page remounts under the new name, and its
- * editor should take the focus back at `caret`, whatever the pointer type. One-shot.
+ * A rename landed while the note stayed open. The page remounts under the new name, and its editor should
+ * show exactly what the old one had (see EditorSnapshot) and, with `focus` (the user was writing in the
+ * body), take the focus back at the same caret, whatever the pointer type. One-shot.
  */
-export function expectHandover(to: NoteRef, caret: number): void {
-  handovers.set(keyOf(to), caret);
+export function expectHandover(to: NoteRef, handover: Handover): void {
+  handovers.set(keyOf(to), handover);
 }
 
-/** The caret of a pending handover for this note (see expectHandover), consuming it; null if none. */
-export function takeHandover(ref: NoteRef): number | null {
+/** The pending handover for this note (see expectHandover), consuming it; null if none. */
+export function takeHandover(ref: NoteRef): Handover | null {
   const key = keyOf(ref);
-  const caret = handovers.get(key) ?? null;
+  const handover = handovers.get(key) ?? null;
   handovers.delete(key);
-  return caret;
+  return handover;
 }
 
 /** Test helper: forget everything. */
