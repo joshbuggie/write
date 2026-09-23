@@ -164,7 +164,11 @@ export function createAutosaver(deps: AutosaverDeps, opts: AutosaverOptions): Au
     if (!force && content === baseline) {
       dirtySince = null;
       retryAttempt = 0;
-      if (state.kind !== "saved") setState({ kind: "saved", at: lastSavedAt });
+      // Undone back to the file: a draft an earlier failed save left behind would bring the edit back.
+      if (state.kind !== "saved") {
+        deps.drafts?.clear();
+        setState({ kind: "saved", at: lastSavedAt });
+      }
       return;
     }
     const sentEpoch = epoch;
@@ -259,11 +263,20 @@ export function createAutosaver(deps: AutosaverDeps, opts: AutosaverOptions): Au
     flushKeepalive() {
       if (disposed) return;
       const content = deps.getContent();
-      if (content === baseline) return;
+      if (inFlight) {
+        // Even text equal to the baseline needs the draft: after an undo, the save in flight still puts
+        // the undone text on disk. A second concurrent PUT could race into a false conflict.
+        deps.drafts?.write(content, version);
+        keepaliveDraft = content;
+        return;
+      }
+      if (content === baseline) {
+        if (state.kind !== "saved") deps.drafts?.clear(); // see runSave: a failed save's draft is stale now
+        return;
+      }
       const tooLarge = bodyBytes({ content, baseVersion: version, force: false }) > KEEPALIVE_MAX_BYTES;
-      if (inFlight || state.kind === "conflict" || tooLarge) {
-        deps.drafts?.write(content, version); // a second concurrent PUT could race into a false conflict
-        if (inFlight) keepaliveDraft = content;
+      if (state.kind === "conflict" || tooLarge) {
+        deps.drafts?.write(content, version);
         return;
       }
       void startSave(false, true, content); // writes the draft first, then the keepalive PUT

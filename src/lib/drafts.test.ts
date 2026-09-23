@@ -8,6 +8,7 @@ import {
   moveDraft,
   readDraft,
   readDraftConflict,
+  takeDraft,
   writeDraft,
   writeDraftConflict,
   type Draft,
@@ -64,6 +65,33 @@ describe("drafts", () => {
     expect(readDraft(ref, storage)).toEqual(draft);
     clearDraft(ref, storage);
     expect(readDraft(ref, storage)).toBeNull();
+    expect(storage.length).toBe(0);
+  });
+
+  it("leaves a draft another tab wrote since, so a tab finishing its save can't erase it", () => {
+    const storage = new MemoryStorage();
+    writeDraft(ref, draft, storage); // this tab, before its PUT
+    const theirs = { content: "# Milk\n\nEggs\n", baseVersion: "abc123", savedAt: 1, owner: "other-tab" };
+    storage.setItem('write:draft:v1:["notebook","Groceries"]', JSON.stringify(theirs));
+    clearDraft(ref, storage); // this tab's PUT lands
+    expect(readDraft(ref, storage)).toEqual({ content: theirs.content, baseVersion: "abc123", savedAt: 1 });
+  });
+
+  it("lets the tab that opens a note take a draft any tab left behind", () => {
+    const storage = new MemoryStorage();
+    const key = 'write:draft:v1:["notebook","Groceries"]';
+    for (const stored of [{ ...draft, owner: "crashed-tab" }, draft]) {
+      storage.setItem(key, JSON.stringify(stored)); // …and a draft from before owners existed
+      expect(takeDraft(ref, storage)).toEqual(draft);
+      expect(storage.length).toBe(0);
+    }
+    expect(takeDraft(ref, storage)).toBeNull();
+  });
+
+  it("forgets a deleted note's draft whichever tab wrote it", () => {
+    const storage = new MemoryStorage();
+    storage.setItem('write:draft:v1:["notebook","Groceries"]', JSON.stringify({ ...draft, owner: "x" }));
+    forgetDrafts(ref, storage);
     expect(storage.length).toBe(0);
   });
 

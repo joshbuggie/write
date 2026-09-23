@@ -1,4 +1,4 @@
-import { mkdir, utimes, writeFile } from "node:fs/promises";
+import { chmod, mkdir, utimes, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { strFromU8, unzipSync } from "fflate";
 import { describe, expect, it } from "vitest";
@@ -53,6 +53,18 @@ describe("zipAll", () => {
       const files = unzipSync((await zipAll()).bytes);
       expect(strFromU8(files[`write-notes-${today()}/notebook/Old.md`])).toBe("old");
     }));
+
+  // Root reads every file whatever its mode, so the permission error can't be staged there.
+  it.skipIf(process.getuid?.() === 0)("fails instead of leaving out a note it can't read", () =>
+    withTempDataDir(async (dir) => {
+      await seed(dir, { "Work/Plan.md": "plan", "Work/Secret.md": "secret" });
+      await chmod(path.join(dir, "Work/Secret.md"), 0o000);
+      const err = await zipAll().catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(StorageError);
+      expect(err).toMatchObject({ code: "storage_unavailable" });
+      expect((err as Error).message).toContain("Work/Secret.md");
+    }),
+  );
 
   it("NFC-normalizes entry names", () =>
     withTempDataDir(async (dir) => {

@@ -4,7 +4,8 @@ import { NOTE_EXT } from "@/lib/constants";
 import { uniqueName } from "@/lib/names";
 import type { FolderSummary } from "@/lib/types";
 import { getDataDir } from "./config";
-import { mapFsError } from "./fs-utils";
+import { StorageError } from "./errors";
+import { errorCode, mapFsError } from "./fs-utils";
 import { listFolderNotes, listTree } from "./folders";
 import { resolveFolder, safeJoin } from "./paths";
 
@@ -12,6 +13,26 @@ import { resolveFolder, safeJoin } from "./paths";
 const MIN_MTIME = new Date(1980, 0, 2).getTime();
 const MAX_MTIME = new Date(2099, 11, 30).getTime();
 const clampMtime = (ms: number) => new Date(Math.min(MAX_MTIME, Math.max(MIN_MTIME, ms)));
+
+/**
+ * A note's bytes, or null if it was deleted or moved while zipping. Any other failure stops the download:
+ * a backup that silently leaves notes out looks complete when it isn't.
+ */
+async function readForZip(file: string, label: string): Promise<Uint8Array | null> {
+  try {
+    return await readFile(file);
+  } catch (err) {
+    const code = errorCode(err);
+    if (code === "ENOENT" || code === "ENOTDIR") return null;
+    if (code === "EACCES" || code === "EPERM") {
+      throw new StorageError(
+        "storage_unavailable",
+        `Couldn't read “${label}” (permission denied), so nothing was downloaded.`,
+      );
+    }
+    throw err; // EIO and friends: a 500, logged server-side (docs/design-decisions.md#d3)
+  }
+}
 
 /**
  * Zip entries for one folder: every visible note as "<name>.md" with its real mtime. Names are NFC so the
@@ -23,12 +44,8 @@ async function folderEntries(dataDir: string, folder: FolderSummary): Promise<Zi
   const used: string[] = [];
   for (const note of folder.notes) {
     const file = safeJoin(dataDir, folder.name, note.name + NOTE_EXT);
-    let bytes: Uint8Array;
-    try {
-      bytes = await readFile(file);
-    } catch {
-      continue; // deleted while zipping
-    }
+    const bytes = await readForZip(file, `${folder.name}/${note.name}${NOTE_EXT}`);
+    if (!bytes) continue;
     const name = uniqueName(note.name.normalize("NFC"), used);
     used.push(name);
     entries[name + NOTE_EXT] = [bytes, { mtime: clampMtime(Date.parse(note.updatedAt)) }];

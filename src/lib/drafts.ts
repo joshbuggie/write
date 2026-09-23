@@ -6,6 +6,15 @@
 import type { NoteRef } from "@/lib/types";
 
 export type Draft = { content: string; baseVersion: string; savedAt: number };
+/** What storage holds: the draft plus the tab that wrote it (absent in drafts written before owners). */
+type StoredDraft = Draft & { owner?: string };
+
+/**
+ * This page load. Tabs with the same note open share its draft key, so each tab clears only a draft it
+ * wrote itself: a tab that finishes a save must not erase newer unsaved text another tab wrote since.
+ * Not crypto.randomUUID: that is missing on plain-HTTP LAN addresses, and this only has to tell tabs apart.
+ */
+const TAB_ID = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
 
 const KEY_PREFIX = "write:draft:v1:";
 /**
@@ -40,10 +49,23 @@ function isDraft(value: unknown): value is Draft {
 
 /** The saved draft for a note, or null if there is none (or it is unreadable). */
 export function readDraft(ref: NoteRef, storage?: Storage): Draft | null {
-  return readKey(draftKey(ref), storage);
+  const stored = readStored(draftKey(ref), storage);
+  if (!stored) return null;
+  const { content, baseVersion, savedAt } = stored;
+  return { content, baseVersion, savedAt };
 }
 
-function readKey(key: string, storage?: Storage): Draft | null {
+/**
+ * Reads the draft for a note that is opening and removes it, whichever tab wrote it: the opening tab now
+ * restores it (writing it again as its own), parks it as a draft conflict, or drops it as already saved.
+ */
+export function takeDraft(ref: NoteRef, storage?: Storage): Draft | null {
+  const draft = readDraft(ref, storage);
+  if (draft) clearKey(draftKey(ref), storage);
+  return draft;
+}
+
+function readStored(key: string, storage?: Storage): StoredDraft | null {
   try {
     const raw = resolveStorage(storage)?.getItem(key);
     if (!raw) return null;
@@ -54,12 +76,13 @@ function readKey(key: string, storage?: Storage): Draft | null {
   }
 }
 
-/** Best effort: a full or unavailable storage silently keeps no draft. */
+/** Best effort: a full or unavailable storage silently keeps no draft. Marks the draft as this tab's. */
 export function writeDraft(ref: NoteRef, draft: Draft, storage?: Storage): void {
-  writeKey(draftKey(ref), draft, storage);
+  const { content, baseVersion, savedAt } = draft;
+  writeKey(draftKey(ref), { content, baseVersion, savedAt, owner: TAB_ID }, storage);
 }
 
-function writeKey(key: string, draft: Draft, storage?: Storage): void {
+function writeKey(key: string, draft: StoredDraft, storage?: Storage): void {
   try {
     resolveStorage(storage)?.setItem(key, JSON.stringify(draft));
   } catch {
@@ -67,9 +90,15 @@ function writeKey(key: string, draft: Draft, storage?: Storage): void {
   }
 }
 
-/** Drops the regular draft once the server has the text (or the user discarded it). */
+/**
+ * Drops this tab's regular draft once the server has the text (or the user discarded it). A draft another
+ * tab wrote since is left alone: it holds that tab's unsaved text (see TAB_ID).
+ */
 export function clearDraft(ref: NoteRef, storage?: Storage): void {
-  clearKey(draftKey(ref), storage);
+  const key = draftKey(ref);
+  const stored = readStored(key, storage);
+  if (stored && stored.owner !== TAB_ID) return;
+  clearKey(key, storage);
 }
 
 function clearKey(key: string, storage?: Storage): void {
@@ -95,7 +124,7 @@ export function draftAction(
 
 /** The draft waiting on a conflict-banner choice (see CONFLICT_KEY_PREFIX), or null. */
 export function readDraftConflict(ref: NoteRef, storage?: Storage): Draft | null {
-  return readKey(draftKey(ref, CONFLICT_KEY_PREFIX), storage);
+  return readStored(draftKey(ref, CONFLICT_KEY_PREFIX), storage);
 }
 
 /** Parks a draft based on an older version until the user resolves it; autosave never touches it. */
@@ -118,7 +147,7 @@ export function clearDraftConflict(ref: NoteRef, storage?: Storage): void {
  * would replace that new note with the old note's text.
  */
 export function forgetDrafts(ref: NoteRef, storage?: Storage): void {
-  clearDraft(ref, storage);
+  clearKey(draftKey(ref), storage); // whichever tab wrote it: the note it belonged to is gone
   clearDraftConflict(ref, storage);
 }
 
@@ -155,7 +184,7 @@ export function moveDraft(from: NoteRef, to: NoteRef, storage?: Storage): void {
   for (const prefix of [KEY_PREFIX, CONFLICT_KEY_PREFIX]) {
     const [fromKey, toKey] = [draftKey(from, prefix), draftKey(to, prefix)];
     if (fromKey === toKey) continue;
-    const draft = readKey(fromKey, storage);
+    const draft = readStored(fromKey, storage); // keeps its owner
     if (!draft) continue;
     writeKey(toKey, draft, storage);
     clearKey(fromKey, storage);

@@ -198,6 +198,18 @@ describe("drafts", () => {
     await t.rejectSave(apiError("internal"));
     expect(t.drafts.clear).not.toHaveBeenCalled();
   });
+
+  it("drops a failed save's draft when a retry finds the edit undone", async () => {
+    const t = setup();
+    t.edit("edited\n");
+    await vi.advanceTimersByTimeAsync(750);
+    await t.rejectSave(apiError("internal"));
+    t.edit("base\n");
+    await vi.advanceTimersByTimeAsync(1000); // the retry has nothing to send
+    expect(t.save).toHaveBeenCalledTimes(1);
+    expect(t.drafts.clear).toHaveBeenCalledTimes(1);
+    expect(t.saver.getState().kind).toBe("saved");
+  });
 });
 
 describe("error mapping", () => {
@@ -543,6 +555,29 @@ describe("flushKeepalive", () => {
     t.saver.dispose();
     await t.rejectSave(apiError("network"));
     expect(t.drafts.write).toHaveBeenLastCalledWith("base + A + B\n", "v1");
+  });
+
+  it("keeps an undo made while a save is in flight, even back to the text on disk", async () => {
+    const t = setup();
+    t.edit("edited\n");
+    await vi.advanceTimersByTimeAsync(750); // PUT of "edited" in flight, based on v1
+    t.edit("base\n"); // undone back to the open text
+    t.saver.flushKeepalive(); // the tab closes
+    t.saver.dispose();
+    await t.resolveSave("v2"); // "edited" still lands on disk
+    expect(t.drafts.write).toHaveBeenLastCalledWith("base\n", "v2"); // reopening restores the undo
+    expect(t.drafts.clear).not.toHaveBeenCalled();
+  });
+
+  it("drops a failed save's draft when the edit was undone before closing", async () => {
+    const t = setup();
+    t.edit("edited\n");
+    await vi.advanceTimersByTimeAsync(750);
+    await t.rejectSave(apiError("unauthorized")); // the draft keeps "edited"
+    t.edit("base\n");
+    t.saver.flushKeepalive();
+    expect(t.save).toHaveBeenCalledTimes(1);
+    expect(t.drafts.clear).toHaveBeenCalledTimes(1);
   });
 
   it("clears the draft even when the note closed before the keepalive PUT returned", async () => {

@@ -449,7 +449,14 @@ In order, in `src/components/note/` and `src/components/editor/note-editor.tsx`:
   access is wrapped in try/catch. `keepalive` bodies share a 64 KiB browser quota, so the guard measures
   the whole JSON request body (`saveNoteBodyBytes`), not just the note text, and larger notes rely on the
   draft when the tab closes. A draft written while a save is in flight is rebased onto that save's version
-  when it lands, even after the page has closed.
+  when it lands, even after the page has closed. That includes an undo back to the text on disk, since the
+  save in flight still writes the undone text. When the text is back to the file with no save in flight, a
+  draft a failed save left behind is dropped, so reopening doesn't bring the undone edit back.
+- **Drafts belong to a tab.** Tabs with the same note open share its draft key, so each draft records the
+  page load that wrote it, and a tab clears only its own. A tab that finishes a save leaves alone the
+  newer unsaved text another tab wrote since. The tab that opens a note takes the draft whichever tab
+  wrote it (`takeDraft`), and deleting a note or folder forgets it whoever wrote it. There is still one
+  draft per note: the last tab to write it wins.
 - **Save status** (`save-status.tsx`) stays calm when things are fine: "Saved", a dot for "Edited", and
   "Saving…" only after 300 ms. It is specific when they're not: "Offline · kept on this device",
   "Not saved · Retry", "Conflict". Only those last three are announced to screen readers.

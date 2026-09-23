@@ -5,8 +5,8 @@ import type { EditorMode, EditorReady, EditorRequest, SourceReason } from "@/com
 import {
   clearDraftConflict,
   draftAction,
-  readDraft,
   readDraftConflict,
+  takeDraft,
   writeDraft,
   writeDraftConflict,
   type Draft,
@@ -93,7 +93,8 @@ export function useEditorSession(
     const restore = restoreRef.current;
     restoreRef.current = null;
     if (restore?.key === source.key) return finishRestore(restore, ready);
-    const draft = firstOpen ? readDraft(ref) : null; // read before adopt(), which clears it
+    // Taken whichever tab wrote it; adopt() only clears this tab's own drafts.
+    const draft = firstOpen ? takeDraft(ref) : null;
     autosaver.adopt(ready.baseline, source.version);
     if (firstOpen) openDrafts(draft, ready);
   }
@@ -111,7 +112,7 @@ export function useEditorSession(
 
     const action = draft ? draftAction(draft, disk) : "drop";
     if (draft && action === "restore") {
-      writeDraft(ref, draft); // adopt() just cleared it, and the remount that restores it takes a moment
+      writeDraft(ref, draft); // taken above, and the remount that restores it takes a moment
       return restoreDraft(draft, { baseline: ready.baseline, force: false, handover });
     }
     if (draft && action === "conflict") {
