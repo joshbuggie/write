@@ -15,6 +15,8 @@ type NoteHeaderProps = {
   resolveDownloadHref?: () => Promise<string>;
   /** SaveStatus, or nothing for read-only notes. */
   status?: ReactNode;
+  /** The ✨ Ask AI button; it renders nothing while the assistant is off. */
+  assist?: ReactNode;
   /** The ⋯ menu. */
   menu?: ReactNode;
 };
@@ -24,7 +26,7 @@ type NoteHeaderProps = {
  * there is no sidebar. Tablet and up: sidebar toggle and a folder / name breadcrumb. Download is one click
  * everywhere.
  */
-export function NoteHeader({ noteRef, resolveDownloadHref, status, menu }: NoteHeaderProps) {
+export function NoteHeader({ noteRef, resolveDownloadHref, status, assist, menu }: NoteHeaderProps) {
   const sidebar = useSidebar();
   return (
     <header className="sticky top-0 z-20 border-b border-line bg-canvas/85 pt-[env(safe-area-inset-top)] backdrop-blur">
@@ -53,6 +55,7 @@ export function NoteHeader({ noteRef, resolveDownloadHref, status, menu }: NoteH
         </p>
         <div className="flex-1" />
         {status}
+        {assist}
         <DownloadLink
           href={downloadNoteHref(noteRef)}
           resolveHref={resolveDownloadHref}

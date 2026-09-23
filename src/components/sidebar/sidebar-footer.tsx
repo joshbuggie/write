@@ -1,7 +1,8 @@
 "use client";
 
-import { Download, FolderPlus, LogOut, SquarePen, type LucideIcon } from "lucide-react";
+import { Download, FolderPlus, LogOut, Settings, SquarePen, type LucideIcon } from "lucide-react";
 import { useState } from "react";
+import { useAi } from "@/components/ai/ai-provider";
 import { useFlushActiveNote } from "@/components/shell/shell-context";
 import { Button, buttonStyles } from "@/components/ui/button";
 import { DownloadLink } from "@/components/ui/download-link";
@@ -18,12 +19,13 @@ const ROW = {
 } as const;
 
 /**
- * Library-level actions at the end of the list: New folder, and Sign out when a password is set.
+ * Library-level actions at the end of the list: New folder, Settings, and Sign out when a password is set.
  * The desktop panel also puts "Download all" here; phones have it in the bottom bar instead.
  */
 export function SidebarActions({ variant, authEnabled }: { variant: Variant; authEnabled: boolean }) {
   const [addingFolder, setAddingFolder] = useState(false);
   const { signOut, signingOut } = useSignOut();
+  const { openSettings } = useAi();
   const row = cn(
     "flex w-full items-center gap-2.5 rounded-md px-2.5 text-muted hover:bg-hover hover:text-ink",
     ROW[variant],
@@ -44,6 +46,10 @@ export function SidebarActions({ variant, authEnabled }: { variant: Variant; aut
           Download all (.zip)
         </DownloadLink>
       )}
+      <button type="button" className={row} onClick={openSettings}>
+        <RowIcon icon={Settings} />
+        Settings
+      </button>
       {authEnabled && (
         <button type="button" className={row} onClick={signOut} disabled={signingOut}>
           <RowIcon icon={LogOut} />

@@ -251,3 +251,26 @@
 .write-prose .ProseMirror-gapcursor::after {
   border-top-color: var(--accent);
 }
+
+/* The text the AI prompt window works on (components/ai/ai-target.ts). Focus is in the prompt window,
+   so the browser hides the editor's own selection; this keeps it visible. A whole paragraph (nothing
+   selected) gets a softer tint than a real selection. */
+.write-prose .write-ai-target {
+  background: var(--selection);
+  border-radius: 2px;
+}
+.write-prose .write-ai-target.write-ai-target-soft {
+  background: var(--accent-soft);
+}
+
+/* The AI reply preview (components/ai/reply-preview.tsx): the note's typography, a size down. */
+.prose.write-prose.write-ai-reply {
+  font-size: 15px;
+  line-height: 1.6;
+}
+.prose.write-prose.write-ai-reply > :first-child {
+  margin-top: 0;
+}
+.prose.write-prose.write-ai-reply > :last-child {
+  margin-bottom: 0;
+}

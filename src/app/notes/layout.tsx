@@ -1,5 +1,6 @@
 import { cookies } from "next/headers";
 import type React from "react";
+import { AiProvider } from "@/components/ai/ai-provider";
 import { AppShell } from "@/components/shell/app-shell";
 import { ShellProvider } from "@/components/shell/shell-context";
 import { StorageUnavailable } from "@/components/shell/storage-unavailable";
@@ -29,9 +30,11 @@ export default async function NotesLayout({ children }: { children: React.ReactN
   return (
     <ShellProvider initialSidebarCollapsed={sidebarCollapsed}>
       <ToastProvider>
-        <AppShell tree={tree} authEnabled={isAuthEnabled()}>
-          {children}
-        </AppShell>
+        <AiProvider>
+          <AppShell tree={tree} authEnabled={isAuthEnabled()}>
+            {children}
+          </AppShell>
+        </AiProvider>
       </ToastProvider>
     </ShellProvider>
   );

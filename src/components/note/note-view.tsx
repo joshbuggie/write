@@ -3,6 +3,7 @@
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { startTransition, useEffect, useRef, useState } from "react";
+import { AiButton } from "@/components/ai/ai-button";
 import { EditorSkeleton, TEXT_COLUMN } from "@/components/editor/editor-skeleton";
 import type { EditorRequest } from "@/components/editor/note-editor";
 import { useRegisterActiveNote } from "@/components/shell/shell-context";
@@ -179,6 +180,7 @@ function EditableNote(props: { note: Note; folders: string[]; onReopen: () => vo
         noteRef={ref}
         resolveDownloadHref={downloadHref}
         status={<SaveStatus state={state} onRetry={() => autosaver.retry()} onShowConflict={showConflict} />}
+        assist={<AiButton />}
         menu={
           <NoteMenu
             mode={mode}

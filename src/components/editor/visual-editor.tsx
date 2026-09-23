@@ -5,6 +5,8 @@ import { Selection } from "@tiptap/pm/state";
 import { EditorContent, useEditor } from "@tiptap/react";
 import { useEffect, useEffectEvent, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { AiAssist } from "@/components/ai/ai-assist";
+import { useAi } from "@/components/ai/ai-provider";
 import { FrontmatterDetails } from "@/components/note/frontmatter-details";
 import { useToast } from "@/components/ui/toast";
 import { createExtensions } from "@/lib/markdown/extensions";
@@ -61,6 +63,7 @@ function focusAt(editor: Editor, at: "start" | number) {
  */
 export function VisualEditor({ content, allowLossy, toolbarSlot, onReady, onChange }: VisualEditorProps) {
   const toast = useToast();
+  const ai = useAi();
   const [linkOpen, setLinkOpen] = useState(false);
   const [extensions] = useState(() => createExtensions());
   const [parts] = useState(() => splitFrontmatter(content));
@@ -159,15 +162,20 @@ export function VisualEditor({ content, allowLossy, toolbarSlot, onReady, onChan
       {parts.frontmatter && <FrontmatterDetails frontmatter={parts.frontmatter} />}
       <div
         ref={bodyRef}
-        className="cursor-text pb-[40vh]"
+        className="relative cursor-text pb-[40vh]"
         onClick={(e) => {
           // Clicking the empty space below the text puts the caret at the end, like a sheet of paper.
           if (e.target === e.currentTarget) live.commands.focus("end");
         }}
       >
         <EditorContent editor={live} />
+        {ai.settings.enabled && <AiAssist editor={live} column={bodyRef} />}
       </div>
-      <KeyboardToolbar editor={live} onOpenLink={openLinkDialog} />
+      <KeyboardToolbar
+        editor={live}
+        onOpenLink={openLinkDialog}
+        onAskAi={ai.settings.enabled ? ai.openPrompt : undefined}
+      />
       {linkOpen && <LinkDialog editor={live} onClose={() => setLinkOpen(false)} />}
     </>
   );
