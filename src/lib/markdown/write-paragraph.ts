@@ -1,6 +1,12 @@
 import type { RenderContext } from "@tiptap/core";
 import { Paragraph } from "@tiptap/extension-paragraph";
-import { escapeBlockStarts, escapeLetterListMarker, escapeTablePipes, escapeTagLikeSpans } from "./escape";
+import {
+  escapeBlockStarts,
+  escapeLetterListMarker,
+  escapeLineStarts,
+  escapeTablePipes,
+  escapeTagLikeSpans,
+} from "./escape";
 import { renderInlineMarkdown } from "./nodes/inline";
 import { isBlankInline } from "./nodes/inline-atoms";
 
@@ -27,6 +33,9 @@ function blankParagraph(ctx: RenderContext | undefined): string {
   const afterBlank = previous?.type === "paragraph" && isBlankInline(previous.content);
   return afterBlank || LISTS.has(previous?.type ?? "") ? "&nbsp;" : "";
 }
+
+/** The escaping a paragraph outside tables gets, as the read-back checks it (see escapeLineStarts). */
+const asWritten = (markdown: string) => escapeLineStarts(escapeTagLikeSpans(markdown));
 
 /** Parents whose paragraphs are rendered on a single table row line (Tiptap reports "table" today). */
 const TABLE_PARENTS = new Set(["table", "tableRow", "tableCell", "tableHeader"]);
@@ -56,7 +65,11 @@ export const WriteParagraph = Paragraph.extend({
     const render = () =>
       isBlankInline(node.content)
         ? blankParagraph(ctx)
-        : renderInlineMarkdown(node.content ?? [], helpers, { inTable, singleLine });
+        : renderInlineMarkdown(node.content ?? [], helpers, {
+            inTable,
+            singleLine,
+            asWritten: inTable ? undefined : asWritten,
+          });
     if (inTable) return escapeTablePipes(escapeTagLikeSpans(render()));
     const markdown = escapeBlockStarts(escapeTagLikeSpans(render()));
     if (ctx?.parentType !== "listItem") return markdown;

@@ -7,10 +7,22 @@
  * overwrite the user's own newer save. So every save, fetch and page prop is recorded here, and the note
  * screen opens from the newest state this tab has seen.
  *
- * "Newest" is decided by `updatedAt`, the file's mtime as the server reported it. Every state comes from
- * the same server clock, so the order is real, unlike versions (content hashes, which repeat: an undo, or
- * two empty "Untitled" notes). What this tab knows is kept only when the other state is strictly older;
- * equal or newer states always replace it.
+ * What this tab knows is kept over an incoming state only when BOTH are true:
+ *
+ * 1. The incoming state is strictly older by `updatedAt` (the file's mtime, from the server's clock).
+ * 2. Its version is one this tab has already recorded for this file (`seen`): an earlier state it has
+ *    since moved past, which is exactly what a replayed page or a fetch that raced a save looks like.
+ *
+ * Neither is enough alone. Versions are content hashes, so they repeat (an undo, two empty "Untitled"
+ * notes) and can't order states by themselves. And an mtime is not a write order: a rename keeps the
+ * file's mtime, and so do a restore from .trash and sync tools like Syncthing or `rsync -t`. So a version
+ * this tab has never seen is new information and always wins, whatever its mtime; equal or newer states
+ * always win too.
+ *
+ * Accepted limit: a file put back to an older version this tab has seen, with that version's old mtime
+ * (say, restored by hand from .trash), looks exactly like a replay, so the tab keeps showing its newer
+ * text. Nothing is lost: the next save gets a 409 and the conflict banner offers the disk version, and a
+ * reload shows the file as it is.
  *
  * An entry describes one file. When that file goes away (deleted, discarded, renamed or moved, its folder
  * renamed or deleted) or a new note takes its name, the entry is forgotten, so the next note under that
@@ -21,7 +33,9 @@ import type { Note, NoteRef } from "@/lib/types";
 
 /** A state of a note's file: its text, its version and its mtime (ISO 8601, from the server). */
 export type DiskState = { content: string; version: string; updatedAt: string };
-type Entry = DiskState & { savedHere: Set<string> };
+/** The newest state this tab knows for a file, and every version it has recorded for it (see above). */
+export type KnownState = DiskState & { seen: ReadonlySet<string> };
+type Entry = DiskState & { seen: Set<string>; savedHere: Set<string> };
 /** What the editor under a note's new name takes over from the one that renamed it. */
 export type Handover = { snapshot: EditorSnapshot; focus: boolean };
 
@@ -45,27 +59,39 @@ export function isStrictlyOlder(a: string, b: string): boolean {
   return !Number.isNaN(ta) && !Number.isNaN(tb) && ta < tb;
 }
 
-/** The state to keep: `incoming`, unless what this tab already knows is strictly newer. */
-export function newerState<T extends DiskState>(known: DiskState | undefined, incoming: T): DiskState {
-  return known && isStrictlyOlder(incoming.updatedAt, known.updatedAt) ? known : incoming;
+/**
+ * The state to keep: `incoming`, unless it is a version this tab has already seen for this file and it is
+ * strictly older than what this tab knows (see the two conditions above).
+ */
+export function newerState(known: KnownState | undefined, incoming: DiskState): DiskState {
+  if (!known || !known.seen.has(incoming.version)) return incoming;
+  return isStrictlyOlder(incoming.updatedAt, known.updatedAt) ? known : incoming;
 }
 
 /**
- * Records a state of the file, unless this tab already knows a strictly newer one (a fetch that raced a
- * save, props replayed from the router cache). `savedHere` marks the result of this tab's own successful
- * save, so a later 409 naming that version is recognized as this tab's text.
+ * Records a state of the file, unless this tab already knows a newer one (a fetch that raced a save,
+ * props replayed from the router cache). `savedHere` marks the result of this tab's own successful save,
+ * so a later 409 naming that version is recognized as this tab's text. This tab wrote that version, so it
+ * is never news here: it is ordered by its mtime alone (a newer state from elsewhere may have come first).
  */
 export function recordDiskState(ref: NoteRef, state: DiskState, opts: { savedHere?: boolean } = {}): void {
   const key = keyOf(ref);
   const entry = entries.get(key);
+  const seen = entry?.seen ?? new Set<string>();
+  const savedHere = entry?.savedHere ?? new Set<string>();
+  if (opts.savedHere) {
+    seen.add(state.version);
+    savedHere.add(state.version);
+  }
   const kept = newerState(entry, state);
+  seen.add(state.version); // 16-character hashes, one per save: small enough to keep for the session
   const next: Entry = {
     content: kept.content,
     version: kept.version,
     updatedAt: kept.updatedAt,
-    savedHere: entry?.savedHere ?? new Set(),
+    seen,
+    savedHere,
   };
-  if (opts.savedHere) next.savedHere.add(state.version);
   entries.delete(key); // re-insert: the Map's order doubles as least-recently-used
   entries.set(key, next);
   if (entries.size > MAX_ENTRIES) entries.delete(entries.keys().next().value!);
@@ -145,6 +171,23 @@ export function takeHandover(ref: NoteRef): Handover | null {
   const handover = handovers.get(key) ?? null;
   handovers.delete(key);
   return handover;
+}
+
+/** True when `a` and `b` name the same file. */
+export function isSameNote(a: NoteRef, b: NoteRef): boolean {
+  return a.folder === b.folder && a.name === b.name;
+}
+
+/**
+ * "Save as new note" after the file went away put this tab's text in a new file under the note's own name.
+ * The note screen reopens on it at the same URL, while the page props still describe the old file. The
+ * copy is recorded as this tab's save, and the old file's `replacedVersion` as a version it has seen and
+ * moved past, so those props lose to the copy (see the two conditions above).
+ */
+export function noteRecreated(copy: Note, replacedVersion: string): void {
+  noteCreated(copy);
+  recordDiskState(copy, copy, { savedHere: true });
+  entries.get(keyOf(copy))!.seen.add(replacedVersion);
 }
 
 /** Test helper: forget everything. */

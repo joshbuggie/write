@@ -128,8 +128,15 @@ const TASK_MARKER_NEAR_START = /^(.?\s*[-+*]\s+)\[(?=[ xX]\](?:\s|$))/;
  * and four of them would silently turn the paragraph into code.
  */
 export function escapeBlockStarts(markdown: string): string {
+  return escapeLineStarts(markdown.replace(CODE_INDENT, ""));
+}
+
+/**
+ * escapeBlockStarts without dropping the first line's indentation: what the inline serializer's
+ * read-back checks, since it compares text with the leading spaces still there.
+ */
+export function escapeLineStarts(markdown: string): string {
   return markdown
-    .replace(CODE_INDENT, "")
     .split("\n")
     .map((line) => BLOCK_STARTS.reduce((l, [re, replacement]) => l.replace(re, replacement), line))
     .join("\n")

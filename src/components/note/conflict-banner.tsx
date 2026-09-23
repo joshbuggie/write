@@ -11,7 +11,7 @@ import type { Draft } from "@/lib/drafts";
 import { toSafeName } from "@/lib/names";
 import { LIBRARY_HREF, noteHref } from "@/lib/routes";
 import type { Note, NoteRef } from "@/lib/types";
-import { isSavedHere, movedTo, noteCreated } from "./known-notes";
+import { isSameNote, isSavedHere, movedTo, noteCreated, noteRecreated } from "./known-notes";
 import type { NoteSync } from "./use-note-sync";
 
 /** The element id SaveStatus's "Conflict" button scrolls to. */
@@ -55,6 +55,8 @@ type ConflictBannerProps = {
   onDraftResolved: () => void;
   /** Load the given disk text into the editor as the new, clean baseline. */
   onReload: (content: string, version: string) => void;
+  /** Remount the note screen: a copy was just created under this note's own name (see saveCopy). */
+  onReopen: () => void;
 };
 
 const messageOf = (err: unknown) => (err instanceof Error ? err.message : "Something went wrong.");
@@ -65,7 +67,7 @@ const messageOf = (err: unknown) => (err instanceof Error ? err.message : "Somet
  * drops your edits without asking.
  */
 export function ConflictBanner(props: ConflictBannerProps) {
-  const { note, sync, draft, onKeepDraft, onDraftResolved, onReload } = props;
+  const { note, sync, draft, onKeepDraft, onDraftResolved, onReload, onReopen } = props;
   const router = useRouter();
   const toast = useToast();
   const [pending, setPending] = useState<string | null>(null);
@@ -129,6 +131,14 @@ export function ConflictBanner(props: ConflictBannerProps) {
       onDraftResolved();
     } else {
       sync.abandon({ gone }); // "changed" and "own" leave the original file in place
+    }
+    if (isSameNote(copy, ref)) {
+      // The old name was free, so the copy took it: same URL, so the page wouldn't remount and this
+      // (abandoned) editor would stay frozen. Reopen the screen on the copy instead.
+      noteRecreated(copy, note.version);
+      onReopen();
+      startTransition(() => router.refresh());
+      return;
     }
     startTransition(() => {
       router.push(noteHref(copy));

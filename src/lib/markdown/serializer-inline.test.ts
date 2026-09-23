@@ -351,6 +351,24 @@ describe("links", () => {
     expect(same(manager.parse(save(doc)), doc)).toBe(true);
   });
 
+  // Alt text marked can't read back as written (it keeps backslashes), only possible from pasted HTML:
+  // it's written as close as it can be, then re-opens and saves the same.
+  it.each([
+    ["C:\\", "![C:\\ ](x.png)", "C:\\ "],
+    ["a\n1. x", "![a 1. x](x.png)", "a 1. x"],
+    ["a\n> b\nc", "![a > b\nc](x.png)", "a > b\nc"],
+  ])("image alt %j is written %s and stays an image", (alt, markdown, reopened) => {
+    const doc = paragraph({ type: "image", attrs: { alt, src: "x.png" } });
+    expect(save(doc)).toBe(markdown + "\n");
+    const back = manager.parse(save(doc));
+    expect(same(back, paragraph({ type: "image", attrs: { alt: reopened, src: "x.png" } }))).toBe(true);
+    expect(save(back)).toBe(save(doc));
+  });
+
+  it("keeps a wrapped alt text from a file as it is", () => {
+    expect(save(manager.parse("![a long\ndescription](x.png)\n"))).toBe("![a long\ndescription](x.png)\n");
+  });
+
   it("escapes a title's quotes", () => {
     const doc = paragraph(text("x", { type: "link", attrs: { href: "u", title: 'say "hi"' } }));
     expect(save(doc)).toBe('[x](u "say \\"hi\\"")\n');
@@ -373,6 +391,13 @@ describe("code spans and line breaks", () => {
   it("keeps a newline in text as one line break, never as a paragraph break", () => {
     expect(save(paragraph(text("a\n\n  b")))).toBe("a\nb\n");
     expect(manager.parse("a\nb\n").content).toHaveLength(1);
+  });
+
+  it("reads back what's written after a line's block-start escape, never showing asterisks", () => {
+    // "**<\n\>**>": the escape on the second line keeps marked from closing the bold, so it's given up.
+    const doc = paragraph(text("<\n>", "bold"), text(">"));
+    expect(save(doc)).toBe("<\n\\>>\n");
+    expect(same(manager.parse(save(doc)), paragraph(text("<\n>>")))).toBe(true);
   });
 });
 

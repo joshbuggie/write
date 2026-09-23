@@ -36,6 +36,12 @@ describe("hasOversizedParagraph on note open and paste", () => {
     ],
     ["HTML block starts", upTo(256 * K, (i) => (i % 2 ? "<div>\n" : "<!-- x\n"))],
     ["one line", "x".repeat(256 * K)],
+    // A line indented as code before a delimiter row ("| - |") is lazy paragraph text, not a table
+    // header, so the rows after it are one paragraph (with emphasis, the slowest kind to parse).
+    [
+      "a lazy code line over a delimiter row, then emphasis",
+      "a\n     b\n| - |\n" + upTo(256 * K, () => "*a **b _c [d](e ".repeat(5) + "\n"),
+    ],
   ];
 
   it.each(hostile)("decides %s in well under 150 ms", (_, markdown) => {
@@ -46,8 +52,22 @@ describe("hasOversizedParagraph on note open and paste", () => {
 
   it("still sends the long runs among them to source mode", () => {
     const [logItem, quoteCycle, , , continuation] = hostile.map(([, markdown]) => markdown);
-    for (const markdown of [logItem, quoteCycle, continuation])
+    const lazyTableHeader = hostile.at(-1)![1];
+    for (const markdown of [logItem, quoteCycle, continuation, lazyTableHeader])
       expect(hasOversizedParagraph(markdown)).toBe(true);
+  });
+
+  // Each line before the rows is lazy text in marked (indented as code in its container), so the rows
+  // are one long paragraph, not a table.
+  it.each([
+    ["a line indented 5", "a\n     b\n| - |\n"],
+    ["a line indented 4", "a\n    x | y\n--- | ---\n"],
+    ["a tab-indented line", "a\n\tb | c\n- | -\n"],
+    ["a list item's line indented 4 more", "- a\n      b\n  | - |\n"],
+    ["a quote's lazy line in a list item", "- > a\n      b\n  | - |\n"],
+  ])("sends rows after %s over a delimiter row to source mode", (_, start) => {
+    const markdown = start + "w".repeat(78).concat("\n").repeat(400);
+    expect(hasOversizedParagraph(markdown)).toBe(true);
   });
 
   it("checks pasted text quickly too, before any parsing", () => {
@@ -139,16 +159,23 @@ describe("scanBlocks", () => {
         "> ",
         ">> ",
         "> - ",
+        "- > ",
         "    ",
+        "     ",
         "      ",
         "\t",
+        " \t",
         "  ",
         "# ",
       ].map((prefix) => () => prefix + words()),
       ...["", "```", "  ```", "~~~", "---", "- - -", "===", "-", "<div>", "| a | b |", "| --- | --- |"].map(
         (line) => () => line,
       ),
-      ...["a | b", "--- | ---"].map((line) => () => line),
+      ...["a | b", "--- | ---", "| - |", "  | - |", "- | -", "    x | y", "\tb | c"].map(
+        (line) => () => line,
+      ),
+      // Lines marked reads unlike CommonMark: "- " starts no list, a tab keeps a paragraph going.
+      ...["- ", "1. ", "\t", "> \t", ">     ", "<!-- x", "-->", "<span>"].map((line) => () => line),
     ];
     const misses: string[] = [];
     for (let n = 0; n < 20_000; n++) {

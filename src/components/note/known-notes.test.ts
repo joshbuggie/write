@@ -5,12 +5,14 @@ import {
   forgetFolder,
   forgetMove,
   forgetNote,
+  isSameNote,
   isSavedHere,
   isStrictlyOlder,
   latestKnown,
   movedTo,
   newerState,
   noteCreated,
+  noteRecreated,
   recordDiskState,
   recordMove,
   resetKnownNotes,
@@ -44,12 +46,18 @@ describe("isStrictlyOlder", () => {
 });
 
 describe("newerState", () => {
-  it("keeps what is known only when the incoming state is strictly older", () => {
-    const known = state("v2", "two", at(2));
+  it("keeps what is known only for a seen version that is strictly older", () => {
+    const known = { ...state("v2", "two", at(2)), seen: new Set(["v1", "v2"]) };
     expect(newerState(undefined, state("v1", "one", at(1)))).toMatchObject({ version: "v1" });
     expect(newerState(known, state("v1", "one", at(1)))).toBe(known);
     expect(newerState(known, state("v3", "three", at(2)))).toMatchObject({ version: "v3" });
     expect(newerState(known, state("v4", "four", at(3)))).toMatchObject({ version: "v4" });
+    expect(newerState(known, state("v1", "one", at(3)))).toMatchObject({ version: "v1" }); // an undo
+  });
+
+  it("lets a version it has never seen win, whatever its mtime", () => {
+    const known = { ...state("v2", "two", at(2)), seen: new Set(["v1", "v2"]) };
+    expect(newerState(known, state("x", "renamed here", at(1)))).toMatchObject({ version: "x" });
   });
 });
 
@@ -59,7 +67,7 @@ describe("latestKnown", () => {
     expect(latestKnown(first)).toBe(first);
   });
 
-  it("ignores stale props replayed by back/forward and opens from this tab's newest save", () => {
+  it("ignores stale props replayed by back/forward and opens from this tab's newest save (DS-1)", () => {
     latestKnown(note("v1", "one", at(1))); // first visit
     recordDiskState(ref, state("v2", "one two", at(2)), { savedHere: true });
     recordDiskState(ref, state("v3", "one two three", at(3)), { savedHere: true });
@@ -94,12 +102,40 @@ describe("latestKnown", () => {
     expect(latestKnown(note("v2", "one!", at(2)))).toMatchObject({ version: "v1", content: "one" });
   });
 
+  it("takes an external change this tab never saw, even with an older mtime (client-R4-1)", () => {
+    // Another tab deleted this note and renamed an older one onto its name; a rename keeps the mtime.
+    latestKnown(note("E", "", at(1)));
+    recordDiskState(ref, state("S", "second note body", at(5)), { savedHere: true });
+    const renamedOnto = note("W", "welcome text", at(3));
+    expect(latestKnown(renamedOnto)).toBe(renamedOnto);
+    // Also a file put there by hand or by a sync tool that keeps mtimes, and what a later fetch says.
+    const synced = note("D1", "draft text", at(2));
+    expect(latestKnown(synced)).toBe(synced);
+    expect(latestKnown(note("S", "second note body", at(5))).content).toBe("second note body");
+  });
+
   it("opens a new note that reuses a hash this tab saw replaced as itself (client-R3-1)", () => {
     // New note "Untitled" (empty, version E), typed into, saved; then a new empty note with that name.
     latestKnown(note("E", "", at(1)));
     recordDiskState(ref, state("V1", "secret old text", at(2)), { savedHere: true });
     const fresh = note("E", "", at(3));
     expect(latestKnown(fresh)).toBe(fresh);
+  });
+
+  it("opens an empty note deleted and recreated outside write as itself", () => {
+    // Deleted in Finder (so this tab never forgot it) and recreated: a new file gets the current mtime.
+    latestKnown(note("E", "", at(1)));
+    recordDiskState(ref, state("V1", "old text", at(2)), { savedHere: true });
+    const recreated = note("E", "", at(4));
+    expect(latestKnown(recreated)).toBe(recreated);
+  });
+
+  it("keeps its newer text over an older version it saw, restored with its old mtime (accepted)", () => {
+    // Put back from .trash by hand: indistinguishable from a replayed page. The tab keeps its text until
+    // the next save's 409 offers the disk version, or a reload.
+    latestKnown(note("v1", "one", at(1)));
+    recordDiskState(ref, state("v2", "one two", at(2)), { savedHere: true });
+    expect(latestKnown(note("v1", "one", at(1)))).toMatchObject({ version: "v2", content: "one two" });
   });
 });
 
@@ -136,6 +172,7 @@ describe("forgetting", () => {
 
   it("forgets every note of a deleted or renamed folder, and pointers into it", () => {
     const other = { folder: "Other", name: "Plain" };
+    recordDiskState(other, state("O0", "older", at(1)));
     recordDiskState(other, state("O1", "other folder", at(9)));
     recordMove({ folder: "Other", name: "Old" }, { folder: "notebook", name: "Somewhere" });
     const fresh = note("E", "", at(1));
@@ -164,7 +201,34 @@ describe("isSavedHere", () => {
     recordDiskState(ref, state("v3", "theirs", at(3)));
     recordDiskState(ref, state("v2", "mine", at(2)), { savedHere: true });
     expect(isSavedHere(ref, "v2")).toBe(true);
-    expect(latestKnown(note("v1", "one", at(1))).content).toBe("theirs");
+    expect(latestKnown(note("v2", "mine", at(2))).content).toBe("theirs");
+  });
+});
+
+describe("noteRecreated", () => {
+  it("opens the copy saved under a deleted note's name, not the old file's props (client-R4-2)", () => {
+    latestKnown(note("v1", "old file", at(1)));
+    const copy = note("C", "my text", at(5));
+    forgetNote(ref); // what saveCopy did before: the old file is gone (sync.abandon)
+    noteRecreated(copy, "v1");
+    expect(latestKnown(note("v1", "old file", at(1)))).toMatchObject({ version: "C", content: "my text" });
+    expect(isSavedHere(ref, "C")).toBe(true);
+    const later = note("v9", "edited elsewhere", at(7));
+    expect(latestKnown(later)).toBe(later);
+  });
+
+  it("clears a rename pointer left at that name", () => {
+    recordMove(ref, { folder: "notebook", name: "Elsewhere" });
+    noteRecreated(note("C", "my text", at(5)), "v1");
+    expect(movedTo(ref)).toBeNull();
+  });
+});
+
+describe("isSameNote", () => {
+  it("compares folder and name", () => {
+    expect(isSameNote(ref, { folder: "notebook", name: "Plain" })).toBe(true);
+    expect(isSameNote(ref, { folder: "Work", name: "Plain" })).toBe(false);
+    expect(isSameNote(ref, { folder: "notebook", name: "Plain 2" })).toBe(false);
   });
 });
 

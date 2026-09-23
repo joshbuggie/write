@@ -33,17 +33,23 @@ const NoteEditor = dynamic(() => import("@/components/editor/note-editor"), {
 
 const messageOf = (err: unknown) => (err instanceof Error ? err.message : "Something went wrong.");
 
-/** The note screen: read-only notes get a preview, everything else the editor. */
+/**
+ * The note screen: read-only notes get a preview, everything else the editor. The page is keyed by the
+ * note's folder and name; `mount` also remounts the editor when a new file takes this same name from this
+ * screen ("Save as new note" after the note was deleted), so it opens as a live editor on that file.
+ */
 export function NoteView({ note, folders }: { note: Note; folders: string[] }) {
+  const [mount, setMount] = useState(0);
   if (note.readOnly) return <ReadOnlyNote note={{ ...note, readOnly: note.readOnly }} />;
-  return <EditableNote note={note} folders={folders} />;
+  return <EditableNote key={mount} note={note} folders={folders} onReopen={() => setMount((n) => n + 1)} />;
 }
 
 /**
  * Orchestrates one open note: header, banners, title and editor, plus every file-level action
  * (rename, move, delete, conflicts, mode switch). Saving itself lives in useNoteSync.
  */
-function EditableNote({ note, folders }: { note: Note; folders: string[] }) {
+function EditableNote(props: { note: Note; folders: string[]; onReopen: () => void }) {
+  const { note, folders, onReopen } = props;
   const router = useRouter();
   const toast = useToast();
   const ref: NoteRef = { folder: note.folder, name: note.name };
@@ -194,6 +200,7 @@ function EditableNote({ note, folders }: { note: Note; folders: string[] }) {
           onKeepDraft={session.keepDraft}
           onDraftResolved={session.dismissDraftConflict}
           onReload={session.reloadEditor}
+          onReopen={onReopen}
         />
         {sourceReason && (
           <SourceModeNotice reason={sourceReason} onEditVisually={() => setDialog("edit-visually")} />

@@ -14,12 +14,16 @@ import { MAX_VISUAL_PARAGRAPH_CHARS } from "../oversized";
 import { markKey, settle, STYLES, type Renderer, type Style, type StyleAt } from "./inline-render";
 import { firstMisread } from "./read-back";
 
+/** The escaping a paragraph's markdown gets after it's rendered (see renderInlineMarkdown). */
+type AsWritten = (markdown: string) => string;
+
 /** Where marked first misreads `markdown` as a rendering of `atoms` (see firstMisread), or null. */
-const misreadOf = (markdown: string, atoms: Atom[], inTable: boolean) =>
+const misreadOf = (markdown: string, atoms: Atom[], inTable: boolean, asWritten?: AsWritten) =>
   firstMisread(
     markdown,
     atoms.map((atom) => ({ text: atom.text, node: atom.node?.type, marks: atom.marks.map(markKey) })),
     inTable,
+    asWritten,
   );
 
 /**
@@ -47,19 +51,27 @@ const TARGETED_TRIES = 4;
  * writes the text so it can't misread. Returns the markdown, the style used, and whether formatting was
  * given up on the way.
  */
-function writeReadably(atoms: Atom[], renderer: Renderer, inTable: boolean, styles: StyleAt[]) {
+function writeReadably(
+  atoms: Atom[],
+  renderer: Renderer,
+  inTable: boolean,
+  styles: StyleAt[],
+  asWritten?: AsWritten,
+) {
   const [preferred, ...alternatives] = styles;
   const hasAddress = hasBareAddress(atoms);
   let gaveUp = false;
   for (let tries = 0; ;) {
     const plain = settle(atoms, renderer, preferred);
     gaveUp ||= plain.dropped > 0;
-    const misread = needsReadBack(plain, hasAddress) ? misreadOf(plain.markdown, atoms, inTable) : null;
+    const misread = needsReadBack(plain, hasAddress)
+      ? misreadOf(plain.markdown, atoms, inTable, asWritten)
+      : null;
     if (!misread) return { markdown: plain.markdown, style: preferred, gaveUp };
     for (const style of alternatives) {
       const copy = atoms.map((atom) => ({ ...atom }));
       const attempt = settle(copy, renderer, style);
-      if (attempt.dropped === 0 && !misreadOf(attempt.markdown, copy, inTable)) {
+      if (attempt.dropped === 0 && !misreadOf(attempt.markdown, copy, inTable, asWritten)) {
         return { markdown: attempt.markdown, style, gaveUp };
       }
     }
@@ -124,11 +136,17 @@ function freePipesFromCode(atoms: Atom[]): void {
  * Paragraphs are written in independent parts (see writePart), so the work stays close to linear even
  * for long paragraphs full of formatting; the whole paragraph is then checked once more.
  * `singleLine` (headings, a task's text) writes newline characters as spaces; `inTable` too, for a cell.
+ * `asWritten`: the escaping the caller applies to the result, which the final read-back checks too
+ * (only "<" before hidden delimiters when not given, see escapeTagLikeSpans).
  */
 export function renderInlineMarkdown(
   content: JSONContent[],
   h: MarkdownRendererHelpers,
-  { singleLine = false, inTable = false } = {},
+  {
+    singleLine = false,
+    inTable = false,
+    asWritten,
+  }: { singleLine?: boolean; inTable?: boolean; asWritten?: AsWritten } = {},
 ): string {
   const atoms = toAtoms(content, singleLine || inTable);
   if (inTable) freePipesFromCode(atoms);
@@ -137,7 +155,7 @@ export function renderInlineMarkdown(
     // Marks CommonMark can't open or close are given up first, so the parts are cut where they'll stay.
     settle(atoms, renderer, STYLE_CHOICES[0]);
     const styles = writePart(atoms, renderer, inTable);
-    const whole = writeReadably(atoms, renderer, inTable, [(atom) => styles[atom]]);
+    const whole = writeReadably(atoms, renderer, inTable, [(atom) => styles[atom]], asWritten);
     // The parts read the same together (see independentParts) unless escaping differs at a cut: rare,
     // and then the paragraph is written again from what's left, like the next save will.
     if (!whole.gaveUp) return whole.markdown;

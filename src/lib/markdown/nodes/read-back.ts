@@ -113,10 +113,16 @@ function closingRun(markdown: string, from: number, length: number): number {
  * when it reads back exactly. marked's emphasis matching has corner cases no flanking rule predicts
  * ("**a *b*c**"), so the serializer checks its own output instead of guessing, and simplifies near
  * the first difference. `inTable`: the markdown also has to survive going into a table row, where
- * GFM reads it the same unless a "|" splits the row.
+ * GFM reads it the same unless a "|" splits the row. `asWritten`: the escaping the paragraph gets
+ * after it's rendered, so what's read back is what the file will hold.
  */
-export function firstMisread(markdown: string, intended: IntendedUnit[], inTable: boolean): Misread | null {
-  const source = escapeTagLikeSpans(markdown);
+export function firstMisread(
+  markdown: string,
+  intended: IntendedUnit[],
+  inTable: boolean,
+  asWritten: (markdown: string) => string = escapeTagLikeSpans,
+): Misread | null {
+  const source = asWritten(markdown);
   if (inTable && SPLITS_TABLE_ROW.test(source)) return { at: 0, autolinks: [] };
   const actual: string[] = [];
   const autolinks: Autolinks = [];

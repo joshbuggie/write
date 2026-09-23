@@ -1,3 +1,4 @@
+import { escapeLineStarts } from "../escape";
 import type { Piece } from "./flanking";
 
 /**
@@ -64,11 +65,19 @@ export function escapeLinkText(pieces: Piece[], from: number): void {
   escapeText((md) => md.replace(/\](?=\()/g, "]\\"));
 }
 
-/** An image's alt text; marked un-escapes brackets in it and keeps every other backslash as written. */
+/**
+ * An image's alt text; marked un-escapes brackets in it and keeps every other backslash as written, so
+ * what a backslash can't fix is written differently: a newline before a line that would start a block
+ * ("1. x", "> x") as a space, and a backslash at the end, which would escape the "]", with a space after
+ * it. Neither can come from Markdown (the text wouldn't be an image there), only from pasted HTML.
+ */
 export function escapeAltText(alt: string): string {
-  const pieces: Piece[] = [{ md: alt, text: true }];
+  const oneBlock = alt.replace(/\n(?=([^\n]*))/g, (newline, line: string) =>
+    escapeLineStarts(line) === line ? newline : " ",
+  );
+  const pieces: Piece[] = [{ md: oneBlock, text: true }];
   escapeUnbalancedBrackets(pieces, 0);
-  return pieces[0].md;
+  return pieces[0].md.replace(/(?<!\\)(?:\\\\)*\\$/, "$& ");
 }
 
 /**
