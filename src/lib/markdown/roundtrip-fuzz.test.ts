@@ -490,9 +490,50 @@ describe("inline syntax round-trip fuzz", () => {
   ];
   const EMPHASIS_SETS = [[], [], ["bold"], ["italic"], ["strike"], ["bold", "italic"], ["italic", "strike"]];
 
+  // What a line may start with after a line break: block syntax alone, or with the line above it
+  // (a setext underline, a table delimiter row, a spaced thematic break).
+  const LINE_STARTS = [
+    "-",
+    "--",
+    "-- -",
+    "--- -",
+    "- - -",
+    "-|",
+    "|-",
+    "| --- |",
+    "|:-|",
+    ":-",
+    ":-:",
+    "=",
+    "==",
+    "* * *",
+    "** *",
+    "_ _ _",
+    "__ _",
+    "#",
+    "## ",
+    ">",
+    "+ ",
+    "1. ",
+    "2) ",
+    "2024",
+    "```",
+    "~~~",
+    "<div>",
+    "|",
+    ":",
+  ];
+
   function inlineContent(rnd: Random, inCell: boolean): JSONContent[] {
     return Array.from({ length: 1 + rnd.int(6) }, (): JSONContent => {
-      const text = Array.from({ length: 1 + rnd.int(3) }, () => rnd.pick(PIECES)).join("");
+      if (!inCell && rnd.random() < 0.15) return { type: "hardBreak" };
+      const pieces = () => Array.from({ length: 1 + rnd.int(3) }, () => rnd.pick(PIECES)).join("");
+      // Often a whole line: after a newline character (a soft break) or a hard break (above), and
+      // before another one or the end.
+      const lineStart = rnd.random() < 0.3 ? rnd.pick(LINE_STARTS) : "";
+      const text = lineStart
+        ? (rnd.random() < 0.5 ? "\n" : "") + lineStart + rnd.pick(["", "", "\n", pieces()])
+        : pieces();
       const kind = rnd.random();
       if (kind < 0.12) {
         // Code can't hold a "|" after a backslash in a table row (it's written next to the code, which

@@ -135,7 +135,7 @@ export function ConflictBanner(props: ConflictBannerProps) {
     if (isSameNote(copy, ref)) {
       // The old name was free, so the copy took it: same URL, so the page wouldn't remount and this
       // (abandoned) editor would stay frozen. Reopen the screen on the copy instead.
-      noteRecreated(copy, note.version);
+      noteRecreated(copy, note);
       onReopen();
       startTransition(() => router.refresh());
       return;

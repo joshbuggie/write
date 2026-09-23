@@ -307,6 +307,14 @@ files.
   punctuation character in its text is backslash-escaped (`escapeEverything` in `escape.ts`), then all
   emphasis is dropped. The work stays bounded, links and marks the user applied stay, and plain text
   never re-opens as a link, image or emphasis.
+- **Block-level check:** a paragraph or heading also checks its final Markdown, after the line-start
+  escapes, with marked's block lexer (`readsAsParagraph` / `readsAsHeading` in `read-back.ts`): it must
+  read back as exactly one block of the same kind. If it doesn't (typed text such as `-- -`, or a line
+  after a line break that looks like a table's delimiter row), it is written again with every ASCII
+  punctuation character escaped, including the first one on each line. Line-start escapes cover the
+  common shapes first (`escapeBlockStarts`), using Tiptap's looser table rule as well as GFM's, because
+  Tiptap's tokenizers are also tried one character into a paragraph. For the same reason a code span
+  that starts like a task item (`` `- [ ] x` ``) is written with a two-backtick fence and a space.
 - A `!` right before a link is written `\!`, so it can't turn the link into an image. Table cells escape
   every `|` on the finished cell Markdown (`escapeTablePipes`), link destinations and image sources
   included. Link destinations and titles escape backticks, because Tiptap pairs backticks across cells
@@ -397,9 +405,16 @@ In order, in `src/components/note/` and `src/components/editor/note-editor.tsx`:
    (`forgetNote` / `forgetFolder`).
 5. **Newest known state:** the editor opens from the newest content and version this tab knows
    (`src/components/note/known-notes.ts`), not from page props that may be stale (back/forward replays
-   cached props). The registry keeps each note's content, version and `updatedAt` (the file's mtime). It
-   is preferred over props only when the props' `updatedAt` is strictly older (both come from the server
-   clock), so equal or newer props always win. An entry is forgotten when the note is deleted,
+   cached props). The registry keeps each note's content, version and `updatedAt` (the file's mtime), and
+   every (version, mtime) state it has seen. Neither half orders states alone: hashes repeat (an undo,
+   two empty notes), and renames, `.trash` restores and mtime-preserving sync keep old mtimes. So the rule
+   depends on where a state came from: **page props** that match a state already seen (other than the
+   current one) are a replay and lose; a **fetched** state (a `GET`, a 409's `current`) that was seen loses
+   only if its mtime is strictly older (a `GET` that raced a save); this tab's own **saves** are ordered
+   by mtime alone; and a state never seen always wins, whatever its mtime. Accepted limit: restoring an
+   older state this tab has seen, with its old mtime, looks like a replay until the next save's 409 or a
+   reload. "Save as new note" under the note's own name remounts the note screen in place (`NoteView`'s
+   mount key) and records the old file's state as seen. An entry is forgotten when the note is deleted,
    discarded, renamed or moved away (both names), when its folder is renamed or deleted, and when a new
    note is created under its name (`forgetNote` / `forgetFolder` / `noteCreated` / `recordMove`), so a
    new note reusing a name never opens with the old note's text. A revalidation `GET` on mount catches a

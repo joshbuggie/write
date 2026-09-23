@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { createExtensions, createMarkdownManager } from "./extensions";
 import { analyzeFidelity } from "./fidelity";
 import { finalizeMarkdown } from "./file-format";
+import { readsAsParagraph } from "./nodes/read-back";
 
 /** Formatting inside a paragraph must re-open from the saved file as written, never as HTML or asterisks. */
 
@@ -357,6 +358,13 @@ describe("links", () => {
     ["C:\\", "![C:\\ ](x.png)", "C:\\ "],
     ["a\n1. x", "![a 1. x](x.png)", "a 1. x"],
     ["a\n> b\nc", "![a > b\nc](x.png)", "a > b\nc"],
+    // A newline before anything but a letter or digit could end the paragraph or start a block.
+    ["a\n\nb", "![a \nb](x.png)", "a \nb"],
+    ["a\n<div>", "![a <div>](x.png)", "a <div>"],
+    ["a\n~~~", "![a ~~~](x.png)", "a ~~~"],
+    // marked ends the alt text at a backtick with nothing to pair with.
+    ["a`b", "![a\\`b](x.png)", "a\\`b"],
+    ["`a` b`", "![`a` b\\`](x.png)", "`a` b\\`"],
   ])("image alt %j is written %s and stays an image", (alt, markdown, reopened) => {
     const doc = paragraph({ type: "image", attrs: { alt, src: "x.png" } });
     expect(save(doc)).toBe(markdown + "\n");
@@ -398,6 +406,66 @@ describe("code spans and line breaks", () => {
     const doc = paragraph(text("<\n>", "bold"), text(">"));
     expect(save(doc)).toBe("<\n\\>>\n");
     expect(same(manager.parse(save(doc)), paragraph(text("<\n>>")))).toBe(true);
+  });
+});
+
+describe("block syntax formed by a paragraph's lines", () => {
+  const br: JSONContent = { type: "hardBreak" };
+
+  // Each line would make the one above it a table header or a setext heading, or be a thematic break.
+  it.each([
+    [[text("-- -")], "\\-- -"],
+    [[text("--- -")], "\\--- -"],
+    [[text("a\n-- -")], "a\n\\-- -"],
+    [[text("a"), br, text("|-")], "a  \n\\|-"],
+    [[text("a\n-|")], "a\n\\-|"],
+    [[text("Total\n| --- |")], "Total\n\\| --- |"],
+    [[text("a b\n:-")], "a b\n\\:-"],
+    [[text("a"), br, text("==")], "a  \n\\=="],
+  ])("%j is escaped and re-opens as the same paragraph", (content, markdown) => {
+    const doc = paragraph(...content);
+    expect(save(doc)).toBe(markdown + "\n");
+    expect(same(manager.parse(save(doc)), doc)).toBe(true);
+  });
+
+  it("escapes every punctuation character when the paragraph would still read as another block", () => {
+    // Code hides the "]" from the bracket escaping, so marked would read a link reference definition.
+    const doc = paragraph(text("[a"), text("]: b", "code"));
+    expect(save(doc)).toBe("\\[a`]: b`\n");
+    expect(same(manager.parse(save(doc)), doc)).toBe(true);
+    expect(save(manager.parse(save(doc)))).toBe(save(doc));
+  });
+
+  it("readsAsParagraph sees block syntax the inline read-back can't", () => {
+    expect(readsAsParagraph("a\n-|")).toBe(false);
+    expect(readsAsParagraph("[a`]: b`")).toBe(false);
+    expect(readsAsParagraph("a\n\\-|")).toBe(true);
+    expect(readsAsParagraph("plain\ntext")).toBe(true);
+  });
+});
+
+describe("saving again writes the same bytes", () => {
+  it.each([
+    ["an escaped '<' before code with '>'", [text("\\\n<"), text(">", "code")]],
+    [
+      "a path, then '<' before an arrow in code",
+      [text("Saved to C:\\\nif n <5 use "), text("a->b", "code"), text(" instead.")],
+    ],
+    [
+      "an image alt with '<' before bold and '>'",
+      [{ type: "image", attrs: { alt: "a<5", src: "x.png" } }, text(" "), text("b", "bold"), text(" >")],
+    ],
+  ])("%s, five saves in a row", (_, content) => {
+    const doc = paragraph(...(content as JSONContent[]));
+    const first = save(doc);
+    let markdown = first;
+    for (let round = 0; round < 5; round++) markdown = save(manager.parse(markdown));
+    expect(markdown).toBe(first);
+  });
+
+  it("re-opens an escaped '<' as the text it was", () => {
+    const doc = paragraph(text("\\\n<"), text(">", "code"));
+    expect(same(manager.parse(save(doc)), doc)).toBe(true);
   });
 });
 
@@ -543,5 +611,36 @@ describe("typed text that looks like syntax around addresses and links", () => {
     const markdown = save(doc);
     expect(performance.now() - start).toBeLessThan(1000);
     expect(readBack(manager.parse(markdown)).text).toBe(readBack(doc).text.replace(/ \n$/, "\n"));
+  });
+});
+
+describe("text that Tiptap's own block tokenizers would pick up", () => {
+  const bulletItem = (...content: JSONContent[]): JSONContent => ({
+    type: "doc",
+    content: [
+      { type: "bulletList", content: [{ type: "listItem", content: [{ type: "paragraph", content }] }] },
+    ],
+  });
+
+  it.each([
+    ["a paragraph", paragraph(text("- [ ] task", "code"), text(" makes a checkbox"))],
+    ["a bullet item", bulletItem(text("* [x] done", "code"), text(" is a checked one"))],
+    ["a paragraph, with a leading space", paragraph(text(" - [ ] x", "code"), text(" y"))],
+  ])("keeps a code span that starts like a task item as code in %s, without a backslash", (_, doc) => {
+    const markdown = save(doc);
+    expect(markdown).not.toContain("\\[");
+    expect(same(manager.parse(markdown), doc)).toBe(true);
+    expect(save(manager.parse(markdown))).toBe(markdown);
+  });
+
+  it.each([
+    ["a | b", "-|-"],
+    ["Price | Qty", "--|:-"],
+    ["x|", "- | -"],
+  ])("escapes a line Tiptap's table tokenizer takes for a delimiter row (%s / %s)", (first, second) => {
+    const doc = paragraph(text(first), { type: "hardBreak" }, text(second));
+    const markdown = save(doc);
+    expect(same(manager.parse(markdown), doc)).toBe(true);
+    expect(save(manager.parse(markdown))).toBe(markdown);
   });
 });

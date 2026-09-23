@@ -5,6 +5,7 @@ import {
   beforeDelimiterRow,
   closesFence,
   delimiterRowAfter,
+  endsLazyQuote,
   ENDS_TABLE,
   FENCE,
   type Fence,
@@ -15,14 +16,17 @@ import {
   inFence,
   isBlank,
   itemColumn,
+  lazyQuoteLines,
   leavesItem,
   LIST_MARKER,
   nestsDeeperThan,
   NOT_SETEXT_TEXT,
   SETEXT_UNDERLINE,
+  spacesAfterMarker,
   startsItem,
   startsTable,
   THEMATIC_BREAK,
+  underlinesAhead,
   withoutQuotes,
 } from "./oversized-lines";
 
@@ -88,6 +92,8 @@ export function scanBlocks(markdown: string): { longestRun: number; tooDeep: boo
   const tables = new Tokenizer();
   new Lexer({ gfm: true, tokenizer: tables }); // gives the tokenizer marked's GFM rules
   const stillTrusted = quoteResumptions();
+  const inLazyQuote = lazyQuoteLines();
+  const underlineAhead = underlinesAhead(lines);
   let untrustedFrom = -1; // the first line marked may read shifted, whose rest then counts as one run
   let longestRun = 0;
   let run = 0; // characters in the current run, 0 when none is open
@@ -96,6 +102,8 @@ export function scanBlocks(markdown: string): { longestRun: number; tooDeep: boo
   let runBullet: string | undefined; // the marker kind when the current run is a list item's text
   let runNotSetext = false; // a line of the current run keeps it from being a setext heading's text
   let lastNotSetext = false; // the last line of the current run does
+  // The current run went on over a blank line: marked's setext rule, which stops at one, can't take it.
+  let acrossBlank = false;
   /** The list items still open, innermost last (followed outside quotes only). */
   const items: Array<{ column: number; bullet: string }> = [];
   let fence: Fence | null = null;
@@ -106,6 +114,7 @@ export function scanBlocks(markdown: string): { longestRun: number; tooDeep: boo
   const endRun = (length = 0) => {
     longestRun = Math.max(longestRun, run, length);
     run = 0;
+    acrossBlank = false;
   };
   /** Closes the list items a line indented `indent` columns isn't part of. */
   const closeItems = (indent: number) => {
@@ -123,6 +132,14 @@ export function scanBlocks(markdown: string): { longestRun: number; tooDeep: boo
     // Whether the next line continues this line's quote lazily (it has fewer ">" and some text).
     const lazyNext = next !== undefined && withoutQuotes(next).quotes < quotes && !isBlank(next);
     if (!stillTrusted(quotes, rest, blank) && untrustedFrom < 0) untrustedFrom = i;
+    // A quoted line that is code (a fence, or indented code) takes no lazy lines after it.
+    const quotedCode =
+      quotes > 0 &&
+      ((fence !== null && fence.quotes > 0 && quotes >= fence.quotes) ||
+        FENCE.test(rest) ||
+        (indent >= 4 && run === 0));
+    // The depth of the quote that takes this line lazily, where "-" is text (see lazyQuoteLines), or 0.
+    const lazyQuote = inLazyQuote(line, quotes, quotedCode);
 
     if (fence) {
       if (inFence(fence, line, previousLine, quotes)) {
@@ -164,10 +181,13 @@ export function scanBlocks(markdown: string): { longestRun: number; tooDeep: boo
     let paragraphOpen = run > 0 && !(runQuotes >= 0 && runQuotes < quotes);
     // A paragraph marked reads with its paragraph rule (not a list item's text, which it reads by line).
     let plainParagraph = paragraphOpen && (runQuotes === quotes ? runColumn : 0) === 0;
-    // That rule runs on over a blank line holding a tab, and over a quoted one holding spaces when the
-    // quote then goes on lazily (marked joins the lazy lines' paragraph to the quote's).
-    if (blank && plainParagraph && (rest.includes("\t") || (rest !== "" && lazyNext))) {
+    // That rule runs on over a blank line holding a tab, and over a quoted one holding whitespace
+    // after its "> " (">\t", ">  ") when the quote then goes on lazily: marked joins the lazy lines'
+    // paragraph, or indented code, to the quote's.
+    const quotedWhitespace = quotes > 0 && !/> ?$/.test(line);
+    if (blank && plainParagraph && (rest.includes("\t") || (quotedWhitespace && lazyNext))) {
       run += rest.length + 1;
+      acrossBlank = true;
       continue;
     }
     if (blank) {
@@ -182,11 +202,23 @@ export function scanBlocks(markdown: string): { longestRun: number; tooDeep: boo
     }
     tableQuotes = -1;
 
+    // A setext underline ends the paragraph when marked reads the text before it as the heading's: all
+    // of it for "===", and at least the line before for dashes (marked starts a paragraph there). Not
+    // in a list item's text, where marked's lazy lines still continue the item after it, on a line a
+    // quote takes lazily, which marked indents to keep it from being one, or after a blank line.
+    const underline =
+      plainParagraph &&
+      runQuotes === quotes &&
+      indent < 4 &&
+      lazyQuote === 0 &&
+      !acrossBlank &&
+      SETEXT_UNDERLINE.test(rest.trimStart()) &&
+      !(rest.trimStart().startsWith("=") ? runNotSetext : lastNotSetext);
     // At the top level, a line followed by a table's delimiter row ("a | b" before "--- | ---") ends
     // the paragraph before it, whether or not the two make a valid table (in quotes and list items,
-    // marked's rules differ).
+    // marked's rules differ). Not an underline: marked reads the heading first ("a", "==", "| - |").
     const topLevel = quotes === 0 && runQuotes === 0 && runColumn === 0 && items.length === 0;
-    if (topLevel && indent < 4 && next !== undefined && beforeDelimiterRow(rest, next)) {
+    if (topLevel && !underline && indent < 4 && next !== undefined && beforeDelimiterRow(rest, next)) {
       endRun();
       paragraphOpen = plainParagraph = false;
     }
@@ -211,6 +243,21 @@ export function scanBlocks(markdown: string): { longestRun: number; tooDeep: boo
         : runQuotes === quotes && indent < runColumn
           ? runBullet
           : undefined;
+    const listMarker = LIST_MARKER.exec(rest);
+    const bullet = listMarker?.[1] ?? listMarker?.[3];
+    // A marker alone of another kind ("-\t" in a "1." item) starts no item, but marked's list item
+    // still ends there, and a paragraph starts outside the list.
+    const bareOtherMarker = BARE_MARKER.test(rest) && openList !== bullet;
+    if (
+      paragraphOpen &&
+      bareOtherMarker &&
+      quotes === 0 &&
+      runQuotes === 0 &&
+      indent < Math.min(4, runColumn)
+    ) {
+      endRun();
+      paragraphOpen = plainParagraph = false;
+    }
     const fenceOpen = FENCE.exec(rest);
     // A heading or thematic break, at any indentation: whether it's one in its container is checked below.
     const heading = INDENTED_BREAK.test(rest) || ATX_HEADING.test(rest);
@@ -226,9 +273,10 @@ export function scanBlocks(markdown: string): { longestRun: number; tooDeep: boo
       column = quotes === 0 ? (items.at(-1)?.column ?? 0) : itemInQuote;
     }
 
-    // Indented code. Right after a quote, marked may read the line as part of a list item in the quote.
+    // Indented code. Right after a quote, marked may read the line as part of a list item in the quote,
+    // and a quote's lazy lines (see lazyQuoteLines) as part of its last paragraph: counted as text.
     const afterQuotedItem = runQuotes > 0 && runBullet !== undefined && previous.quotes > 0;
-    if (!paragraphOpen && quotes === 0 && indent >= column + 4 && !afterQuotedItem) {
+    if (!paragraphOpen && quotes === 0 && indent >= column + 4 && !afterQuotedItem && lazyQuote === 0) {
       codeColumn = column;
       if (nestsDeeperThan(line, MAX_NESTING_IN_CODE)) return { longestRun, tooDeep: true };
       continue;
@@ -241,9 +289,11 @@ export function scanBlocks(markdown: string): { longestRun: number; tooDeep: boo
     }
     if (startsCode && nestsDeeperThan(line, MAX_NESTING)) return { longestRun, tooDeep: true };
     // HTML interrupts a paragraph only at its first column (marked); in a list item's text, indented up
-    // to 3. A less indented line that starts a tag ends the item, so no paragraph is open for it.
-    const htmlCanStart = indent < column + 4 && (!paragraphOpen || column > 0 || indent === 0);
+    // to 3. A less indented line that starts a tag ends the item, so no paragraph is open for it; one
+    // that doesn't ("\t<!--" under "1.   a") is a lazy line of the paragraph.
     const afterItem = column > 0 && indent < column ? htmlAfterItem(rest, quotes, items) : -1;
+    const inItemText = column > 0 && (indent >= column || afterItem >= 0);
+    const htmlCanStart = indent < column + 4 && (!paragraphOpen || inItemText || indent === 0);
     const htmlStart = htmlCanStart ? htmlBlockAt(rest.trimStart(), paragraphOpen && afterItem < 0) : null;
     if (htmlStart) {
       // Fences and other syntax inside it are HTML content until it ends (maybe on this line).
@@ -258,26 +308,25 @@ export function scanBlocks(markdown: string): { longestRun: number; tooDeep: boo
     const lineAfter = next !== undefined && withoutQuotes(next).quotes >= quotes;
     if (fenceOpen && indent < column + 4 && (!paragraphOpen || lineAfter)) {
       endRun();
-      fence = { marker: fenceOpen[1], quotes, column };
+      // Indented further into a list item, it may be in a nested item the scan doesn't follow ("1. -"
+      // over "      ~~~~"): taking its own indentation as its column ends it at the first line less
+      // indented, which counts more lines as text, never fewer.
+      fence = { marker: fenceOpen[1], quotes, column: column > 0 ? Math.max(column, indent) : column };
       continue;
     }
     if (heading && indent < column + 4) {
       endRun(rest.length);
       continue;
     }
-    // A setext underline ends the paragraph when marked reads the text before it as the heading's: all
-    // of it for "===", and at least the line before for dashes (marked starts a paragraph there). Not
-    // in a list item's text, where marked's lazy lines still continue the item after it, nor on a line
-    // continuing a quote lazily, which marked indents to keep it from being one.
-    if (plainParagraph && runQuotes === quotes && indent < 4 && SETEXT_UNDERLINE.test(rest.trimStart())) {
-      if (!(rest.trimStart().startsWith("=") ? runNotSetext : lastNotSetext)) {
-        endRun();
-        continue;
-      }
+    if (underline) {
+      endRun();
+      continue;
     }
-    const listMarker = LIST_MARKER.exec(rest);
-    const bullet = listMarker?.[1] ?? listMarker?.[3];
-    const marker = BARE_MARKER.test(rest) && openList !== bullet ? null : listMarker;
+    // A quote reads "-" among its lazy lines indented, as text (see lazyQuoteLines), not as an item.
+    const lazyText = lazyQuote > 0 && indent < 4 && SETEXT_UNDERLINE.test(rest.trimStart());
+    // In a paragraph, a marker and a tab before an underline is heading text too (see underlinesAhead).
+    const headingText = plainParagraph && quotes === 0 && runQuotes === 0 && underlineAhead[i] === 1;
+    const marker = bareOtherMarker || lazyText || headingText ? null : listMarker;
     if (marker && bullet && startsItem(marker, indent, paragraphOpen, column)) {
       endRun();
       if (quotes === 0) closeItems(indent);
@@ -289,7 +338,7 @@ export function scanBlocks(markdown: string): { longestRun: number; tooDeep: boo
       run = marker[4] === undefined ? 0 : rest.length + 1;
       const text = rest.slice(marker[0].length);
       runNotSetext = lastNotSetext = NOT_SETEXT_TEXT.test(text);
-      const opensBlock = marker[4] !== undefined && marker[4].length <= 4;
+      const opensBlock = marker[4] !== undefined && spacesAfterMarker(marker, indent) <= 4;
       const textFence = opensBlock ? FENCE.exec(text) : null;
       const textHtml = opensBlock ? htmlBlockAt(text, false) : null;
       if (textFence) {
@@ -305,7 +354,15 @@ export function scanBlocks(markdown: string): { longestRun: number; tooDeep: boo
     // A header indented as code in its container is code (lazy text in an open paragraph), never a
     // table. (A list item's lazy line keeps its own indentation in the item's text.)
     const indentInContainer = indent >= column ? indent - column : indent;
-    if (!marker && indentInContainer < 4 && next !== undefined && startsTable(rest, next, quotes, tables)) {
+    // Nor a line a quote takes lazily when the next line isn't one: they're in different containers.
+    const splitByQuote = lazyQuote > 0 && next !== undefined && endsLazyQuote(next);
+    if (
+      !marker &&
+      !splitByQuote &&
+      indentInContainer < 4 &&
+      next !== undefined &&
+      startsTable(rest, next, quotes, tables)
+    ) {
       endRun(rest.length);
       tableQuotes = quotes;
       i++; // the delimiter row
@@ -313,10 +370,11 @@ export function scanBlocks(markdown: string): { longestRun: number; tooDeep: boo
     }
     lastNotSetext = indent >= column + 4 || NOT_SETEXT_TEXT.test(rest.trimStart());
     if (!paragraphOpen) {
-      // After a quoted line holding only spaces, marked takes the lazy lines into the quote.
-      const lazyInQuote = previous.quotes > quotes && previous.rest !== "" && isBlank(previous.rest);
+      // marked takes the lazy lines after a quoted line with any text into the quote, and those after
+      // one holding only spaces (even a less deep one).
+      const afterSpaces = previous.quotes > quotes && previous.rest !== "" && isBlank(previous.rest);
       runColumn = column;
-      runQuotes = lazyInQuote ? previous.quotes : quotes;
+      runQuotes = lazyQuote > 0 ? lazyQuote : afterSpaces ? previous.quotes : quotes;
       runBullet = undefined;
       runNotSetext = lastNotSetext;
     } else if (quotes !== runQuotes) {

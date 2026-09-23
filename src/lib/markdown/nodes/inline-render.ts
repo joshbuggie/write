@@ -62,8 +62,10 @@ const sameMarks = (a: MarkJSON[], b: MarkJSON[]) =>
 /**
  * What rendering a paragraph needs: the manager's helpers, and the text already escaped for this
  * paragraph (settling renders the same runs pass after pass, and escaping is the costly part).
+ * `blockSafe`: every ASCII punctuation character in the text is escaped, "|" too, so no line can form
+ * block syntax (see renderInlineMarkdown); never in a table cell, where "\|" would split the row.
  */
-export type Renderer = { h: MarkdownRendererHelpers; escaped: Map<string, string> };
+export type Renderer = { h: MarkdownRendererHelpers; escaped: Map<string, string>; blockSafe?: boolean };
 
 /** Consecutive text atoms with the same marks form one run; every inline node is a run of its own. */
 function toRuns(atoms: Atom[]): Run[] {
@@ -103,23 +105,27 @@ function extents(runs: Run[]) {
   };
 }
 
-function renderRun(run: Run, { h, escaped }: Renderer, atoms: Atom[]): string {
+function renderRun(run: Run, { h, escaped, blockSafe }: Renderer, atoms: Atom[]): string {
   const index = atoms[run.first].index;
   if (run.node) return h.renderChild?.(run.node, index) ?? "";
   // The text goes through the manager's (patched) escaping, which only depends on the text and the
   // mark types; a code mark tells it not to escape.
-  const mode = run.escapeAll ? "all" : run.plainAddress ? "plain" : "";
+  const code = isCode(run);
+  const blockSafeText = !!blockSafe && !code;
+  const escapeAll = run.escapeAll || blockSafeText;
+  const mode = blockSafeText ? "block" : escapeAll ? "all" : run.plainAddress ? "plain" : "";
   const key = `${mode} ${run.marks.map((mark) => mark.type).join(" ")}\n${run.text}`;
   if (!escaped.has(key)) {
     const render = () => h.renderChild?.({ type: "text", text: run.text, marks: run.marks }, index);
-    const markdown = run.escapeAll
+    const markdown = escapeAll
       ? withEverythingEscaped(render)
       : run.plainAddress
         ? withPlainAddresses(render)
         : render();
-    escaped.set(key, markdown ?? run.text ?? "");
+    // Every "|" in text escaped that way is a literal one.
+    escaped.set(key, (mode === "block" ? markdown?.replace(/\|/g, "\\|") : markdown) ?? run.text ?? "");
   }
-  return isCode(run) ? codeSpan(escaped.get(key)!) : escaped.get(key)!;
+  return code ? codeSpan(escaped.get(key)!) : escaped.get(key)!;
 }
 
 /** Text ending in a "!" that isn't escaped already (after an even number of backslashes). */

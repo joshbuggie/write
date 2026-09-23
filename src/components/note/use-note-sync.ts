@@ -82,12 +82,12 @@ export function useNoteSync(note: Note, onDiskChange: (fresh: Note) => void): No
           api.saveNote({ ...ref, ...input }, { keepalive }).then(
             ({ note: saved }) => {
               const state = { content: input.content, version: saved.version, updatedAt: saved.updatedAt };
-              recordDiskState(ref, state, { savedHere: true });
+              recordDiskState(ref, state, "saved");
               return saved;
             },
             (err: unknown) => {
               if (isApiError(err, "version_conflict") && err.body?.current)
-                recordDiskState(ref, err.body.current);
+                recordDiskState(ref, err.body.current, "fetched");
               throw err;
             },
           ),
@@ -199,10 +199,13 @@ export function useNoteSync(note: Note, onDiskChange: (fresh: Note) => void): No
     };
   }, [actions, autosaver, folder, name]);
 
-  /** A newer state of the file: load it into a clean editor; a dirty one waits for its save's 409. */
-  function checkDisk(fresh: Note) {
+  /**
+   * A newer state of the file: load it into a clean editor; a dirty one waits for its save's 409.
+   * `source` says whether `fresh` came from page props (possibly replayed) or straight from the server.
+   */
+  function checkDisk(fresh: Note, source: "props" | "fetched") {
     if (fresh.readOnly || abandonedRef.current) return;
-    const latest = latestKnown(fresh); // a version this tab already saw replaced is stale, not news
+    const latest = latestKnown(fresh, source); // a state this tab already saw replaced is stale, not news
     if (autosaver.hasUnsavedChanges()) return;
     const v = latest.version;
     if (v === autosaver.getVersion() || autosaver.isKnownVersion(v) || v === requestedVersionRef.current)
@@ -210,7 +213,7 @@ export function useNoteSync(note: Note, onDiskChange: (fresh: Note) => void): No
     requestedVersionRef.current = v;
     onDiskChange(latest);
   }
-  const checkProps = useEffectEvent(checkDisk);
+  const checkProps = useEffectEvent((fresh: Note) => checkDisk(fresh, "props"));
 
   // Refreshed server props (router.refresh on focus, after mutations) carry the current version.
   useEffect(() => {
@@ -221,7 +224,7 @@ export function useNoteSync(note: Note, onDiskChange: (fresh: Note) => void): No
     { folder, name },
     (fresh) => {
       forgetMove(fresh); // the name exists on disk, whatever this tab renamed away from it earlier
-      checkDisk(fresh);
+      checkDisk(fresh, "fetched");
     },
     () => {
       const to = movedTo({ folder, name });

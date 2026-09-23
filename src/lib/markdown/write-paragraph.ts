@@ -9,6 +9,7 @@ import {
 } from "./escape";
 import { renderInlineMarkdown } from "./nodes/inline";
 import { isBlankInline } from "./nodes/inline-atoms";
+import { readsAsParagraph } from "./nodes/read-back";
 
 // Upstream's markdown hooks are arrow functions (no `this`), and the extend() `this` type has no `parent`,
 // so we call the original config hooks directly.
@@ -37,13 +38,20 @@ function blankParagraph(ctx: RenderContext | undefined): string {
 /** The escaping a paragraph outside tables gets, as the read-back checks it (see escapeLineStarts). */
 const asWritten = (markdown: string) => escapeLineStarts(escapeTagLikeSpans(markdown));
 
+/** The escaping a paragraph outside tables gets, as it goes in the file. */
+const asFinal = (markdown: string) => escapeBlockStarts(escapeTagLikeSpans(markdown));
+
+/** Whether the paragraph, as it goes in the file, reads back as one paragraph (see readsAsParagraph). */
+const readsAsOneBlock = (markdown: string) => readsAsParagraph(asFinal(markdown));
+
 /** Parents whose paragraphs are rendered on a single table row line (Tiptap reports "table" today). */
 const TABLE_PARENTS = new Set(["table", "tableRow", "tableCell", "tableHeader"]);
 
 /**
  * Paragraph with markdown fixes for files people own:
  * - a paragraph holding a single image stays a paragraph (upstream unwraps it, which is invalid with inline images);
- * - typed text that looks like a block start ("# x", "- x", "---") is escaped so it re-opens as the same paragraph;
+ * - typed text that looks like a block start ("# x", "- x", "---") is escaped so it re-opens as the same paragraph,
+ *   and the result is read back as a block (see readsAsParagraph), escaping more when it isn't one;
  * - inside table cells, `|` is escaped so it can't split the row;
  * - a literal "<" that would hide later formatting from marked is escaped;
  * - text with marks is written by renderInlineMarkdown (nested delimiters, no HTML fallback);
@@ -68,10 +76,11 @@ export const WriteParagraph = Paragraph.extend({
         : renderInlineMarkdown(node.content ?? [], helpers, {
             inTable,
             singleLine,
-            asWritten: inTable ? undefined : asWritten,
+            ...(inTable ? {} : { asWritten, readsAsOneBlock }),
           });
+    // A cell's text can't form blocks: every line of the table is a row.
     if (inTable) return escapeTablePipes(escapeTagLikeSpans(render()));
-    const markdown = escapeBlockStarts(escapeTagLikeSpans(render()));
+    const markdown = asFinal(render());
     if (ctx?.parentType !== "listItem") return markdown;
     // A list item's first paragraph sits on the marker line; later ones are continuation lines.
     return ctx.index > 0 ? escapeLetterListMarker(markdown) : escapeTaskMarker(markdown);

@@ -24,6 +24,26 @@ export const FENCE = /^[ \t]*(`{3,}(?=[^`]*$)|~{3,})/;
 export const ATX_HEADING = /^[ \t]*#{1,6}(?:[ \t]|$)/;
 /** A setext heading's underline, when it follows paragraph text ("===", "--"). */
 export const SETEXT_UNDERLINE = /^(?:=+|-+) *$/;
+/** Lines marked's setext heading rule doesn't take as the heading's text (an underline aside). */
+const NOT_HEADING_TEXT =
+  /^(?:[ \t]*$|(?: {4}| {0,3}\t)| {0,3}(?:(?:[*+-]|\d{1,9}[.)]) |`{3,}|~{3,}|>|#{1,6}|<[^>]+>$|\|?(?:[:\- ]*\|)+[:\- ]*$))/;
+const UNDERLINE_LINE = /^ {0,3}(?:=+|-+) *$/;
+
+/**
+ * For each line, whether marked's setext heading rule, reading text from there on, reaches an
+ * underline. That rule runs before the paragraph rule and takes a list marker followed by a tab
+ * ("-\tx", "1.\t```") as the heading's text, so a paragraph over such lines and an underline is one
+ * heading, not a paragraph and list items. One pass from the end, so it stays linear.
+ */
+export function underlinesAhead(lines: string[]): Uint8Array {
+  const reach = new Uint8Array(lines.length + 1);
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const text = !NOT_HEADING_TEXT.test(lines[i]) && reach[i + 1] === 1;
+    reach[i] = UNDERLINE_LINE.test(lines[i]) || text ? 1 : 0;
+  }
+  return reach;
+}
+
 /** Starts of lines that keep marked from reading the text before an underline as a setext heading. */
 export const NOT_SETEXT_TEXT = /^(?:(?:[-+*]|\d{1,9}[.)])(?:[ \t]|$)|[>#<|]|`{3}|~{3}|[:\- ]*\|)/;
 const TABLE_DELIMITER_ROW = /^ {0,3}(?:\| *)?:?-+:? *(?:\| *:?-+:? *)*(?:\| *)?$/;
@@ -94,13 +114,49 @@ const HTML_BLOCKS: Array<{
   { start: new RegExp(`^ {0,3}</?(?:${BLOCK_TAGS})(?: |/?>|$)`, "i"), end: () => null, interrupts: true },
   {
     start: new RegExp(
-      `^ {0,3}(?:<(?!script|pre|style|textarea)[a-z][\\w-]*${ATTRIBUTE}*? */?>|</[a-z][\\w-]*\\s*>)[ \\t]*$`,
+      `^ {0,3}(?:<(?!script|pre|style|textarea)[a-z][\\w-]*${ATTRIBUTE}*? */?>|</(?!script|pre|style|textarea)[a-z][\\w-]*\\s*>)[ \\t]*$`,
       "i",
     ),
     end: () => null,
     interrupts: false,
   },
 ];
+
+/**
+ * Lines that stop a quote from taking the lines after it lazily (marked's quote rule reads them with its
+ * paragraph rule): a thematic break, heading, quote, fence, list item ("-", "*", "+" or "1." and a
+ * space), or an HTML block of the kinds that interrupt a paragraph. Strict on purpose: a line wrongly
+ * taken into the quote only makes the run longer.
+ */
+const ENDS_LAZY_QUOTE = new RegExp(
+  `^(?: {0,3}(?:${BREAK}|#{1,6}(?:[ \\t]|$)|>|\`{3,}(?=[^\`]*$)|~{3,}|(?:[*+-]|1[.)])[ \\t])` +
+    `|</?(?:${BLOCK_TAGS})(?: |/?>|$)|<(?:script|pre|style|textarea|!--))`,
+);
+
+/**
+ * Follows which lines a quote takes lazily. marked's quote rule takes the lines after a quoted line
+ * with any text (after "> " or ">", even a tab) up to a blank line or a line that ends it (see
+ * ENDS_LAZY_QUOTE), whatever block that quoted line starts ("> ## h", "> <div>", "> ---"), unless the
+ * quote ends in code. It reads them in the quote, a setext underline among them ("-", "==") indented,
+ * as text: it doesn't end a paragraph there. Call it for every line, with whether a quoted line is
+ * code; it returns the depth of the quote a line without ">" is in that way, or 0.
+ */
+export function lazyQuoteLines() {
+  let depth = 0;
+  return (line: string, quotes: number, code: boolean): number => {
+    if (quotes > 0) {
+      depth = code || /^ {0,3}> ?$/.test(line) ? 0 : quotes;
+      return 0;
+    }
+    if (depth > 0 && endsLazyQuote(line)) depth = 0;
+    return depth;
+  };
+}
+
+/** Whether a line without ">" ends the lines a quote takes lazily (see lazyQuoteLines). */
+export const endsLazyQuote = (line: string) =>
+  // A line of spaces ends them; one with a tab doesn't (marked's rule reads it as text).
+  (isBlank(line) && !line.includes("\t")) || ENDS_LAZY_QUOTE.test(line);
 
 /** The HTML block a line starts, if any: the text that ends it (null: a blank line). */
 export function htmlBlockAt(rest: string, paragraphOpen: boolean): { end: RegExp | null } | null {
@@ -144,7 +200,10 @@ export function closesFence(fence: Fence, text: string): boolean {
  * at most 3, and less than the item's text column.
  */
 const LEAVES_ITEM = [0, 1, 2, 3].map((spaces) => ({
-  line: new RegExp(`^ {0,${spaces}}(?:[>#<]|\`{3}|~{3}|(?:[*+-]|\\d{1,9}[.)])(?:[ \\t]|$)|${BREAK})`),
+  line: new RegExp(
+    `^ {0,${spaces}}(?:[>#]|<(?:[a-z].*>|!--)|\`{3}|~{3}|(?:[*+-]|\\d{1,9}[.)])(?:[ \\t]|$)|${BREAK})`,
+    "i",
+  ),
   before: new RegExp(`^ {0,${spaces}}(?:\`{3}|~{3}|#|${BREAK})`),
 }));
 
@@ -158,11 +217,12 @@ export function leavesItem(column: number, line: string, previous: string): bool
   if (column === 0 || isBlank(line) || indentOf(line) >= column) return false;
   const leaves = LEAVES_ITEM[Math.min(3, column - 1)];
   if (leaves.line.test(line)) return true;
-  // marked reads the item's lines with each tab as four spaces, and its first line after the marker.
+  // marked reads the item's first line after the marker (with tab stops, see spacesAfterMarker), and
+  // its other lines with each tab as four spaces.
+  const marker = LIST_MARKER.exec(previous);
   const expanded = previous.replace(/\t/g, "    ");
-  const marker = LIST_MARKER.exec(expanded);
   let inItem = expanded;
-  if (marker && itemColumn(marker, indentOf(expanded)) === column) inItem = expanded.slice(marker[0].length);
+  if (marker && itemColumn(marker, indentOf(previous)) === column) inItem = previous.slice(marker[0].length);
   else if (indentOf(expanded) >= column) inItem = expanded.slice(column);
   return isBlank(inItem) || indentOf(inItem) >= 4 || leaves.before.test(inItem);
 }
@@ -179,19 +239,32 @@ export function inFence(fence: Fence, line: string, previous: string, quotes: nu
 }
 
 /**
- * The column a list item's text starts at: after the marker and the spaces after it, or one space when
- * there are more than four (the rest is indented code).
+ * How many columns the spaces after a list marker take (one for an empty item). marked expands each tab
+ * there to the next tab stop of 4, counted from the line's start, so "-\t" takes 3.
+ */
+export function spacesAfterMarker(marker: RegExpExecArray, indent: number): number {
+  const markerEnd = indent + (marker[1] ? 1 : marker[2].length + 1);
+  let column = markerEnd;
+  for (const char of marker[4] ?? " ") column += char === "\t" ? 4 - (column % 4) : 1;
+  return column - markerEnd;
+}
+
+/**
+ * The column a list item's text starts at: after the marker and the spaces after it (see
+ * spacesAfterMarker), or one space when there are more than four (the rest is indented code).
  */
 export function itemColumn(marker: RegExpExecArray, indent: number): number {
-  const spaces = marker[4]?.length ?? 1;
+  const spaces = spacesAfterMarker(marker, indent);
   const markerWidth = marker[1] ? 1 : marker[2].length + 1;
   return indent + markerWidth + (spaces <= 4 ? spaces : 1);
 }
 
 /**
  * Whether a list marker line starts a new item rather than continuing the open paragraph: a bullet or
- * "1." interrupts a paragraph unless it's indented as code or empty; another number ("5.") only starts
- * an item outside the paragraph's own item (marked, like CommonMark, won't let it interrupt).
+ * "1." interrupts a paragraph unless it's indented as code or empty; another number ("5.", "01.") only
+ * starts an item outside the paragraph's own item (marked, like CommonMark, won't let it interrupt).
+ * Unlike CommonMark, marked lets an empty item interrupt when two or more spaces or tabs follow the
+ * marker ("*\t\t").
  */
 export function startsItem(
   marker: RegExpExecArray,
@@ -201,8 +274,8 @@ export function startsItem(
 ) {
   if (!paragraphOpen) return true;
   if (indent < runColumn) return true; // a sibling or outer item
-  const empty = marker[4] === undefined;
-  const interrupts = marker[1] !== undefined || Number(marker[2]) === 1;
+  const empty = marker[4] === undefined && !/[ \t]{2}$/.test(marker[0]);
+  const interrupts = marker[1] !== undefined || marker[2] === "1";
   return indent < runColumn + 4 && interrupts && !empty;
 }
 

@@ -126,6 +126,22 @@ function freePipesFromCode(atoms: Atom[]): void {
 }
 
 /**
+ * Writes the atoms: settles them, writes each part readably, then reads the whole paragraph back once
+ * more. The parts read the same together (see independentParts) unless escaping differs at a cut: rare,
+ * and then the paragraph is written again from what's left, like the next save will.
+ */
+function writeAtoms(atoms: Atom[], renderer: Renderer, inTable: boolean, asWritten?: AsWritten): string {
+  for (;;) {
+    // Marks CommonMark can't open or close are given up first, so the parts are cut where they'll stay.
+    settle(atoms, renderer, STYLE_CHOICES[0]);
+    const styles = writePart(atoms, renderer, inTable);
+    const whole = writeReadably(atoms, renderer, inTable, [(atom) => styles[atom]], asWritten);
+    if (!whole.gaveUp) return whole.markdown;
+    resetWriting(atoms);
+  }
+}
+
+/**
  * Inline content (text with marks, images, hard breaks) as markdown that re-opens as the same marks.
  * Overlapping marks are closed and reopened instead of falling back to HTML. Where CommonMark can't open
  * or close a delimiter (a mark edge between a letter and punctuation, like `これは「強調」です` or
@@ -138,6 +154,11 @@ function freePipesFromCode(atoms: Atom[]): void {
  * `singleLine` (headings, a task's text) writes newline characters as spaces; `inTable` too, for a cell.
  * `asWritten`: the escaping the caller applies to the result, which the final read-back checks too
  * (only "<" before hidden delimiters when not given, see escapeTagLikeSpans).
+ * `readsAsOneBlock`: whether the result, as the caller writes it, reads back as the one block it is (see
+ * readsAsParagraph). The inline read-back can't see block syntax formed by several lines ("a" over
+ * "-|" is a table); when that happens, the content is written again with every ASCII punctuation
+ * character in its text escaped, "|" included, so no line of it can start or shape a block. That is
+ * deterministic, so the next save writes the same bytes.
  */
 export function renderInlineMarkdown(
   content: JSONContent[],
@@ -146,19 +167,22 @@ export function renderInlineMarkdown(
     singleLine = false,
     inTable = false,
     asWritten,
-  }: { singleLine?: boolean; inTable?: boolean; asWritten?: AsWritten } = {},
+    readsAsOneBlock,
+  }: {
+    singleLine?: boolean;
+    inTable?: boolean;
+    asWritten?: AsWritten;
+    readsAsOneBlock?: (markdown: string) => boolean;
+  } = {},
 ): string {
-  const atoms = toAtoms(content, singleLine || inTable);
-  if (inTable) freePipesFromCode(atoms);
-  const renderer: Renderer = { h, escaped: new Map() };
-  for (;;) {
-    // Marks CommonMark can't open or close are given up first, so the parts are cut where they'll stay.
-    settle(atoms, renderer, STYLE_CHOICES[0]);
-    const styles = writePart(atoms, renderer, inTable);
-    const whole = writeReadably(atoms, renderer, inTable, [(atom) => styles[atom]], asWritten);
-    // The parts read the same together (see independentParts) unless escaping differs at a cut: rare,
-    // and then the paragraph is written again from what's left, like the next save will.
-    if (!whole.gaveUp) return whole.markdown;
-    resetWriting(atoms);
-  }
+  const write = (blockSafe: boolean) => {
+    const atoms = toAtoms(content, singleLine || inTable);
+    if (inTable) freePipesFromCode(atoms);
+    return writeAtoms(atoms, { h, escaped: new Map(), blockSafe }, inTable, asWritten);
+  };
+  const markdown = write(false);
+  if (!readsAsOneBlock || readsAsOneBlock(markdown)) return markdown;
+  // With all text punctuation escaped, only code spans, links, images and delimiters can start a line,
+  // and none of those starts a block, so this isn't read back again.
+  return write(true);
 }

@@ -2,14 +2,22 @@ import { escapeLineStarts } from "../escape";
 import type { Piece } from "./flanking";
 
 /**
+ * Tiptap's task-list tokenizer is tried one character into a paragraph, so a paragraph starting with
+ * "`- [ ] x`" would re-open as "`" plus a task list. A two-backtick fence and a space keep the marker out
+ * of its reach without touching the code (CommonMark strips that one space on each side).
+ */
+const TASK_MARKER = /^\s*[-+*]\s+\[[ xX]\]/;
+
+/**
  * A code span that re-opens with exactly this content: the fence is longer than any backtick run inside,
  * and a space pads content that starts or ends with a backtick or that marked would otherwise trim.
  */
 export function codeSpan(text: string): string {
   const longest = Math.max(0, ...(text.match(/`+/g) ?? []).map((run) => run.length));
-  const fence = "`".repeat(longest + 1);
+  const looksLikeTask = TASK_MARKER.test(text);
+  const fence = "`".repeat(Math.max(longest + 1, looksLikeTask ? 2 : 1));
   const trimmedByParser = /^ [\s\S]* $/.test(text) && /[^ ]/.test(text);
-  const pad = /^`|`$/.test(text) || trimmedByParser ? " " : "";
+  const pad = /^`|`$/.test(text) || trimmedByParser || looksLikeTask ? " " : "";
   return fence + pad + text + pad + fence;
 }
 
@@ -66,16 +74,43 @@ export function escapeLinkText(pieces: Piece[], from: number): void {
 }
 
 /**
+ * A newline in alt text stays one only before a line that starts with a letter or digit and wouldn't
+ * start a block ("a long\ndescription"); before anything else (a blank line, "<div>", a fence, "1. x",
+ * a delimiter row) it would end the paragraph or start a block, and the image would be lost.
+ */
+const keepsNewline = (line: string) => /^[\p{L}\p{N}]/u.test(line) && escapeLineStarts(line) === line;
+
+/**
+ * marked only reads a backtick in an image's (or link's) text as part of a pair ("a `b` c"): a backtick
+ * with no later one to pair with ends the text, and the image is lost. Such a backtick is escaped.
+ */
+function escapeUnpairedBackticks(alt: string): string {
+  let out = "";
+  for (let i = 0; i < alt.length; i++) {
+    if (alt[i] === "\\") {
+      out += alt.slice(i, i + 2);
+      i++;
+    } else if (alt[i] === "`") {
+      const close = alt.indexOf("`", i + 1);
+      out += close === -1 ? "\\`" : alt.slice(i, close + 1);
+      if (close !== -1) i = close;
+    } else out += alt[i];
+  }
+  return out;
+}
+
+/**
  * An image's alt text; marked un-escapes brackets in it and keeps every other backslash as written, so
- * what a backslash can't fix is written differently: a newline before a line that would start a block
- * ("1. x", "> x") as a space, and a backslash at the end, which would escape the "]", with a space after
- * it. Neither can come from Markdown (the text wouldn't be an image there), only from pasted HTML.
+ * what a backslash can't fix is written differently: a newline before a line that would end the
+ * paragraph or start a block as a space (see keepsNewline), a backslash at the end, which would escape
+ * the "]", with a space after it, and a backtick with nothing to pair with escaped (it re-opens with the
+ * backslash). None can come from Markdown (the text wouldn't be an image there), only from pasted HTML.
  */
 export function escapeAltText(alt: string): string {
   const oneBlock = alt.replace(/\n(?=([^\n]*))/g, (newline, line: string) =>
-    escapeLineStarts(line) === line ? newline : " ",
+    keepsNewline(line) ? newline : " ",
   );
-  const pieces: Piece[] = [{ md: oneBlock, text: true }];
+  const pieces: Piece[] = [{ md: escapeUnpairedBackticks(oneBlock), text: true }];
   escapeUnbalancedBrackets(pieces, 0);
   return pieces[0].md.replace(/(?<!\\)(?:\\\\)*\\$/, "$& ");
 }

@@ -86,6 +86,9 @@ describe("escapeBlockStarts", () => {
     ["> not quote", "\\> not quote"],
     ["---", "\\---"],
     ["===", "\\==="],
+    ["-- -", "\\-- -"],
+    ["--- -", "\\--- -"],
+    ["_ __", "\\_ __"],
     ["- [ ] not a task", "\\- \\[ ] not a task"],
     ["- [x](https://e.com) a link, not a task", "\\- [x](https://e.com) a link, not a task"],
     ["x- [x] not a task", "x- \\[x] not a task"],
@@ -97,6 +100,20 @@ describe("escapeBlockStarts", () => {
 
   it("escapes every line of a paragraph with hard breaks", () => {
     expect(escapeBlockStarts("a  \n# b  \n- c")).toBe("a  \n\\# b  \n\\- c");
+  });
+
+  it.each([
+    ["a\n-|", "a\n\\-|"],
+    ["a  \n|-", "a  \n\\|-"],
+    ["Total\n| --- |", "Total\n\\| --- |"],
+    ["a b\n:-", "a b\n\\:-"],
+    ["a\n-- -", "a\n\\-- -"],
+  ])("escapes a line that would make the one above it a table header or rule: %j", (input, output) => {
+    expect(escapeBlockStarts(input)).toBe(output);
+  });
+
+  it.each(["|-", ":-", "a\n:-) smile", "a\n-> arrow", "a\n| cell |"])("leaves %j alone", (text) => {
+    expect(escapeBlockStarts(text)).toBe(text);
   });
 
   it.each(["#hashtag", "-dash", "1.5 liters", "a - b", "2024-01-01", "text > more"])(
@@ -153,6 +170,13 @@ describe("escapeTagLikeSpans", () => {
     ["a longer code span holds a single backtick", "``x<`y`` *b* >", "``x<`y`` *b* >"],
     ["a code span closes at a run of its own length", "`a``<5 *x*`` >` z", "`a``<5 *x*`` >` z"],
     ["an escaped backtick only makes the first of its run literal", "\\```x<5`` *b* >", "\\```x<5`` *b* >"],
+    // Another backslash would turn "\<" into a literal backslash and a "<", one more on every save.
+    ["an escaped < isn't escaped again", "\\\\\n\\<`>`", "\\\\\n\\<`>`"],
+    [
+      "an escaped < after a literal backslash",
+      "C\\:\\\\\nif n \\<5 use `a->b`",
+      "C\\:\\\\\nif n \\<5 use `a->b`",
+    ],
   ])("%s", (_, input, output) => {
     expect(escapeTagLikeSpans(input)).toBe(output);
   });

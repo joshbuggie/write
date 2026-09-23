@@ -113,7 +113,23 @@ const BLOCK_STARTS: Array<[RegExp, string]> = [
   [/^(\s{0,3})(\d+)([.)])(?=\s|$)/, "$1$2\\$3"], // ordered list (Tiptap accepts any number of digits)
   [/^(\s{0,3})>/, "$1\\>"], // blockquote
   [/^(\s{0,3})(=+|-+)(\s*)$/, "$1\\$2$3"], // setext underline / thematic break
+  [/^(\s{0,3})([-*_])(?=(?:[ \t]*\2){2,}[ \t]*$)/, "$1\\$2"], // spaced thematic break ("-- -", "_ __")
 ];
+
+/**
+ * A GFM table's delimiter row ("-|", ":-", "| --- |"): under another line of a paragraph, it would turn
+ * that line into a table header. Loose on purpose (marked also wants a pipe or colon, and as many cells
+ * as the header): escaping one character too many costs nothing. No two adjacent "[ \t]*", so a long
+ * line can't make it backtrack.
+ */
+const DELIMITER_ROW = /^ {0,3}\|?[ \t]*:?-+:?[ \t]*(?:\|[ \t]*:?-+:?[ \t]*)*(?:\|[ \t]*)?$/;
+
+/**
+ * Tiptap's table tokenizer is looser than GFM: any line of only spaces, tabs, "|", ":" and "-" (with at
+ * least one "-") under a line with a "|" starts a table for it, and marked tries it at every offset of a
+ * paragraph. The first character class has no "-", so this can't backtrack either.
+ */
+const TIPTAP_DELIMITER_ROW = /^[ \t|:]*-[ \t|:-]*$/;
 
 /**
  * Tiptap's task-list tokenizer looks for "- [ ] " one character into a block, even after "\" or a letter
@@ -123,7 +139,8 @@ const BLOCK_STARTS: Array<[RegExp, string]> = [
 const TASK_MARKER_NEAR_START = /^(.?\s*[-+*]\s+)\[(?=[ xX]\](?:\s|$))/;
 
 /**
- * Escape paragraph lines that would otherwise start a block ("# x", "- x", "1. x", "> x", "---", "- [ ] x").
+ * Escape paragraph lines that would otherwise start a block ("# x", "- x", "1. x", "> x", "---", "-- -",
+ * "- [ ] x"), or turn the line above into a table header ("-|").
  * Also drops code-block indentation from the first line: markdown can't keep leading spaces anyway,
  * and four of them would silently turn the paragraph into code.
  */
@@ -138,7 +155,11 @@ export function escapeBlockStarts(markdown: string): string {
 export function escapeLineStarts(markdown: string): string {
   return markdown
     .split("\n")
-    .map((line) => BLOCK_STARTS.reduce((l, [re, replacement]) => l.replace(re, replacement), line))
+    .map((line, i) => {
+      const escaped = BLOCK_STARTS.reduce((l, [re, replacement]) => l.replace(re, replacement), line);
+      const tableRow = DELIMITER_ROW.test(escaped) || TIPTAP_DELIMITER_ROW.test(escaped);
+      return i > 0 && tableRow ? escaped.replace(/^(\s*)/, "$1\\") : escaped;
+    })
     .join("\n")
     .replace(TASK_MARKER_NEAR_START, "$1\\[");
 }
@@ -172,10 +193,11 @@ export function escapeTagLikeSpans(markdown: string): string {
   let nextDelimiter = Infinity;
   for (let i = n - 1; i >= 0; i--) {
     const c = markdown[i];
+    // An escaped "<" is already literal: another backslash would make the first one literal instead.
+    if (escaped[i]) continue;
     if (c === "<" && !NOT_A_HIDING_LT.test(markdown[i + 1] ?? "") && nextDelimiter < nextGt && nextGt < n) {
       hides[i] = 1;
     }
-    if (escaped[i]) continue;
     if (c === ">") nextGt = i;
     else if (HIDDEN_DELIMITERS.has(c)) nextDelimiter = i;
   }

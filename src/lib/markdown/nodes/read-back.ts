@@ -139,3 +139,40 @@ export function firstMisread(
   for (let i = 0; i < length; i++) if (actual[i] !== expected[i]) return { at: i, autolinks };
   return complete && actual.length === expected.length ? null : { at: length, autolinks };
 }
+
+/**
+ * A line that may start a block, end one, or turn the line above into one ("-|" under it): its first
+ * character after the indentation is ASCII punctuation or a digit. A paragraph without one is always
+ * a single paragraph, so its block structure isn't read back.
+ */
+const MAY_FORM_BLOCK = /(?:^|\n)[ \t]*[!-/:-@[-`{-~0-9]/;
+
+/**
+ * marked's blocks for `markdown` as a note holds it (a newline after it lets a fence or table form),
+ * without lexing their inline content: that's the costly part, and superlinear on some long paragraphs.
+ */
+const blocksOf = (markdown: string) =>
+  new Lexer({ gfm: true }).blockTokens(markdown + "\n").filter((token) => token.type !== "space");
+
+/**
+ * Whether marked reads `markdown` (a paragraph as written, block-start escapes included) as exactly one
+ * paragraph holding all of it. The inline read-back (firstMisread) can't see block syntax that the
+ * paragraph's lines form together: a table delimiter row or setext underline under a line, a thematic
+ * break, a fence. Then the paragraph's text would re-open as another block, or lose lines.
+ */
+export function readsAsParagraph(markdown: string): boolean {
+  if (!MAY_FORM_BLOCK.test(markdown)) return true;
+  const blocks = blocksOf(markdown);
+  return blocks.length === 1 && blocks[0].type === "paragraph" && blocks[0].text === markdown;
+}
+
+/** Whether marked reads `markdown` as exactly one heading of this level whose inline markdown is `text`. */
+export function readsAsHeading(markdown: string, depth: number, text: string): boolean {
+  const blocks = blocksOf(markdown);
+  return (
+    blocks.length === 1 &&
+    blocks[0].type === "heading" &&
+    blocks[0].depth === depth &&
+    blocks[0].text === text
+  );
+}

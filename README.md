@@ -232,6 +232,8 @@ A few more rules:
   button. write never modifies them.
 - **Images** display when they point to a web URL. Uploading images isn't supported yet, and images with
   relative paths don't display.
+- **Tabs inside list items** become spaces once the note is saved and reopened (the Markdown parser
+  expands them there). Tabs in ordinary paragraphs, quotes and code are kept.
 - You can switch any note between the visual editor and Markdown source from its **⋯** menu.
 
 ---

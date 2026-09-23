@@ -36,6 +36,13 @@ describe("hasOversizedParagraph on note open and paste", () => {
     ],
     ["HTML block starts", upTo(256 * K, (i) => (i % 2 ? "<div>\n" : "<!-- x\n"))],
     ["one line", "x".repeat(256 * K)],
+    ["one line of table and heading syntax", "|- :".repeat(64 * K)],
+    [
+      "quoted headings, each with lazy lines",
+      upTo(256 * K, (i) => ["> ## h\n", "text\n", "-\n", "\tx\n"][i % 4]),
+    ],
+    ["tabs after list markers opening fences", upTo(256 * K, (i) => (i % 2 ? "-\t```\n" : "x\n"))],
+    ["list items with tabs, all heading text", "a\n" + upTo(256 * K, () => "-\tb\n") + "\n---\n"],
     // A line indented as code before a delimiter row ("| - |") is lazy paragraph text, not a table
     // header, so the rows after it are one paragraph (with emphasis, the slowest kind to parse).
     [
@@ -67,6 +74,34 @@ describe("hasOversizedParagraph on note open and paste", () => {
     ["a quote's lazy line in a list item", "- > a\n      b\n  | - |\n"],
   ])("sends rows after %s over a delimiter row to source mode", (_, start) => {
     const markdown = start + "w".repeat(78).concat("\n").repeat(400);
+    expect(hasOversizedParagraph(markdown)).toBe(true);
+  });
+
+  // marked reads everything after each of these as one paragraph (or a list item's text): a tab after a
+  // marker goes to the next tab stop, so "-\t```" is an item whose fence ends at the next line; closing
+  // tags of script, pre, style and textarea aren't HTML blocks; a setext heading wins over the table
+  // below it; and a quote takes the lines after any quoted line lazily, reading "-" there as text.
+  it.each([
+    ["-\t```\nx\n", ""],
+    ["*\t```\n", ""],
+    ["1.\t```\n", ""],
+    ["-\t~~~~\n:-: | --\n", ""],
+    ["-\t```\n-|-\n", ""],
+    ["*\t```\n", "  "],
+    ["> ## h\ntext\n-\n", "      "],
+    ["> ---\ntext\n-\n", "      "],
+    ["> ## h\n-->\n==\n", "      "],
+    [">\t\n]]>\n-\n", "      "],
+    ["><!--\nwwwwwwww\n-\n", "      "],
+    ["> > <span>\n-->\n-\n", "      "],
+    ["><table>\n-->\n  --\n", "      "],
+    ["> </pre>\nwwwwwwww\n-\n", "      "],
+    ["</pre>\n\t\n", "      "],
+    ["a\n==\n| - |\n", ""],
+    ["1. \t\n    </script>\n-\t\n      ~~~~\n", "      "],
+    ["a\n-\t```\n", ""],
+  ])("sends a long run after %j to source mode", (start, indent) => {
+    const markdown = start + (indent + "w".repeat(78) + "\n").repeat(400);
     expect(hasOversizedParagraph(markdown)).toBe(true);
   });
 
@@ -176,6 +211,15 @@ describe("scanBlocks", () => {
       ),
       // Lines marked reads unlike CommonMark: "- " starts no list, a tab keeps a paragraph going.
       ...["- ", "1. ", "\t", "> \t", ">     ", "<!-- x", "-->", "<span>"].map((line) => () => line),
+      // A tab after a list marker (to the next tab stop), closing tags marked doesn't read as HTML,
+      // and quoted lines of any block, which take the lines after them lazily (a "-" there is text).
+      ...["-\t```", "*\t```", "1.\t```", "-\t~~~~", "*\t\t", "-\t", "</pre>", "</script>", "]]>"].map(
+        (line) => () => line,
+      ),
+      ...["> ## h", "> ---", "><!--", "> > <span>", "><table>", "> </pre>", ">\t", "  --", "==", "-|-"].map(
+        (line) => () => line,
+      ),
+      ...["      ", ":-: | --"].map((prefix) => () => prefix + words()),
     ];
     const misses: string[] = [];
     for (let n = 0; n < 20_000; n++) {
