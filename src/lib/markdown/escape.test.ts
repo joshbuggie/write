@@ -2,12 +2,15 @@ import { describe, expect, it } from "vitest";
 import {
   encodeText,
   escapeBlockStarts,
+  escapeEverything,
   escapeLetterListMarker,
+  escapeTablePipes,
   escapeTagLikeSpans,
   patchMarkdownManager,
-  withEscapedTablePipes,
+  withEverythingEscaped,
 } from "./escape";
 import { createMarkdownManager } from "./extensions";
+import { firstMisread } from "./nodes/read-back";
 
 describe("encodeText", () => {
   it.each([
@@ -42,6 +45,15 @@ describe("encodeText", () => {
 
 describe("encodeText and bare URLs", () => {
   it.each([
+    ["Docs: <https://x.com/docs> here", "Docs: &lt;https://x.com/docs> here"],
+    ["see https://x.com/(*a* now", "see https://x.com/(\\*a\\* now"],
+    ["see https://x.com/a.(b_c_ now", "see https://x.com/a.(b_c\\_ now"],
+    ["https://x.com/(a(b) *c*", "https://x.com/(a(b) \\*c\\*"],
+  ])("escapes what marked reads outside the URL in %j", (input, output) => {
+    expect(encodeText(input)).toBe(output);
+  });
+
+  it.each([
     ["see https://x.com/~u/ now", "see https://x.com/~u/ now"],
     ["https://x.com/a*b*c", "https://x.com/a*b*c"],
     ["https://x.com/a__b__c and a_b", "https://x.com/a__b__c and a_b"],
@@ -75,6 +87,7 @@ describe("escapeBlockStarts", () => {
     ["---", "\\---"],
     ["===", "\\==="],
     ["- [ ] not a task", "\\- \\[ ] not a task"],
+    ["- [x](https://e.com) a link, not a task", "\\- [x](https://e.com) a link, not a task"],
     ["x- [x] not a task", "x- \\[x] not a task"],
     ["    not code", "not code"],
     ["\tnot code", "not code"],
@@ -137,6 +150,9 @@ describe("escapeTagLikeSpans", () => {
     ["an escaped > doesn't close", "<5 \\> *x* >", "\\<5 \\> *x* >"],
     ["a code span ends at the next backtick", "`a\\` <5 *x* >", "`a\\` \\<5 *x* >"],
     ["an unclosed backtick is a delimiter", "<5 ` x >", "\\<5 ` x >"],
+    ["a longer code span holds a single backtick", "``x<`y`` *b* >", "``x<`y`` *b* >"],
+    ["a code span closes at a run of its own length", "`a``<5 *x*`` >` z", "`a``<5 *x*`` >` z"],
+    ["an escaped backtick only makes the first of its run literal", "\\```x<5`` *b* >", "\\```x<5`` *b* >"],
   ])("%s", (_, input, output) => {
     expect(escapeTagLikeSpans(input)).toBe(output);
   });
@@ -197,14 +213,70 @@ describe("patchMarkdownManager", () => {
     expect(manager.encodeTextForMarkdown).toBe(patched);
   });
 
-  it("escapes pipes (code included) only while rendering table cells", () => {
+  it("leaves pipes to the table row, and escapes everything only when asked", () => {
     const manager = fakeManager();
     patchMarkdownManager(manager);
     expect(manager.encodeTextForMarkdown("a|b", {})).toBe("a|b");
-    expect(withEscapedTablePipes(() => manager.encodeTextForMarkdown("a|b", {}))).toBe("a\\|b");
-    expect(withEscapedTablePipes(() => manager.encodeTextForMarkdown("x|y", { marks: ["code"] }))).toBe(
-      "x\\|y",
+    expect(withEverythingEscaped(() => manager.encodeTextForMarkdown("a*b|c", {}))).toBe("a\\*b|c");
+    expect(withEverythingEscaped(() => manager.encodeTextForMarkdown("x*y", { marks: ["code"] }))).toBe(
+      "x*y",
     );
-    expect(manager.encodeTextForMarkdown("a|b", {})).toBe("a|b");
+    expect(manager.encodeTextForMarkdown("a*b", {})).toBe("a\\*b");
+  });
+});
+
+describe("escapeTablePipes", () => {
+  it("escapes every pipe in a cell, code spans and link destinations included", () => {
+    expect(escapeTablePipes("a|b `x|y` [l](https://x.com/a|b)")).toBe(
+      "a\\|b `x\\|y` [l](https://x.com/a\\|b)",
+    );
+  });
+});
+
+describe("escapeEverything", () => {
+  it("escapes all ASCII punctuation but the table pipe, and nothing else", () => {
+    expect(escapeEverything("<https://x.com> me@x.com www.x.com ![a](b) &amp; 5 * 3 | é「」")).toBe(
+      "\\<https\\:\\/\\/x\\.com\\> me\\@x\\.com www\\.x\\.com \\!\\[a\\]\\(b\\) \\&amp\\; 5 \\* 3 | é「」",
+    );
+  });
+});
+
+describe("escapeEverything, the inline serializer's safety net", () => {
+  it("reads back as the literal text, whatever the text (seeded search)", () => {
+    let seed = 11;
+    const random = () => {
+      seed = (seed + 0x6d2b79f5) | 0;
+      let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+    const ascii = Array.from({ length: 95 }, (_, i) => String.fromCharCode(32 + i));
+    const pieces = [
+      ...ascii,
+      "https://",
+      "www.",
+      "me@x.com",
+      "&amp;",
+      "<b>",
+      "![x](y)",
+      "「強調」",
+      "é",
+      "\\\\",
+    ];
+    for (let n = 0; n < 5000; n++) {
+      const typed = Array.from(
+        { length: 1 + Math.floor(random() * 12) },
+        () => pieces[Math.floor(random() * pieces.length)],
+      )
+        .join("")
+        .trim();
+      if (!typed) continue;
+      const units = Array.from(typed, (char) => ({ text: char, marks: [] }));
+      const inTable = random() < 0.5;
+      expect({ typed, misread: firstMisread(escapeEverything(typed), units, inTable) }).toEqual({
+        typed,
+        misread: null,
+      });
+    }
   });
 });

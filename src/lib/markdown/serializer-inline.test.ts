@@ -375,3 +375,148 @@ describe("code spans and line breaks", () => {
     expect(manager.parse("a\nb\n").content).toHaveLength(1);
   });
 });
+
+describe("typed text that looks like syntax around addresses and links", () => {
+  /** The text of every block, and every mark but the links GFM makes from bare addresses. */
+  function readBack(doc: JSONContent) {
+    const texts: string[] = [];
+    const marks: string[] = [];
+    const visit = (node: JSONContent) => {
+      if (node.type === "text") {
+        texts.push(node.text ?? "");
+        for (const mark of node.marks ?? []) {
+          const href = mark.attrs?.href;
+          const autolink = [node.text, `http://${node.text}`, `mailto:${node.text}`].includes(href);
+          if (!(mark.type === "link" && autolink)) marks.push(`${mark.type} ${href ?? ""} on ${node.text}`);
+        }
+      }
+      if (node.type === "image") marks.push(`image ${node.attrs?.src}`);
+      node.content?.forEach(visit);
+      if (node.type === "paragraph" || node.type === "heading") texts.push("\n");
+    };
+    visit(doc);
+    return { text: texts.join(""), marks };
+  }
+
+  /** Saves, re-opens and saves again until the bytes settle (a bare URL re-opens as a link). */
+  function saveAndReopen(doc: JSONContent) {
+    let markdown = save(doc);
+    for (let round = 0; round < 3 && save(manager.parse(markdown)) !== markdown; round++) {
+      expect(readBack(manager.parse(markdown))).toEqual(readBack(doc));
+      markdown = save(manager.parse(markdown));
+    }
+    expect(save(manager.parse(markdown))).toBe(markdown);
+    return { markdown, reopened: manager.parse(markdown) };
+  }
+
+  it.each([
+    ["Docs: <https://x.com/docs> here", "Docs: &lt;https://x.com/docs> here"],
+    ["mail <ftp://x.com> now", "mail &lt;ftp://x.com> now"],
+    ["see https://x.com/(*a* now", "see https://x.com/(\\*a\\* now"],
+    ["see https://x.com/(**important** now", "see https://x.com/(\\*\\*important\\*\\* now"],
+    ["see https://x.com/(`code` now", "see https://x.com/(\\`code\\` now"],
+    ["see www.x.com/(\\[x] now", "see www.x.com/(\\\\[x] now"],
+  ])("%j is written %j and re-opens as the same text, unformatted", (typed, markdown) => {
+    const doc = paragraph(text(typed));
+    expect(save(doc)).toBe(markdown + "\n");
+    const { reopened } = saveAndReopen(doc);
+    expect(readBack(reopened)).toEqual({ text: typed + "\n", marks: [] });
+  });
+
+  it.each([
+    [[text("Wow!"), text("here", link("https://e.com"))], "Wow\\![here](https://e.com)"],
+    [[text("Wow!", "bold"), text("here", link("https://e.com"), "bold")], "**Wow\\![here](https://e.com)**"],
+    [[text("Wow\\!"), text("here", link("https://e.com"))], "Wow\\\\\\![here](https://e.com)"],
+    [[text("here", link("https://e.com")), text("!")], "[here](https://e.com)!"],
+  ])("a '!' right before a link stays text, not an image (%#)", (content, markdown) => {
+    const doc = paragraph(...content);
+    expect(save(doc)).toBe(markdown + "\n");
+    expect(same(manager.parse(save(doc)), doc)).toBe(true);
+  });
+
+  it("a link at the start of a list item's text, after a typed '- ', stays a link", () => {
+    const doc: JSONContent = {
+      type: "doc",
+      content: [
+        {
+          type: "bulletList",
+          content: [
+            {
+              type: "listItem",
+              content: [paragraph(text("- "), text(" ", link("https://e.com")), text("x")).content![0]],
+            },
+          ],
+        },
+      ],
+    };
+    expect(save(doc)).toBe("- \\- [ ](https://e.com)x\n");
+    expect(same(manager.parse(save(doc)), doc)).toBe(true);
+  });
+
+  it("a '!' before a bare URL stays text once the URL re-opens as a link", () => {
+    const { markdown, reopened } = saveAndReopen(paragraph(text("see!https://x.com/a now")));
+    expect(markdown).toBe("see\\![https://x.com/a](https://x.com/a) now\n");
+    expect(readBack(reopened)).toEqual({ text: "see!https://x.com/a now\n", marks: [] });
+  });
+
+  it.each([
+    ["a backslash before a bracket", "a\\[b]", "https://e.com", "[a\\\\\\[b\\]](https://e.com)"],
+    ["a backslash at the end of the address", "x", "https://e.com/a\\", "[x](https://e.com/a\\\\)"],
+    ["a backslash before CJK punctuation", "x", "https://e.com/a\\「b」", "[x](https://e.com/a\\\\「b」)"],
+    ["a backtick in the address", "x", "https://e.com/a`b", "[x](https://e.com/a\\`b)"],
+  ])("a link with %s re-opens the same", (_, label, href, markdown) => {
+    const doc = paragraph(text(label, link(href)));
+    expect(save(doc)).toBe(markdown + "\n");
+    expect(same(manager.parse(save(doc)), doc)).toBe(true);
+  });
+
+  const table = (...cells: JSONContent[][]): JSONContent => ({
+    type: "doc",
+    content: [
+      {
+        type: "table",
+        content: [
+          { type: "tableRow", content: ["h", "i"].map((label) => cell("tableHeader", [text(label)])) },
+          { type: "tableRow", content: cells.map((content) => cell("tableCell", content)) },
+        ],
+      },
+    ],
+  });
+  const cell = (type: string, content: JSONContent[]): JSONContent => ({
+    type,
+    content: [{ type: "paragraph", content }],
+  });
+
+  it.each([
+    ["a bare URL with a pipe", [text("see https://x.com/a|b now")]],
+    ["a link to an address with a pipe", [text("x"), text("link", link("https://x.com/a|b"))]],
+    ["an image from a path with a pipe", [{ type: "image", attrs: { src: "img/a|b.png", alt: "a|b" } }]],
+    ["a bare URL ending in a backtick", [text("https://x.com/a`")]],
+  ])("a table cell with %s keeps its row and the next cell", (_, content) => {
+    const doc = table(content, [text("z `y`")]);
+    const { markdown, reopened } = saveAndReopen(doc);
+    expect(markdown.split("\n")[2].match(/(?<!\\)\|/g)).toHaveLength(3); // | cell | cell |
+    expect(readBack(reopened)).toEqual(readBack(doc));
+  });
+
+  it("code with a backslash before a pipe in a cell keeps its text, the pipe beside the code", () => {
+    const doc = table([text("a\\|b", "code")], [text("z")]);
+    expect(save(doc).split("\n")[2]).toBe("| `a\\`\\|`b` | z   |");
+    expect(readBack(manager.parse(save(doc))).text).toBe("h\ni\na\\|b\nz\n");
+  });
+
+  it("writes a paragraph where every URL runs into code in linear time", () => {
+    // Each URL would swallow the code span after it; giving them up one save pass at a time was
+    // quadratic (seconds at 400 URLs).
+    const content = Array.from({ length: 400 }, (_, i) => [
+      text(`https://x.com/a${i}`, "italic"),
+      text("c", "italic", "code"),
+      text(" ", "italic"),
+    ]).flat();
+    const doc = paragraph(...content);
+    const start = performance.now();
+    const markdown = save(doc);
+    expect(performance.now() - start).toBeLessThan(1000);
+    expect(readBack(manager.parse(markdown)).text).toBe(readBack(doc).text.replace(/ \n$/, "\n"));
+  });
+});

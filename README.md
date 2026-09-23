@@ -226,7 +226,8 @@ A few more rules:
   always open in Markdown source mode, which stays fast. Long lists, tables and code blocks don't count, so
   they still open visually. Quotes or lists nested more than 32 levels deep also open as source.
 - **Pasting Markdown** the visual editor can't fully keep (HTML, a linked badge, an unused link
-  definition…) pastes it as plain text instead, with a message, so nothing is silently dropped.
+  definition…) pastes it as plain text instead, with a message, so nothing is silently dropped. Markdown
+  over 256 KB is also pasted as plain text, like a note that size opening in source mode.
 - **Very large files** (over 5 MB) and **files that aren't valid UTF-8** open read-only, with a download
   button. write never modifies them.
 - **Images** display when they point to a web URL. Uploading images isn't supported yet, and images with

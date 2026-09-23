@@ -13,6 +13,7 @@ export type MarkJSON = { type: string; attrs?: Record<string, unknown> };
 /**
  * One code point of text, or one inline node (image, hard break), with the marks it carries.
  * `plainAddress`: part of a bare URL to write so marked doesn't link it (see simplifyNear).
+ * `escapeAll`: text to write with all ASCII punctuation escaped (see fallBack).
  */
 export type Atom = {
   index: number;
@@ -20,6 +21,7 @@ export type Atom = {
   node?: JSONContent;
   marks: MarkJSON[];
   plainAddress?: boolean;
+  escapeAll?: boolean;
 };
 
 /** Marks written with delimiter runs, which can't start or end on whitespace. */
@@ -101,12 +103,32 @@ export const hasBareAddress = (atoms: Atom[]) => mayHaveBareUrl(textOf(atoms));
 
 const isPlainSpace = (atom: Atom) => atom.marks.length === 0 && /^[^\S\n]$/.test(atom.text ?? "");
 
+/** Characters an email address can have before and after its "@", as marked reads them. */
+const EMAIL_LOCAL = /[A-Za-z0-9._+-]/;
+const EMAIL_DOMAIN = /[A-Za-z0-9._-]/;
+
+/**
+ * The [start, end) spans of bare URLs and of everything an email could span, in order. An email
+ * decides how the text right after it reads ("me@x.comhttps://…" isn't a URL), so neither is cut.
+ * Emails are found from each "@" outwards, which stays linear on long runs of letters.
+ */
+function addressSpans(text: string): Array<[number, number]> {
+  const spans = autolinkSpans(text);
+  for (let at = text.indexOf("@"); at !== -1; at = text.indexOf("@", at + 1)) {
+    let [start, end] = [at, at + 1];
+    while (start > 0 && EMAIL_LOCAL.test(text[start - 1])) start--;
+    while (end < text.length && EMAIL_DOMAIN.test(text[end])) end++;
+    spans.push([start, end]);
+  }
+  return spans.sort(([a], [b]) => a - b);
+}
+
 /**
  * Where a paragraph splits into parts that serialize independently: between two unformatted characters,
  * or next to an unformatted space. No mark or delimiter spans such a cut, and every delimiter has the
  * same kind of neighbor in its part as in the paragraph (a space reads like a part's start or end), so
- * marked reads each part the same alone. Line breaks and bare URLs (which marked reads up to the next
- * space) are never cut. Cuts only appear as formatting is given up, never disappear, so the
+ * marked reads each part the same alone. Line breaks, bare URLs (which marked reads up to the next
+ * space) and emails are never cut. Cuts only appear as formatting is given up, never disappear, so the
  * parts of a paragraph as saved are these parts or finer. Returns the start index of every part.
  */
 export function independentParts(atoms: Atom[]): number[] {
@@ -118,7 +140,7 @@ export function independentParts(atoms: Atom[]): number[] {
   });
   const inAddress = new Uint8Array(atoms.length);
   let atom = 0;
-  for (const [start, end] of autolinkSpans(text)) {
+  for (const [start, end] of addressSpans(text)) {
     for (; atom < atoms.length && offsets[atom] < end; atom++) {
       if (offsets[atom] >= start) inAddress[atom] = 1;
     }
@@ -140,9 +162,20 @@ export function independentParts(atoms: Atom[]): number[] {
   return starts;
 }
 
-/** Whether the atoms write anything marked could misread: emphasis delimiters or a bare address. */
+/**
+ * Characters marked may read as inline syntax: delimiters, code, links and images, entities, tags and
+ * autolinks, escapes, and the starts of bare URLs and emails. Text without any is read literally.
+ * ("|" matters in a table row. Block syntax at a line's start is escaped separately.)
+ */
+export const MAY_BE_SYNTAX = /[\\`*_~<>&[\]!@|]|www\.|:\/\//i;
+
+/**
+ * Whether a part of a paragraph needs writing readably on its own: it has formatting, an inline node or
+ * a bare address. Unformatted text is cut into single characters (see independentParts), which read
+ * the same anywhere; the whole paragraph is read back afterwards.
+ */
 export const mayMisread = (atoms: Atom[]) =>
-  atoms.some((atom) => atom.marks.some((mark) => EMPHASIS.has(mark.type))) || hasBareAddress(atoms);
+  atoms.some((atom) => atom.node || atom.marks.length > 0) || hasBareAddress(atoms);
 
 /** How far (in characters) from the first misread one a stretch of emphasis is still blamed for it. */
 const BLAME_RADIUS = 8;
@@ -192,6 +225,46 @@ function unlinkAddressAt(atoms: Atom[], { at, autolinks }: Misread): boolean {
   if (unlinked.every((atom) => atom.plainAddress)) return false;
   unlinked.forEach((atom) => (atom.plainAddress = true));
   return true;
+}
+
+/** Gives up every bold, italic and strikethrough mark. False when there's none. */
+function dropAllEmphasis(atoms: Atom[]): boolean {
+  let dropped = false;
+  for (const atom of atoms) {
+    const marks = atom.marks.filter((mark) => !EMPHASIS.has(mark.type));
+    if (marks.length === atom.marks.length) continue;
+    atom.marks = marks;
+    dropped = true;
+  }
+  return dropped;
+}
+
+/**
+ * The inline serializer's safety net, for markdown that still misreads when targeted simplification
+ * (see simplifyNear) has nothing left to give up or has run out of tries. One step per call, least
+ * loss first, each taking one render for the whole part: no bare address is linked; then all ASCII
+ * punctuation in the text is escaped, which CommonMark reads back as the literal characters, so no
+ * text can turn into syntax; finally all emphasis is given up. What's left then (text, code, links
+ * and images) reads back as written. Null when every step has been taken.
+ */
+export function fallBack(atoms: Atom[]): "address" | "escape" | "emphasis" | null {
+  if (hasBareAddress(atoms) && atoms.some((atom) => !atom.plainAddress)) {
+    atoms.forEach((atom) => (atom.plainAddress = true));
+    return "address";
+  }
+  if (atoms.some((atom) => atom.text !== undefined && !atom.escapeAll)) {
+    atoms.forEach((atom) => (atom.escapeAll = true));
+    return "escape";
+  }
+  return dropAllEmphasis(atoms) ? "emphasis" : null;
+}
+
+/** Forgets how the atoms were last written (see simplifyNear and fallBack), to write them afresh. */
+export function resetWriting(atoms: Atom[]): void {
+  atoms.forEach((atom) => {
+    atom.plainAddress = false;
+    atom.escapeAll = false;
+  });
 }
 
 /**

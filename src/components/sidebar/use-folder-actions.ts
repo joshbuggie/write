@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { startTransition } from "react";
+import { forgetFolder, noteCreated } from "@/components/note/known-notes";
 import { useFlushActiveNote } from "@/components/shell/shell-context";
 import { useDownload } from "@/components/ui/download-link";
 import { useToast } from "@/components/ui/toast";
@@ -28,6 +29,9 @@ export function useFolderActions(folder: string, openRef: NoteRef | null) {
   async function rename(newName: string): Promise<void> {
     if (holdsOpenNote) await flushActiveNote();
     const { folder: renamed } = await api.renameFolder(folder, newName);
+    // Its notes left the old name, and under the new one they are not whatever this tab knew there.
+    forgetFolder(folder);
+    forgetFolder(renamed.name);
     startTransition(() => {
       if (holdsOpenNote) router.replace(noteHref({ folder: renamed.name, name: openRef.name }));
       router.refresh();
@@ -37,7 +41,9 @@ export function useFolderActions(folder: string, openRef: NoteRef | null) {
   async function remove(): Promise<void> {
     if (holdsOpenNote) await flushActiveNote();
     await api.deleteFolder(folder);
-    forgetFolderDrafts(folder); // its notes are gone; a new note with a same name must open clean
+    // Its notes are gone; a new note with a same name must open clean.
+    forgetFolderDrafts(folder);
+    forgetFolder(folder);
     startTransition(() => {
       if (holdsOpenNote) router.replace(LIBRARY_HREF);
       router.refresh();
@@ -57,7 +63,8 @@ export function useFolderActions(folder: string, openRef: NoteRef | null) {
       }
       try {
         const content = await file.text();
-        await api.createNote({ folder, name: noteNameFromFileName(file.name), content });
+        const { note } = await api.createNote({ folder, name: noteNameFromFileName(file.name), content });
+        noteCreated(note);
         imported++;
       } catch {
         skipped++;

@@ -1,5 +1,5 @@
 import type { JSONContent, MarkdownRendererHelpers } from "@tiptap/core";
-import { withPlainAddresses } from "../escape";
+import { withEverythingEscaped, withPlainAddresses } from "../escape";
 import { findUnparseableDelimiters, type Culprit, type Piece } from "./flanking";
 import { expelWhitespace, type Atom, type MarkJSON } from "./inline-atoms";
 import { codeSpan, escapeLinkText, linkSuffix } from "./inline-syntax";
@@ -20,6 +20,7 @@ type Run = {
   /** The marks written as syntax (links and emphasis), by markKey. */
   keys: Set<string>;
   plainAddress?: boolean;
+  escapeAll?: boolean;
 };
 type OpenMark = { key: string; mark: MarkJSON; delimiter: string; start: number };
 
@@ -73,10 +74,11 @@ function toRuns(atoms: Atom[]): Run[] {
       last.text += atom.text;
       last.last = i;
       last.plainAddress ||= atom.plainAddress;
+      last.escapeAll ||= atom.escapeAll;
     } else {
       const keys = new Set(atom.marks.filter(isRendered).map(markKey));
-      const { text, node, marks, plainAddress } = atom;
-      runs.push({ first: i, last: i, text, node, marks, keys, plainAddress });
+      const { text, node, marks, plainAddress, escapeAll } = atom;
+      runs.push({ first: i, last: i, text, node, marks, keys, plainAddress, escapeAll });
     }
   });
   return runs;
@@ -106,12 +108,29 @@ function renderRun(run: Run, { h, escaped }: Renderer, atoms: Atom[]): string {
   if (run.node) return h.renderChild?.(run.node, index) ?? "";
   // The text goes through the manager's (patched) escaping, which only depends on the text and the
   // mark types; a code mark tells it not to escape.
-  const key = `${run.plainAddress ? "plain " : ""}${run.marks.map((mark) => mark.type).join(" ")}\n${run.text}`;
+  const mode = run.escapeAll ? "all" : run.plainAddress ? "plain" : "";
+  const key = `${mode} ${run.marks.map((mark) => mark.type).join(" ")}\n${run.text}`;
   if (!escaped.has(key)) {
     const render = () => h.renderChild?.({ type: "text", text: run.text, marks: run.marks }, index);
-    escaped.set(key, (run.plainAddress ? withPlainAddresses(render) : render()) ?? run.text ?? "");
+    const markdown = run.escapeAll
+      ? withEverythingEscaped(render)
+      : run.plainAddress
+        ? withPlainAddresses(render)
+        : render();
+    escaped.set(key, markdown ?? run.text ?? "");
   }
   return isCode(run) ? codeSpan(escaped.get(key)!) : escaped.get(key)!;
+}
+
+/** Text ending in a "!" that isn't escaped already (after an even number of backslashes). */
+const LIVE_BANG_AT_END = /(?:^|[^\\])(?:\\\\)*!$/;
+
+/** A "!" written right before a link's "[" would make it an image, so it is escaped: "Wow\![here](u)". */
+function escapeBangBeforeLink(pieces: Piece[]): void {
+  const last = pieces.at(-1);
+  if (last?.text && LIVE_BANG_AT_END.test(last.md)) {
+    pieces[pieces.length - 1] = { ...last, md: last.md.slice(0, -1) + "\\!" };
+  }
 }
 
 /** Markdown pieces for the atoms, with every mark nested properly (a stack, closed and reopened at crossings). */
@@ -134,6 +153,7 @@ function renderPieces(atoms: Atom[], renderer: Renderer, styleAt: StyleAt): Piec
   const open = (mark: MarkJSON, firstAtom: number) => {
     const key = markKey(mark);
     if (mark.type === "link") {
+      escapeBangBeforeLink(pieces);
       stack.push({ key, mark, delimiter: "[", start: pieces.length });
       pieces.push({ md: "[" });
       return;

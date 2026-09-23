@@ -3,7 +3,8 @@
 import type { JSONContent } from "@tiptap/core";
 import { useMemo } from "react";
 import { VISUAL_EDITOR_MAX_BYTES } from "@/lib/constants";
-import { hasOversizedParagraph, type LossReason } from "@/lib/markdown/fidelity";
+import type { LossReason } from "@/lib/markdown/fidelity";
+import { hasOversizedParagraph } from "@/lib/markdown/oversized";
 import { byteLength } from "@/lib/names";
 import { SourceEditor } from "./source-editor";
 import { VisualEditor } from "./visual-editor";

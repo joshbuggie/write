@@ -1,11 +1,6 @@
 import type { RenderContext } from "@tiptap/core";
 import { Paragraph } from "@tiptap/extension-paragraph";
-import {
-  escapeBlockStarts,
-  escapeLetterListMarker,
-  escapeTagLikeSpans,
-  withEscapedTablePipes,
-} from "./escape";
+import { escapeBlockStarts, escapeLetterListMarker, escapeTablePipes, escapeTagLikeSpans } from "./escape";
 import { renderInlineMarkdown } from "./nodes/inline";
 import { isBlankInline } from "./nodes/inline-atoms";
 
@@ -62,7 +57,7 @@ export const WriteParagraph = Paragraph.extend({
       isBlankInline(node.content)
         ? blankParagraph(ctx)
         : renderInlineMarkdown(node.content ?? [], helpers, { inTable, singleLine });
-    if (inTable) return escapeTagLikeSpans(withEscapedTablePipes(render));
+    if (inTable) return escapeTablePipes(escapeTagLikeSpans(render()));
     const markdown = escapeBlockStarts(escapeTagLikeSpans(render()));
     if (ctx?.parentType !== "listItem") return markdown;
     // A list item's first paragraph sits on the marker line; later ones are continuation lines.

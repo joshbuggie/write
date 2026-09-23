@@ -7,15 +7,24 @@ import { TextField } from "@/components/ui/text-field";
 import { api, isApiError } from "@/lib/api-client";
 import { safeNextPath } from "@/lib/routes";
 
+/** "Try again in N minutes." for a wait in seconds, rounded up like the server's own lockout message. */
+function waitHint(seconds: number | null): string {
+  if (seconds === null) return "Try again later.";
+  const minutes = Math.max(1, Math.ceil(seconds / 60));
+  return `Try again in ${minutes} minute${minutes === 1 ? "" : "s"}.`;
+}
+
 /**
  * Turns a failed login into a short, human message. The server's 401/429 text says wrong vs locked out;
- * during a lockout it names the wait ("Try again in 15 minutes.", the same value as Retry-After).
+ * during a lockout it names the wait ("Try again in 15 minutes.", the same value as Retry-After). A 429
+ * without that JSON body (a reverse proxy's own rate limit, say) still names the wait from Retry-After.
  */
-function loginErrorMessage(err: unknown): string {
+export function loginErrorMessage(err: unknown): string {
   // Only the server's own JSON message is shown; a body-less response gets the generic wording.
   const serverMessage = isApiError(err) ? err.body?.error?.message : undefined;
   if (isApiError(err, "unauthorized")) return serverMessage || "Wrong password.";
-  if (isApiError(err, "rate_limited")) return serverMessage || "Too many sign-in attempts. Try again later.";
+  if (isApiError(err, "rate_limited"))
+    return serverMessage || `Too many sign-in attempts. ${waitHint(err.retryAfterSeconds)}`;
   if (isApiError(err, "network")) return "Can't reach the server.";
   return "Couldn't sign in. Try again.";
 }

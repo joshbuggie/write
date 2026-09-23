@@ -9,7 +9,7 @@ import { UNTITLED } from "@/lib/constants";
 import { clearDraft, forgetDrafts, writeDraft } from "@/lib/drafts";
 import { noteHref } from "@/lib/routes";
 import type { Note, NoteRef } from "@/lib/types";
-import { expectHandover, forgetMove, latestKnown, movedTo, recordDiskState } from "./known-notes";
+import { expectHandover, forgetMove, forgetNote, latestKnown, movedTo, recordDiskState } from "./known-notes";
 import { createLifecycleHandlers } from "./note-lifecycle";
 import { useRevalidation } from "./use-revalidation";
 
@@ -81,7 +81,8 @@ export function useNoteSync(note: Note, onDiskChange: (fresh: Note) => void): No
         save: (input, { keepalive }) =>
           api.saveNote({ ...ref, ...input }, { keepalive }).then(
             ({ note: saved }) => {
-              recordDiskState(ref, { content: input.content, version: saved.version }, { savedHere: true });
+              const state = { content: input.content, version: saved.version, updatedAt: saved.updatedAt };
+              recordDiskState(ref, state, { savedHere: true });
               return saved;
             },
             (err: unknown) => {
@@ -104,12 +105,19 @@ export function useNoteSync(note: Note, onDiskChange: (fresh: Note) => void): No
   const actions = useMemo(() => {
     const ref = { folder, name };
     const getContent = () => handleRef.current?.getContent() ?? standInRef.current;
-    /** `gone`: no file has this name any more, so nothing parked under it (see forgetDrafts) is wanted. */
+    /**
+     * `gone`: no file has this name any more, so nothing parked or known under it (see forgetDrafts and
+     * forgetNote) is wanted: the next note created with this name must open clean.
+     */
     const stop = (gone: boolean) => {
       abandonedRef.current = true;
       autosaver.dispose();
-      if (gone) forgetDrafts(ref);
-      else clearDraft(ref);
+      if (gone) {
+        forgetDrafts(ref);
+        forgetNote(ref);
+      } else {
+        clearDraft(ref);
+      }
     };
     /**
      * Unsaved text becomes the renamed note's draft, which its editor restores on open. The draft is
@@ -171,6 +179,7 @@ export function useNoteSync(note: Note, onDiskChange: (fresh: Note) => void): No
         api.discardIfEmpty(ref).then(({ deleted }) => {
           if (!deleted) return; // the file isn't empty after all: an unresolved draft conflict stays
           forgetDrafts(ref);
+          forgetNote(ref);
           refreshTree();
         }, ignore);
       },

@@ -19,8 +19,14 @@ const BACKSLASH_BEFORE_PUNCT_OR_END = /\\(?=[!-/:-@[-`{-~]|$)/g;
  * where marked doesn't autolink and a "*" would be read as emphasis.
  * `plainAddresses` escapes URLs like other text and keeps marked from linking them (see LINK_START),
  * for the rare URL that would swallow the syntax after it.
+ * `everything` backslash-escapes all ASCII punctuation (see escapeEverything): the inline serializer's
+ * last resort, when the targeted escaping above still reads back differently.
  */
-export function encodeText(text: string, { inLink = false, plainAddresses = false } = {}): string {
+export function encodeText(
+  text: string,
+  { inLink = false, plainAddresses = false, everything = false } = {},
+): string {
+  if (everything) return escapeEverything(text);
   if (plainAddresses) {
     // Split where a link would start; escaping the pieces alone escapes them the same way.
     const pieces = text.split(LINK_START).map(escapeProse);
@@ -29,12 +35,26 @@ export function encodeText(text: string, { inLink = false, plainAddresses = fals
   let escaped = "";
   let last = 0;
   for (const [start, end] of inLink ? [] : autolinkSpans(text)) {
-    escaped += escapeProse(text.slice(last, start)) + escapeEntities(text.slice(start, end));
+    // A "<" right before a URL would make it an <autolink> (or a tag), so it is escaped like "<a".
+    escaped += escapeProse(text.slice(last, start)).replace(/<$/, "&lt;");
+    escaped += escapeEntities(text.slice(start, end));
     last = end;
   }
   // [ and ] only where a link or reference definition could form; keeps [[wiki]] and [^1].
   return escapeLinkBrackets(escaped + escapeProse(text.slice(last)));
 }
+
+/** ASCII punctuation but "|", which only matters in a table row and is escaped there (see escapeTablePipes). */
+const ESCAPABLE = /[!-/:-@[-`{}~]/g;
+
+/**
+ * Every ASCII punctuation character with a backslash before it. CommonMark reads "\" followed by any
+ * ASCII punctuation as that literal character, so the text can't start emphasis, code, a link, an
+ * image ("\![x]"), an entity ("\&amp;" reads "&amp;"), a tag or <autolink> ("\<"), a bare URL ("https\:\/\/",
+ * "www\.") or an email ("me\@x\.com"), and it can't hide syntax around it either. Ugly, so it is used
+ * only when nothing prettier reads back.
+ */
+export const escapeEverything = (text: string) => text.replace(ESCAPABLE, "\\$&");
 
 /** & only where it would form an entity; < only where a tag, comment or autolink could start. */
 const escapeEntities = (text: string) =>
@@ -96,10 +116,11 @@ const BLOCK_STARTS: Array<[RegExp, string]> = [
 ];
 
 /**
- * Tiptap's task-list tokenizer looks for "- [ ]" one character into a block, even after "\" or a letter
- * ("x- [ ] y" parses as "x" plus a task list), so the bracket is escaped there too.
+ * Tiptap's task-list tokenizer looks for "- [ ] " one character into a block, even after "\" or a letter
+ * ("x- [ ] y" parses as "x" plus a task list), so the bracket is escaped there too. It needs space
+ * after the "]", so a link ("- [x](url)") is left alone.
  */
-const TASK_MARKER_NEAR_START = /^(.?\s*[-+*]\s+)\[(?=[ xX]\])/;
+const TASK_MARKER_NEAR_START = /^(.?\s*[-+*]\s+)\[(?=[ xX]\](?:\s|$))/;
 
 /**
  * Escape paragraph lines that would otherwise start a block ("# x", "- x", "1. x", "> x", "---", "- [ ] x").
@@ -126,7 +147,7 @@ const NOT_A_HIDING_LT = /[A-Za-z/!? ]/;
  * formatting before the next ">" hides those delimiters ("x <5 **c** y> z" would lose the bold).
  * Such a "<" is written as "\<"; escaped "<"s don't stop marked's skip, so every one before the ">" is.
  * A backtick counts too: a skipped span ending inside a code span breaks that code span.
- * Code spans (an unescaped backtick up to the next backtick) are left untouched. Paragraph-level.
+ * Code spans (see codeSpans) are left untouched. Paragraph-level.
  *
  * Linear on purpose: it runs on every save, and a per-"<" lookahead froze the tab on long paragraphs
  * full of "<". One pass marks escaped characters, one (right to left) tracks the next unescaped ">"
@@ -152,14 +173,50 @@ export function escapeTagLikeSpans(markdown: string): string {
     else if (HIDDEN_DELIMITERS.has(c)) nextDelimiter = i;
   }
 
-  for (let i = 0; i < n; i++) {
-    if (markdown[i] !== "`" || escaped[i]) continue;
-    const close = markdown.indexOf("`", i + 1);
-    if (close === -1) break; // no backtick after this one, so no more code spans either
-    hides.fill(0, i, close + 1);
-    i = close;
-  }
+  for (const [start, end] of codeSpans(markdown, escaped)) hides.fill(0, start, end);
   return insertBackslashes(markdown, hides);
+}
+
+/**
+ * The [start, end) ranges of the code spans in inline markdown: a run of backticks up to the next run
+ * of the same length ("``a`b``"). A backslash before a run makes its first backtick literal. Linear
+ * but for a binary search per run.
+ */
+function codeSpans(markdown: string, escaped: Uint8Array): Array<[number, number]> {
+  const runs: Array<[start: number, length: number]> = [];
+  for (let i = 0; i < markdown.length; i++) {
+    if (markdown[i] !== "`") continue;
+    const start = i;
+    while (markdown[i + 1] === "`") i++;
+    runs.push([start, i + 1 - start]);
+  }
+  // The runs of each length, in order, to find the next one that closes an opening run.
+  const byLength = new Map<number, number[]>();
+  runs.forEach(([, length], r) => {
+    if (!byLength.has(length)) byLength.set(length, []);
+    byLength.get(length)!.push(r);
+  });
+  const nextRun = (length: number, after: number) => {
+    const candidates = byLength.get(length) ?? [];
+    let [low, high] = [0, candidates.length];
+    while (low < high) {
+      const middle = (low + high) >> 1;
+      if (candidates[middle] > after) high = middle;
+      else low = middle + 1;
+    }
+    return candidates[low];
+  };
+
+  const spans: Array<[number, number]> = [];
+  for (let r = 0; r < runs.length; r++) {
+    const literal = escaped[runs[r][0]] ? 1 : 0;
+    const [start, length] = [runs[r][0] + literal, runs[r][1] - literal];
+    const close = length > 0 ? nextRun(length, r) : undefined;
+    if (close === undefined) continue;
+    spans.push([start, runs[close][0] + length]);
+    r = close;
+  }
+  return spans;
 }
 
 /**
@@ -170,26 +227,20 @@ export function escapeLetterListMarker(markdown: string): string {
   return markdown.replace(/^(\s*(?:[a-zA-Z]{1,2}|[ivxlcdmIVXLCDM]+))([.)])(?=\s)/, "$1\\$2");
 }
 
-let escapeTablePipes = false;
-let plainAddresses = false;
-
 /**
- * Render table cell content with every `|` escaped (code spans included, as GFM requires), so a pipe
- * typed in a cell can't split the row. Rendering is synchronous, so a module flag scoped by try/finally is safe.
+ * A table cell's markdown as it goes in the row: every "|" escaped (inside code spans and link
+ * destinations too, as GFM requires), so a pipe can't split the row. GFM removes exactly these
+ * backslashes before reading the cell, so it reads the same as `markdown` would outside a table.
  */
-export function withEscapedTablePipes<T>(render: () => T): T {
-  const previous = escapeTablePipes;
-  escapeTablePipes = true;
-  try {
-    return render();
-  } finally {
-    escapeTablePipes = previous;
-  }
-}
+export const escapeTablePipes = (markdown: string) => markdown.replace(/\|/g, "\\|");
+
+let plainAddresses = false;
+let everything = false;
 
 /**
  * Render text with bare addresses written so marked doesn't link them (see encodeText), for the
- * inline serializer's retry when an address swallowed the syntax after it. Scoped like the pipes flag.
+ * inline serializer's retry when an address swallowed the syntax after it. Rendering is synchronous,
+ * so a module flag scoped by try/finally is safe.
  */
 export function withPlainAddresses<T>(render: () => T): T {
   const previous = plainAddresses;
@@ -198,6 +249,17 @@ export function withPlainAddresses<T>(render: () => T): T {
     return render();
   } finally {
     plainAddresses = previous;
+  }
+}
+
+/** Render text with all ASCII punctuation escaped (see escapeEverything). Scoped like the flag above. */
+export function withEverythingEscaped<T>(render: () => T): T {
+  const previous = everything;
+  everything = true;
+  try {
+    return render();
+  } finally {
+    everything = previous;
   }
 }
 
@@ -223,13 +285,10 @@ export function patchMarkdownManager(manager: unknown): boolean {
   if (!m || typeof m.encodeTextForMarkdown !== "function") return false;
   if (m[PATCHED]) return true;
   const original = m.encodeTextForMarkdown.bind(m);
-  // Probe: the original returns "*" unchanged only inside code contexts (code mark / code block parent).
   m.encodeTextForMarkdown = (text, node, parent) => {
-    const encoded =
-      original("*", node, parent) === "*"
-        ? text
-        : encodeText(text, { inLink: hasLink(node), plainAddresses });
-    return escapeTablePipes ? encoded.replace(/\|/g, "\\|") : encoded;
+    // The original returns "*" unchanged only inside code contexts (code mark / code block parent).
+    if (original("*", node, parent) === "*") return text;
+    return encodeText(text, { inLink: hasLink(node), plainAddresses, everything });
   };
   m[PATCHED] = true;
   return true;

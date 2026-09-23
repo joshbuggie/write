@@ -23,6 +23,8 @@ export class ApiError extends Error {
     readonly code: ErrorCode | "network",
     message: string,
     readonly body: ApiErrorBody | null = null,
+    /** The response's Retry-After, in seconds (a 429 during a sign-in lockout), or null without one. */
+    readonly retryAfterSeconds: number | null = null,
   ) {
     super(message);
     this.name = "ApiError";
@@ -44,6 +46,19 @@ export function codeFromStatus(status: number): ErrorCode {
   if (status === 429) return "rate_limited";
   if (status === 503) return "storage_unavailable";
   return status >= 400 && status < 500 ? "bad_request" : "internal";
+}
+
+/**
+ * Seconds to wait from a Retry-After header: either a number of seconds or an HTTP date. Null when the
+ * header is missing or unreadable; never negative.
+ */
+export function parseRetryAfter(value: string | null, now: number = Date.now()): number | null {
+  const text = value?.trim();
+  if (!text) return null;
+  if (/^\d+$/.test(text)) return Number(text);
+  if (!/[a-z]/i.test(text)) return null; // an HTTP date names its weekday and month; "-5" is not one
+  const date = Date.parse(text);
+  return Number.isNaN(date) ? null : Math.max(0, Math.ceil((date - now) / 1000));
 }
 
 const encodeBody = (body: unknown) => JSON.stringify(body);
@@ -80,7 +95,8 @@ async function request<T>(
   if (!res.ok) {
     const b = data as ApiErrorBody | null;
     const code = b?.error?.code ?? codeFromStatus(res.status);
-    throw new ApiError(res.status, code, b?.error?.message ?? `Request failed (${res.status}).`, b);
+    const message = b?.error?.message ?? `Request failed (${res.status}).`;
+    throw new ApiError(res.status, code, message, b, parseRetryAfter(res.headers.get("Retry-After")));
   }
   return data as T;
 }

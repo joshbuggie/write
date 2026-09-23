@@ -33,10 +33,24 @@ describe("looksLikeMarkdown", () => {
     expect(looksLikeMarkdown(text)).toBe(false);
   });
 
-  it("stays fast on 100 KB of unclosed brackets", () => {
+  it.each([
+    ["unclosed brackets", "[a ".repeat(35_000)],
+    ["link starts without a closing parenthesis", "[a](x".repeat(50_000)],
+    ["bold starts", "**a".repeat(80_000)],
+  ])("stays fast on 100 KB+ of %s", (_, text) => {
     const start = performance.now();
-    expect(looksLikeMarkdown("[a ".repeat(35_000))).toBe(false);
+    looksLikeMarkdown(text);
     expect(performance.now() - start).toBeLessThan(100);
+  });
+});
+
+describe("parsePastedMarkdown on large pastes", () => {
+  it("pastes more than a note can open visually as text, without parsing it", () => {
+    const manager = createMarkdownManager();
+    const text = "# Log\n\n" + "- item\n".repeat(40_000); // 280 KB of short lines
+    const start = performance.now();
+    expect(parsePastedMarkdown(manager, text)).toBeNull();
+    expect(performance.now() - start).toBeLessThan(150);
   });
 });
 

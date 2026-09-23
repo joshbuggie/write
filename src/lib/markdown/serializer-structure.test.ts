@@ -1,5 +1,5 @@
 import { Editor, getSchema, type JSONContent } from "@tiptap/core";
-import { Slice } from "@tiptap/pm/model";
+import { Slice, type Node as ProseMirrorNode } from "@tiptap/pm/model";
 import { TextSelection } from "@tiptap/pm/state";
 import { dropPoint } from "@tiptap/pm/transform";
 import type { EditorView } from "@tiptap/pm/view";
@@ -258,6 +258,74 @@ describe("table cells hold one line of text", () => {
     caretAfter(editor, "Para two");
     drop(editor, positionAfter(editor, "1"), [paragraph("p"), paragraph("q")]);
     expect(serializeBody(editor)).toBe("| a    | b   |\n| ---- | --- |\n| 1p q | 2   |\n\nPara two\n");
+  });
+
+  /**
+   * Drops `blocks` the way ProseMirror's drop handler does, where the pointer resolves to `pos`: the drop
+   * event, transformPasted, then handleDrop, and only when no plugin handled it the default insertion.
+   */
+  function dropLikeProseMirror(editor: Editor, pos: number, blocks: JSONContent[]) {
+    const view = Object.create(editor.view, {
+      posAtCoords: { value: () => ({ pos, inside: -1 }) },
+      focus: { value: () => {} },
+    }) as EditorView;
+    const event = { clientX: 0, clientY: 0 } as DragEvent;
+    const input = editor.state.plugins.find((plugin) => plugin.props.handleDOMEvents?.drop)!;
+    input.props.handleDOMEvents!.drop!.call(input, view, event);
+    const doc = editor.schema.nodeFromJSON({ type: "doc", content: blocks });
+    const slice = input.props.transformPasted!.call(input, Slice.maxOpen(doc.content), view, false);
+    if (input.props.handleDrop?.call(input, view, event, slice, false)) return;
+    const at = dropPoint(editor.state.doc, pos, slice) ?? pos;
+    editor.view.dispatch(editor.state.tr.replaceRange(at, at, slice));
+  }
+
+  /** The position of the table part `name` (cell, row) holding `text`, plus `offset`. */
+  function positionIn(editor: Editor, name: string, text: string, offset: (node: ProseMirrorNode) => number) {
+    let found = -1;
+    editor.state.doc.descendants((node, pos) => {
+      if (found === -1 && node.type.name === name && node.textContent === text) found = pos + offset(node);
+    });
+    return found;
+  }
+
+  /** Where a drop lands: the table part holding some text, and the offset into it. */
+  const dropSpots: Array<[string, string, string, (node: ProseMirrorNode) => number, string]> = [
+    ["the top padding of a cell (before its text)", "tableCell", "1", () => 1, "| r s1 | 2   |"],
+    [
+      "the bottom padding of a cell (after its text)",
+      "tableCell",
+      "1",
+      (node) => node.nodeSize - 1,
+      "| 1r s | 2   |",
+    ],
+    [
+      "the border between two cells",
+      "tableRow",
+      "12",
+      (node) => 1 + node.firstChild!.nodeSize,
+      "| 1r s | 2   |",
+    ],
+    ["the start of a row", "tableRow", "12", () => 1, "| r s1 | 2   |"],
+  ];
+
+  it.each(dropSpots)(
+    "drops blocks on %s into the cell's text, keeping the columns",
+    (_, name, text, offset, row) => {
+      const editor = editorWith(table + "\nPara two\n");
+      caretAfter(editor, "Para two");
+      dropLikeProseMirror(editor, positionIn(editor, name, text, offset), [paragraph("r"), paragraph("s")]);
+      expect(serializeBody(editor)).toBe(`| a    | b   |\n| ---- | --- |\n${row}\n\nPara two\n`);
+    },
+  );
+
+  it("drops one line on a cell's padding into its text, not a new cell", () => {
+    const editor = editorWith(table);
+    dropLikeProseMirror(
+      editor,
+      positionIn(editor, "tableCell", "2", () => 1),
+      [paragraph("zz")],
+    );
+    expect(serializeBody(editor)).toBe("| a   | b   |\n| --- | --- |\n| 1   | zz2 |\n");
   });
 
   it("keeps blocks dropped outside the table as blocks, even with the caret in a cell", () => {

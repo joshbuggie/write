@@ -1,7 +1,7 @@
 import { Extension, type Editor } from "@tiptap/core";
 import { TableCell, TableHeader } from "@tiptap/extension-table";
 import { Fragment, Slice, type Node, type ResolvedPos, type Schema } from "@tiptap/pm/model";
-import { Plugin, PluginKey } from "@tiptap/pm/state";
+import { Plugin, PluginKey, Selection, TextSelection } from "@tiptap/pm/state";
 import type { EditorView } from "@tiptap/pm/view";
 
 const CELLS = new Set(["tableCell", "tableHeader"]);
@@ -35,6 +35,30 @@ function flattenToParagraph(slice: Slice, schema: Schema): Slice {
  */
 const dropTargets = new WeakMap<EditorView, number>();
 
+const TABLE_PARTS = new Set(["table", "tableRow", ...CELLS]);
+
+/**
+ * Drops content (already flattened by transformPasted) into the cell text nearest to `target`, a
+ * position between table parts: the padding of a cell resolves before or after its paragraph, and
+ * ProseMirror would fit a slice there by making a new cell or splitting the table. Replaces
+ * ProseMirror's default drop, which does the same with the position it computed.
+ */
+function dropIntoCell(view: EditorView, target: number, slice: Slice, moved: boolean): void {
+  const $target = view.state.doc.resolve(target);
+  const inside = Selection.findFrom($target, $target.index() === 0 ? 1 : -1, true);
+  if (!inside) return;
+  const tr = view.state.tr;
+  if (moved) tr.deleteSelection(); // the dragged content leaves its old place
+  const pos = tr.mapping.map(inside.head);
+  tr.replaceRange(pos, pos, slice);
+  // Select what was dropped, like ProseMirror does.
+  let end = pos;
+  tr.mapping.maps.at(-1)?.forEach((_from, _to, _newFrom, newTo) => (end = newTo));
+  tr.setSelection(TextSelection.between(tr.doc.resolve(pos), tr.doc.resolve(end)));
+  view.focus();
+  view.dispatch(tr.setMeta("uiEvent", "drop"));
+}
+
 /** Where pasted or dropped content goes: the drop position during a drop, otherwise the selection. */
 function insertionPoint(view: EditorView): ResolvedPos {
   const drop = dropTargets.get(view);
@@ -44,7 +68,8 @@ function insertionPoint(view: EditorView): ResolvedPos {
 /**
  * Typing in a table cell, before the default handlers: Enter moves to the next cell like Tab (adding a
  * row at the end), and paste or drop becomes one line, since blocks would split the table (a cell holds
- * a single paragraph). Runs before the markdown paste handler, which would insert parsed blocks.
+ * a single paragraph); a drop on a cell's padding goes into its text (see dropIntoCell). Runs before
+ * the markdown paste handler, which would insert parsed blocks.
  */
 const TableCellInput = Extension.create({
   name: "tableCellInput",
@@ -79,8 +104,19 @@ const TableCellInput = Extension.create({
               return false;
             },
           },
+          handleDrop(view, event, slice, moved) {
+            const target = dropTargets.get(view);
+            if (target === undefined) return false;
+            const { parent } = view.state.doc.resolve(target);
+            if (!TABLE_PARTS.has(parent.type.name)) return false; // in text: the default drop is right
+            dropIntoCell(view, target, slice, moved);
+            return true;
+          },
           transformPasted(slice, view) {
-            return isInTableCell(insertionPoint(view)) ? flattenToParagraph(slice, view.state.schema) : slice;
+            const $at = insertionPoint(view);
+            // Between cells or rows, a drop lands in a cell too (see dropIntoCell).
+            const inCell = isInTableCell($at) || TABLE_PARTS.has($at.parent.type.name);
+            return inCell ? flattenToParagraph(slice, view.state.schema) : slice;
           },
         },
       }),

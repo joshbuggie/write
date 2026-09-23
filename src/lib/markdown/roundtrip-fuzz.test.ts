@@ -1,9 +1,10 @@
-import { Editor, type JSONContent } from "@tiptap/core";
+import { Editor, getSchema, type JSONContent } from "@tiptap/core";
 import { TextSelection } from "@tiptap/pm/state";
 import { afterEach, describe, expect, it } from "vitest";
 import { Marked } from "marked";
 import { isAutolinkLiteral } from "./autolinks";
 import { createExtensions, createMarkdownManager } from "./extensions";
+import { finalizeMarkdown } from "./file-format";
 import { serializeBody } from "./serialize";
 
 /**
@@ -263,13 +264,17 @@ const hrefOf = (node: JSONContent) => node.marks?.find((mark) => mark.type === "
 
 /**
  * How many characters at the start of a link's text GFM linked by itself: all of them for a bare URL
- * or email, or the address at the start of a link it merged into (ProseMirror joins adjacent links to
- * the same address: "me@x.com" before a link to mailto:me@x.com).
+ * or email, or the address (once or more) at the start of a link it merged into (ProseMirror joins
+ * adjacent links to the same address: "me@x.com" before a link to mailto:me@x.com).
  */
 function autolinkedLength(text: string, href: unknown): number {
   if (isAutolink(text, href)) return text.length;
   const address = String(href).replace(/^(?:mailto:|http:\/\/)/, "");
-  return isAutolink(address, href) && text.startsWith(address) ? address.length : 0;
+  if (!isAutolink(address, href)) return 0;
+  // The same address typed twice in a row re-opens as two links to it, which merge too.
+  let length = 0;
+  while (address && text.startsWith(address, length)) length += address.length;
+  return length;
 }
 
 /**
@@ -422,5 +427,152 @@ describe("editing round-trip fuzz", () => {
   it("gives up emphasis only in the rare nestings marked can't read", () => {
     expect(emphasis.kept).toBeGreaterThan(1000);
     expect(emphasis.lost / (emphasis.kept + emphasis.lost)).toBeLessThan(0.02);
+  });
+});
+
+/**
+ * The same property for inline content the editing steps above rarely produce: typed text full of
+ * syntax (URLs with parentheses, pipes, "<" and "!", emails, entities, backslashes, CJK) under random
+ * marks, links and code, in every block that holds inline content. Documents are built directly, so each
+ * seed tries many paragraphs; the checks are the ones above.
+ */
+describe("inline syntax round-trip fuzz", () => {
+  const manager = createMarkdownManager();
+  const schema = getSchema(createExtensions());
+  const PIECES = [
+    "https://x.com/(a",
+    "https://x.com/(*a* now",
+    "https://x.com/a|b",
+    "https://x.com/docs",
+    "<https://x.com>",
+    "www.x.com/(\\[x]",
+    "ftp://a.b",
+    "me@x.com",
+    "see!",
+    "!",
+    "![x](y)",
+    "<",
+    "<b>",
+    ">",
+    "&amp;",
+    "&",
+    "|",
+    "\\",
+    "\\|",
+    "*",
+    "**",
+    "_",
+    "~",
+    "`",
+    "[",
+    "]",
+    "(",
+    ")",
+    ":",
+    "#",
+    "- ",
+    "1. ",
+    "「強調」",
+    "中文。",
+    "é",
+    "a",
+    "word",
+    " ",
+    " ",
+  ];
+  // Not the addresses above: a bare URL next to a link to itself would merge into it on re-open.
+  const LINK_HREFS = [
+    "https://e.com",
+    "https://e.com/a|b",
+    "https://e.com/a)b",
+    "notes/a b.md",
+    "https://w.org/Foo_(bar)",
+  ];
+  const EMPHASIS_SETS = [[], [], ["bold"], ["italic"], ["strike"], ["bold", "italic"], ["italic", "strike"]];
+
+  function inlineContent(rnd: Random, inCell: boolean): JSONContent[] {
+    return Array.from({ length: 1 + rnd.int(6) }, (): JSONContent => {
+      const text = Array.from({ length: 1 + rnd.int(3) }, () => rnd.pick(PIECES)).join("");
+      const kind = rnd.random();
+      if (kind < 0.12) {
+        // Code can't hold a "|" after a backslash in a table row (it's written next to the code, which
+        // the serializer tests cover), and adjacent code pieces merge: no backslashes in cells.
+        const code = inCell ? text.replace(/\\/g, "/") : text;
+        return { type: "text", text: code, marks: [{ type: "code" }] };
+      }
+      const marks: JSONContent["marks"] = rnd.pick(EMPHASIS_SETS).map((type) => ({ type }));
+      if (kind < 0.3) marks.push({ type: "link", attrs: { href: rnd.pick(LINK_HREFS) } });
+      return { type: "text", text, ...(marks.length ? { marks } : {}) };
+    });
+  }
+
+  const paragraphOf = (content: JSONContent[]): JSONContent => ({ type: "paragraph", content });
+  const cell = (type: string, content: JSONContent[]): JSONContent => ({
+    type,
+    content: [paragraphOf(content)],
+  });
+
+  /** One block of each kind that holds inline content, each with random content. */
+  function blocks(rnd: Random): JSONContent[] {
+    const content = (inCell = false) => inlineContent(rnd, inCell);
+    return [
+      paragraphOf(content()),
+      { type: "heading", attrs: { level: 2 }, content: content() },
+      {
+        type: "table",
+        content: [
+          {
+            type: "tableRow",
+            content: [cell("tableHeader", content(true)), cell("tableHeader", content(true))],
+          },
+          { type: "tableRow", content: [cell("tableCell", content(true)), cell("tableCell", content(true))] },
+        ],
+      },
+      { type: "bulletList", content: [{ type: "listItem", content: [paragraphOf(content())] }] },
+      {
+        type: "taskList",
+        content: [{ type: "taskItem", attrs: { checked: true }, content: [paragraphOf(content())] }],
+      },
+      { type: "blockquote", content: [paragraphOf(content())] },
+    ];
+  }
+
+  const emphasis = { kept: 0, lost: 0 };
+  it.each(SEEDS)("seed %i re-opens every block's text, links and code as saved", (seed) => {
+    const rnd = generator(seed * 7919 + 1);
+    for (const block of blocks(rnd)) {
+      // Through the schema, so adjacent text nodes merge and empty ones go, as in the editor.
+      const doc = schema.nodeFromJSON({ type: "doc", content: [block] }).toJSON() as JSONContent;
+      const markdown = finalizeMarkdown(manager.serialize(doc));
+      const reopen = (md: string) =>
+        withoutAutolinks(canonical(schema.nodeFromJSON(manager.parse(md)).toJSON()));
+      const got = reopen(markdown);
+      const context = { seed, markdown };
+      const { kept, lost } = expectSameDocument(context, got, withoutAutolinks(canonical(doc)));
+      emphasis.kept += kept;
+      emphasis.lost += lost;
+
+      // Saving again writes the same bytes, but for bare URLs, which re-open as links (see above).
+      let saved = markdown;
+      let current = got;
+      for (let round = 0; round < 4; round++) {
+        const resaved = finalizeMarkdown(manager.serialize(manager.parse(saved)));
+        if (resaved === saved) break;
+        expect({ ...context, saved, bareUrl: hasBareAddress(saved) }).toEqual({
+          ...context,
+          saved,
+          bareUrl: true,
+        });
+        const next = reopen(resaved);
+        expectSameDocument({ ...context, resaved }, next, current);
+        [saved, current] = [resaved, next];
+      }
+      expect(finalizeMarkdown(manager.serialize(manager.parse(saved)))).toBe(saved);
+    }
+  });
+
+  it("gives up little emphasis", () => {
+    expect(emphasis.kept).toBeGreaterThan(500);
+    expect(emphasis.lost / (emphasis.kept + emphasis.lost)).toBeLessThan(0.1);
   });
 });

@@ -11,7 +11,7 @@ import type { Draft } from "@/lib/drafts";
 import { toSafeName } from "@/lib/names";
 import { LIBRARY_HREF, noteHref } from "@/lib/routes";
 import type { Note, NoteRef } from "@/lib/types";
-import { isSavedHere, movedTo } from "./known-notes";
+import { isSavedHere, movedTo, noteCreated } from "./known-notes";
 import type { NoteSync } from "./use-note-sync";
 
 /** The element id SaveStatus's "Conflict" button scrolls to. */
@@ -108,12 +108,15 @@ export function ConflictBanner(props: ConflictBannerProps) {
 
   /** Creates the copy next to the note, or in the default folder if the note's folder is gone. */
   async function createCopy(name: string, content: string): Promise<Note> {
+    let copy: Note;
     try {
-      return (await api.createNote({ folder: note.folder, name, content })).note;
+      copy = (await api.createNote({ folder: note.folder, name, content })).note;
     } catch (err) {
       if (!isApiError(err, "not_found") || note.folder === DEFAULT_FOLDER) throw err;
-      return (await api.createNote({ folder: DEFAULT_FOLDER, name, content })).note;
+      copy = (await api.createNote({ folder: DEFAULT_FOLDER, name, content })).note;
     }
+    noteCreated(copy);
+    return copy;
   }
 
   /** "Save mine as a copy" / "Save as new note": your text goes to a new file; the original is left as is. */

@@ -1,20 +1,21 @@
 import type { JSONContent, MarkdownRendererHelpers } from "@tiptap/core";
 import {
+  fallBack,
   hasBareAddress,
   independentParts,
+  MAY_BE_SYNTAX,
   mayMisread,
+  resetWriting,
   simplifyNear,
   toAtoms,
   type Atom,
 } from "./inline-atoms";
+import { MAX_VISUAL_PARAGRAPH_CHARS } from "../oversized";
 import { markKey, settle, STYLES, type Renderer, type Style, type StyleAt } from "./inline-render";
 import { firstMisread } from "./read-back";
 
-/** `hasAddress`: the paragraph has a bare URL, so it's read back even without delimiters. */
-type Options = { inTable: boolean; hasAddress: boolean };
-
 /** Where marked first misreads `markdown` as a rendering of `atoms` (see firstMisread), or null. */
-const misreadOf = (markdown: string, atoms: Atom[], { inTable }: Options) =>
+const misreadOf = (markdown: string, atoms: Atom[], inTable: boolean) =>
   firstMisread(
     markdown,
     atoms.map((atom) => ({ text: atom.text, node: atom.node?.type, marks: atom.marks.map(markKey) })),
@@ -22,27 +23,51 @@ const misreadOf = (markdown: string, atoms: Atom[], { inTable }: Options) =>
   );
 
 /**
+ * Whether to read the markdown back: when it has emphasis delimiters or a bare address, which marked
+ * reads in ways no rule predicts, or any syntax character at all. Only the first two for a paragraph
+ * too long to re-open visually (see MAX_VISUAL_PARAGRAPH_CHARS): marked's inline lexing of a long
+ * run full of "<" or "[" is slow, and the note opens as Markdown source anyway.
+ */
+function needsReadBack(plain: { markdown: string; hasDelimiters: boolean }, hasAddress: boolean) {
+  if (plain.hasDelimiters || hasAddress) return true;
+  return plain.markdown.length <= MAX_VISUAL_PARAGRAPH_CHARS && MAY_BE_SYNTAX.test(plain.markdown);
+}
+
+/**
+ * How many times in a row a part is simplified where marked misread it (see simplifyNear) before the
+ * safety net's next step (see fallBack) takes over. Each try renders and reads back the whole part, so
+ * this keeps a part with many misreads (a URL before every code span) linear.
+ */
+const TARGETED_TRIES = 4;
+
+/**
  * Settles the atoms and reads the markdown back with marked; if marked still gets it wrong ("**a *b*c**"),
  * the other styles are tried in order, and failing that the atoms are simplified where marked first
- * misread them (see simplifyNear), until it reads back. Returns the markdown, the style used, and
- * whether formatting was given up on the way.
+ * misread them (see simplifyNear), until it reads back. When that runs out, the safety net (fallBack)
+ * writes the text so it can't misread. Returns the markdown, the style used, and whether formatting was
+ * given up on the way.
  */
-function writeReadably(atoms: Atom[], renderer: Renderer, options: Options, styles: StyleAt[]) {
+function writeReadably(atoms: Atom[], renderer: Renderer, inTable: boolean, styles: StyleAt[]) {
   const [preferred, ...alternatives] = styles;
-  for (let gaveUp = false; ;) {
+  const hasAddress = hasBareAddress(atoms);
+  let gaveUp = false;
+  for (let tries = 0; ;) {
     const plain = settle(atoms, renderer, preferred);
     gaveUp ||= plain.dropped > 0;
-    const misread =
-      plain.hasDelimiters || options.hasAddress ? misreadOf(plain.markdown, atoms, options) : null;
+    const misread = needsReadBack(plain, hasAddress) ? misreadOf(plain.markdown, atoms, inTable) : null;
     if (!misread) return { markdown: plain.markdown, style: preferred, gaveUp };
     for (const style of alternatives) {
       const copy = atoms.map((atom) => ({ ...atom }));
       const attempt = settle(copy, renderer, style);
-      if (attempt.dropped === 0 && !misreadOf(attempt.markdown, copy, options)) {
+      if (attempt.dropped === 0 && !misreadOf(attempt.markdown, copy, inTable)) {
         return { markdown: attempt.markdown, style, gaveUp };
       }
     }
-    const simplified = simplifyNear(atoms, misread);
+    let simplified: ReturnType<typeof fallBack> =
+      tries < TARGETED_TRIES ? simplifyNear(atoms, misread) : null;
+    tries = simplified ? tries + 1 : 0; // targeted tries start over after each step of the safety net
+    simplified ??= fallBack(atoms);
+    // Unreachable in practice: with everything escaped and no emphasis, marked reads back what's written.
     if (!simplified) return { markdown: plain.markdown, style: preferred, gaveUp };
     gaveUp ||= simplified === "emphasis";
   }
@@ -64,11 +89,28 @@ function writePart(atoms: Atom[], renderer: Renderer, inTable: boolean): Style[]
         writePart(atoms.slice(start, starts[i + 1] ?? atoms.length), renderer, inTable),
       );
     }
-    const options = { inTable, hasAddress: hasBareAddress(atoms) };
-    const { style, gaveUp } = writeReadably(atoms, renderer, options, STYLE_CHOICES);
+    const { style, gaveUp } = writeReadably(atoms, renderer, inTable, STYLE_CHOICES);
     if (!gaveUp) return Array<Style>(atoms.length).fill(style(0));
-    atoms.forEach((atom) => (atom.plainAddress = false));
+    resetWriting(atoms);
   }
+}
+
+/**
+ * In a table row, inline code can't hold a "|" after an odd number of backslashes ("a\|"): GFM needs
+ * every "|" in a row escaped, code included, and one more backslash there would make the pair an
+ * escaped backslash. Such a "|" is written as text next to the code instead, keeping the character.
+ */
+function freePipesFromCode(atoms: Atom[]): void {
+  let backslashes = 0;
+  atoms.forEach((atom, i) => {
+    const code = atom.marks.some((mark) => mark.type === "code");
+    const sameSpan = i > 0 && atoms[i - 1].marks.map(markKey).join() === atom.marks.map(markKey).join();
+    if (!code || !sameSpan) backslashes = 0;
+    if (code && atom.text === "|" && backslashes % 2 === 1) {
+      atom.marks = atom.marks.filter((mark) => mark.type !== "code");
+    }
+    backslashes = code && atom.text === "\\" ? backslashes + 1 : 0;
+  });
 }
 
 /**
@@ -89,16 +131,16 @@ export function renderInlineMarkdown(
   { singleLine = false, inTable = false } = {},
 ): string {
   const atoms = toAtoms(content, singleLine || inTable);
+  if (inTable) freePipesFromCode(atoms);
   const renderer: Renderer = { h, escaped: new Map() };
-  const options = { inTable, hasAddress: hasBareAddress(atoms) };
   for (;;) {
     // Marks CommonMark can't open or close are given up first, so the parts are cut where they'll stay.
     settle(atoms, renderer, STYLE_CHOICES[0]);
     const styles = writePart(atoms, renderer, inTable);
-    const whole = writeReadably(atoms, renderer, options, [(atom) => styles[atom]]);
+    const whole = writeReadably(atoms, renderer, inTable, [(atom) => styles[atom]]);
     // The parts read the same together (see independentParts) unless escaping differs at a cut: rare,
     // and then the paragraph is written again from what's left, like the next save will.
     if (!whole.gaveUp) return whole.markdown;
-    atoms.forEach((atom) => (atom.plainAddress = false));
+    resetWriting(atoms);
   }
 }

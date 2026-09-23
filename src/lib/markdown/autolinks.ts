@@ -22,17 +22,33 @@ export const mayHaveBareUrl = (text: string) => new RegExp(URL_START.source).tes
 const INSIDE_EMAIL = /@[a-zA-Z0-9._-]*$/;
 
 /**
+ * How much of a URL match marked links: it "backpedals" trailing punctuation and cuts the link at an
+ * unmatched "(", reading everything after that cut as ordinary markdown.
+ */
+function linkedLength(match: string): number {
+  let linked = match;
+  for (let previous = ""; previous !== linked;) {
+    previous = linked;
+    linked = RULES._backpedal.exec(linked)?.[0] ?? "";
+  }
+  return linked.length;
+}
+
+/**
  * The [start, end) spans of `text` that marked would read as bare URLs, as written: a trailing "." or
  * "_" that marked leaves out of the link is included, because a backslash written before it would end
- * up inside the link.
+ * up inside the link. A URL that marked cuts at an unmatched "(" ends there: marked reads the rest as
+ * ordinary markdown, so it is escaped like other text (and may hold another URL).
  */
 export function autolinkSpans(text: string): Array<[number, number]> {
   const spans: Array<[number, number]> = [];
   for (const { index } of text.matchAll(URL_START)) {
     if (index < (spans.at(-1)?.[1] ?? 0)) continue; // inside the previous URL
     if (INSIDE_EMAIL.test(text.slice(Math.max(0, index - 256), index))) continue;
-    const length = RULES.url.exec(text.slice(index))?.[0].length ?? 0;
-    if (length > 0) spans.push([index, index + length]);
+    const match = RULES.url.exec(text.slice(index))?.[0] ?? "";
+    if (!match) continue;
+    const cut = match.indexOf("(", linkedLength(match));
+    spans.push([index, index + (cut === -1 ? match.length : cut)]);
   }
   return spans;
 }

@@ -240,6 +240,10 @@ files.
   installs to use a long random password and a VPN or reverse-proxy auth in front.
 - The 429 carries `Retry-After`, and its message names the same wait in minutes (`lockoutResponse`
   computes both from one clock reading), so the sign-in page can show "Try again in N minutes" as is.
+  A 429 without that JSON body (from a reverse proxy, for example) still shows the wait:
+  `ApiError.retryAfterSeconds` (parsed from `Retry-After` by `parseRetryAfter` in
+  `src/lib/api-client.ts`) feeds the login form's fallback message, rounded up to whole minutes like
+  `lockoutResponse`, or "Try again later." when there is no header.
 - The lockout lives in memory on `globalThis`, shared by the proxy and the route handlers, which fits the
   one-process-per-data-folder rule ([D7](#d7)).
 - Code: `src/lib/server/auth.ts` and `src/app/api/auth/`.
@@ -290,12 +294,23 @@ files.
   a code span, a link or an emphasis delimiter right after it, it is written as `https\://…` (or
   `www\.…`) so it isn't linked and the formatting survives. A bare URL or email that marked does link
   re-opens as a link (an accepted normalization, like `<autolinks>`), so a later save writes `[url](url)`.
-- **Read-back:** inline formatting and paragraphs with a bare URL are read back with marked
-  (`src/lib/markdown/nodes/read-back.ts`). If marked reads different marks, other delimiter styles are
+- **Read-back:** every paragraph, heading or table cell whose Markdown holds a syntax character is read
+  back with marked (`src/lib/markdown/nodes/read-back.ts`); paragraphs over 16 K characters only when
+  they have delimiters or a bare address. If marked reads different marks, other delimiter styles are
   tried, and failing that the text is simplified where marked first misread it: the URL is kept from
   being linked, or else the nearest emphasis stretch is given up, never text. What's left is written
   again, so a second save writes the same bytes. Paragraphs are written in independent parts, so this
   stays close to linear (`src/lib/markdown/nodes/inline.ts`).
+- **Safety net:** when that targeted simplification finds nothing left to give up, or has run 4 times in
+  a row, the part falls back one step per render, cheapest loss first (`fallBack` in
+  `src/lib/markdown/nodes/inline-atoms.ts`): no bare address in it is linked, then every ASCII
+  punctuation character in its text is backslash-escaped (`escapeEverything` in `escape.ts`), then all
+  emphasis is dropped. The work stays bounded, links and marks the user applied stay, and plain text
+  never re-opens as a link, image or emphasis.
+- A `!` right before a link is written `\!`, so it can't turn the link into an image. Table cells escape
+  every `|` on the finished cell Markdown (`escapeTablePipes`), link destinations and image sources
+  included. Link destinations and titles escape backticks, because Tiptap pairs backticks across cells
+  before it splits a table row.
 - Always read Markdown with `serializeBody(editor)`, never `editor.getMarkdown()`, because only
   `serializeBody` applies the escaping and final-newline rules.
 - The document schema is `createSchemaExtensions()` in `src/lib/markdown/extensions.ts`. Both the editor
@@ -324,11 +339,17 @@ files.
 - **Lossy notes open in source mode** (a textarea holding the whole file) with a banner. "Edit visually
   anyway" asks for confirmation first. Editing never silently destroys content.
 - **Large notes open in source mode**, because inline parsing is superlinear: notes over 256 KiB, and
-  notes where one inline run is over 16 K characters (`hasOversizedParagraph`). It measures real runs
-  from marked's block lexer, which is linear: each paragraph, list item's text, heading and table cell
-  counts separately, and fenced or indented code never counts, so long tight lists, tables and quotes
-  still open visually. Quotes or lists nested more than 32 levels on one line (`> > > …`) also open in
-  source mode, because they could overflow marked's stack. Notes over 5 MiB or that aren't valid UTF-8
+  notes where one inline run is over 16 K characters (`hasOversizedParagraph` in
+  `src/lib/markdown/oversized.ts`, re-exported from `fidelity.ts`). It makes one linear pass over the
+  lines (`scanBlocks`) and gives an upper bound on the longest inline run: blank lines, headings,
+  thematic breaks, list items that interrupt a paragraph, valid GFM tables, and fenced, indented or HTML
+  blocks end runs, and anything unsure counts toward the run, so an unusual note may open as source.
+  Long tight lists, tables and quotes still open visually, and fenced or indented code never counts. It
+  finishes in a few milliseconds for any input up to 256 KiB; marked's block lexer, used before, was
+  superlinear on long list items and on quotes whose depth changes every line. Quotes or lists nested
+  more than 32 levels on one line (`> > > …`) also open in source mode, because they could overflow
+  marked's stack; the guard skips thematic breaks and allows 256 levels on lines read as code. Notes over
+  5 MiB or that aren't valid UTF-8
   are read-only ([D18](#d18)). Both callers, `note-editor.tsx` (the "Large note" notice) and Markdown
   paste ([D22](#d22)), use the same check.
 - Switching modes from the ⋯ menu flushes first, then remounts the inner editor from the last saved
@@ -354,7 +375,9 @@ In order, in `src/components/note/` and `src/components/editor/note-editor.tsx`:
 1. **Read-only:** a note over 5 MiB or not valid UTF-8 renders `ReadOnlyNote`: the reason, a text preview
    for files that aren't UTF-8, and a download button. write never modifies it.
 2. **Mode:** over 256 KiB, an inline run (paragraph, list item, heading or table cell) over 16 K
-   characters, or quotes and lists nested more than 32 deep goes to source mode ([D16](#d16)). Otherwise
+   characters, or quotes and lists nested more than 32 deep goes to source mode ([D16](#d16)). The run
+   check is one linear pass over the lines that bounds the longest run from above, so it takes a few
+   milliseconds even on adversarial input (`src/lib/markdown/oversized.ts`). Otherwise
    the visual editor is created and the fidelity
    check ([D16](#d16)) runs **synchronously on the first render**. The editor is loaded with
    `next/dynamic(…, { ssr: false })` and `immediatelyRender: true`, so there is no flash of the wrong mode
@@ -370,11 +393,18 @@ In order, in `src/components/note/` and `src/components/editor/note-editor.tsx`:
    dropped, together with the regular draft, when the note or its folder is deleted, when the note is
    renamed away from its old name, and when an empty Untitled note is discarded (once the server confirms)
    (`forgetDrafts` / `forgetFolderDrafts` in `src/lib/drafts.ts`). "Save mine as a copy" keeps the
-   original's conflict, since that file still exists.
+   original's conflict, since that file still exists. The known state of step 5 is forgotten alongside
+   (`forgetNote` / `forgetFolder`).
 5. **Newest known state:** the editor opens from the newest content and version this tab knows
    (`src/components/note/known-notes.ts`), not from page props that may be stale (back/forward replays
-   cached props). A revalidation `GET` on mount catches a stale page restored by the browser; it retries
-   transient failures (after 2, 5 and 15 s) and runs again on a back/forward-cache `pageshow`.
+   cached props). The registry keeps each note's content, version and `updatedAt` (the file's mtime). It
+   is preferred over props only when the props' `updatedAt` is strictly older (both come from the server
+   clock), so equal or newer props always win. An entry is forgotten when the note is deleted,
+   discarded, renamed or moved away (both names), when its folder is renamed or deleted, and when a new
+   note is created under its name (`forgetNote` / `forgetFolder` / `noteCreated` / `recordMove`), so a
+   new note reusing a name never opens with the old note's text. A revalidation `GET` on mount catches a
+   stale page restored by the browser; it retries transient failures (after 2, 5 and 15 s) and runs again
+   on a back/forward-cache `pageshow`.
 6. **Focus:** an empty `Untitled` note focuses and selects its title. On touch devices nothing is
    focused automatically, so the keyboard doesn't jump up. After a rename made while typing in the body,
    the new name's editor gets the old editor's exact document and caret ([D21](#d21)).
@@ -458,6 +488,8 @@ In order, in `src/components/note/` and `src/components/editor/note-editor.tsx`:
 - **Paste:** HTML goes through the editor schema. Plain text that looks like Markdown (`looksLikeMarkdown`
   in `src/lib/markdown/markdown-paste.ts`) is parsed as Markdown, unless the editor would drop part of it
   (the same fidelity check as opening a note, [D16](#d16)): then it is pasted as plain text with a toast.
+  Markdown over 256 KiB (`VISUAL_EDITOR_MAX_BYTES`) is pasted as plain text without being parsed, like a
+  note that size opening in source mode.
   Inside a code block, text is pasted raw. Pasted files and images are ignored with a toast, because uploads aren't supported yet.
 - **Table cells** hold one line of inline text. Blocks pasted or dropped into a cell are flattened to one
   line, joined with spaces (`src/lib/markdown/nodes/table-cells.ts`). A drop is judged by where it lands,

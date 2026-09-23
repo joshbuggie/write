@@ -2,11 +2,13 @@ import { Extension, type JSONContent } from "@tiptap/core";
 import type { MarkdownManager } from "@tiptap/markdown";
 import type { EditorView } from "@tiptap/pm/view";
 import { Plugin, PluginKey } from "@tiptap/pm/state";
+import { VISUAL_EDITOR_MAX_BYTES } from "@/lib/constants";
 import { analyzeFidelity, hasOversizedParagraph } from "./fidelity";
 import { finalizeMarkdown } from "./file-format";
 
-// Link text excludes "[" so the scan from each "[" stops at the next one (linear on text full of "[").
-const MARKDOWN_HINT = /^(#{1,6}\s|[-*+]\s|\d+[.)]\s|>\s|```|\|.+\|)|\*\*[^*]+\*\*|\[[^[\]]+\]\([^)]+\)/m;
+// Each scan stops where the next match could start: link text at the next "[", the destination at the
+// next "(" or space, bold at the next "*". That keeps the test linear on text full of "[a](" or "**".
+const MARKDOWN_HINT = /^(#{1,6}\s|[-*+]\s|\d+[.)]\s|>\s|```|\|.+\|)|\*\*[^*]+\*\*|\[[^[\]]+\]\([^()\s]+\)/m;
 
 /**
  * DOM event dispatched (bubbling) on the editor element when a paste or drop carried only files.
@@ -45,7 +47,8 @@ function vscodeMode(data: DataTransfer): string | null {
  * Uses the same fidelity check as opening a note, on the pasted text alone.
  */
 export function parsePastedMarkdown(manager: MarkdownManager, text: string): JSONContent | null {
-  if (hasOversizedParagraph(text)) return null;
+  // Like a note, too much Markdown to parse quickly is pasted as text (see VISUAL_EDITOR_MAX_BYTES).
+  if (text.length > VISUAL_EDITOR_MAX_BYTES || hasOversizedParagraph(text)) return null;
   const parsed = manager.parse(text);
   const roundTripped = finalizeMarkdown(manager.serialize(parsed));
   return analyzeFidelity(text, roundTripped).kind === "lossy" ? null : parsed;

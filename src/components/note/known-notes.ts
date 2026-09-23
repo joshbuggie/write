@@ -7,16 +7,21 @@
  * overwrite the user's own newer save. So every save, fetch and page prop is recorded here, and the note
  * screen opens from the newest state this tab has seen.
  *
- * Versions are content hashes with no order, so "newer" is decided by history: a version this tab has
- * already seen replaced is stale when it shows up again in props or a fetch. The one exception is a
- * successful save, which is always the newest state (undoing back to the original text legitimately
- * brings an old hash back).
+ * "Newest" is decided by `updatedAt`, the file's mtime as the server reported it. Every state comes from
+ * the same server clock, so the order is real, unlike versions (content hashes, which repeat: an undo, or
+ * two empty "Untitled" notes). What this tab knows is kept only when the other state is strictly older;
+ * equal or newer states always replace it.
+ *
+ * An entry describes one file. When that file goes away (deleted, discarded, renamed or moved, its folder
+ * renamed or deleted) or a new note takes its name, the entry is forgotten, so the next note under that
+ * name never opens with the old note's text.
  */
 import type { EditorSnapshot } from "@/components/editor/note-editor";
 import type { Note, NoteRef } from "@/lib/types";
 
-type DiskState = { content: string; version: string };
-type Entry = DiskState & { seen: Set<string>; savedHere: Set<string> };
+/** A state of a note's file: its text, its version and its mtime (ISO 8601, from the server). */
+export type DiskState = { content: string; version: string; updatedAt: string };
+type Entry = DiskState & { savedHere: Set<string> };
 /** What the editor under a note's new name takes over from the one that renamed it. */
 export type Handover = { snapshot: EditorSnapshot; focus: boolean };
 
@@ -28,22 +33,38 @@ const moves = new Map<string, NoteRef>();
 const handovers = new Map<string, Handover>();
 
 const keyOf = (ref: NoteRef) => JSON.stringify([ref.folder, ref.name]);
+const folderOfKey = (key: string) => (JSON.parse(key) as [string, string])[0];
 
 /**
- * Records a state of the file. `savedHere` marks the result of this tab's own successful save, which
- * always wins; anything else is ignored when it is a version this tab has already seen replaced.
+ * True only when `a` is strictly older than `b` (both ISO 8601 mtimes from the server). A timestamp that
+ * can't be read is never "older", so a state with one always wins over what this tab knows.
+ */
+export function isStrictlyOlder(a: string, b: string): boolean {
+  const ta = Date.parse(a);
+  const tb = Date.parse(b);
+  return !Number.isNaN(ta) && !Number.isNaN(tb) && ta < tb;
+}
+
+/** The state to keep: `incoming`, unless what this tab already knows is strictly newer. */
+export function newerState<T extends DiskState>(known: DiskState | undefined, incoming: T): DiskState {
+  return known && isStrictlyOlder(incoming.updatedAt, known.updatedAt) ? known : incoming;
+}
+
+/**
+ * Records a state of the file, unless this tab already knows a strictly newer one (a fetch that raced a
+ * save, props replayed from the router cache). `savedHere` marks the result of this tab's own successful
+ * save, so a later 409 naming that version is recognized as this tab's text.
  */
 export function recordDiskState(ref: NoteRef, state: DiskState, opts: { savedHere?: boolean } = {}): void {
   const key = keyOf(ref);
   const entry = entries.get(key);
-  if (!opts.savedHere && entry && entry.version !== state.version && entry.seen.has(state.version)) return;
+  const kept = newerState(entry, state);
   const next: Entry = {
-    content: state.content,
-    version: state.version,
-    seen: entry?.seen ?? new Set(),
+    content: kept.content,
+    version: kept.version,
+    updatedAt: kept.updatedAt,
     savedHere: entry?.savedHere ?? new Set(),
   };
-  next.seen.add(state.version);
   if (opts.savedHere) next.savedHere.add(state.version);
   entries.delete(key); // re-insert: the Map's order doubles as least-recently-used
   entries.set(key, next);
@@ -54,7 +75,8 @@ export function recordDiskState(ref: NoteRef, state: DiskState, opts: { savedHer
 export function latestKnown(note: Note): Note {
   recordDiskState(note, note);
   const entry = entries.get(keyOf(note))!;
-  return entry.version === note.version ? note : { ...note, content: entry.content, version: entry.version };
+  if (entry.version === note.version) return note;
+  return { ...note, content: entry.content, version: entry.version, updatedAt: entry.updatedAt };
 }
 
 /** True when `version` came from a save made in this tab: a 409 naming it is not someone else's edit. */
@@ -62,8 +84,38 @@ export function isSavedHere(ref: NoteRef, version: string): boolean {
   return entries.get(keyOf(ref))?.savedHere.has(version) ?? false;
 }
 
-/** Remembers a rename or move, so a cached page of the old name can point to the new one. */
+/**
+ * The file at `ref` is gone (deleted, discarded, closed for good after a deletion elsewhere) or no longer
+ * lives under this name: forget its state and any handover waiting for it.
+ */
+export function forgetNote(ref: NoteRef): void {
+  entries.delete(keyOf(ref));
+  handovers.delete(keyOf(ref));
+}
+
+/**
+ * A folder was deleted, or renamed from or to this name: forget every note in it, and every rename
+ * pointer that leads into it (the note it pointed to is no longer there).
+ */
+export function forgetFolder(folder: string): void {
+  for (const map of [entries, handovers])
+    for (const key of [...map.keys()]) if (folderOfKey(key) === folder) map.delete(key);
+  for (const [key, to] of [...moves]) if (to.folder === folder) moves.delete(key);
+}
+
+/** A new note was just created at `ref`: nothing this tab knew about that name applies to it. */
+export function noteCreated(ref: NoteRef): void {
+  forgetNote(ref);
+  forgetMove(ref);
+}
+
+/**
+ * Remembers a rename or move, so a cached page of the old name can point to the new one. The file left
+ * `from` and replaced whatever this tab knew at `to`, so what was known under both names is forgotten.
+ */
 export function recordMove(from: NoteRef, to: NoteRef): void {
+  forgetNote(from);
+  forgetNote(to);
   moves.delete(keyOf(to)); // a note lives there now
   moves.set(keyOf(from), to);
 }

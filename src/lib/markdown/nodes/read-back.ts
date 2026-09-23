@@ -1,5 +1,5 @@
 import { decodeHtmlEntities } from "@tiptap/core";
-import { Lexer, type Token } from "marked";
+import { Lexer, type Token, type Tokens } from "marked";
 import { isAutolinkLiteral } from "../autolinks";
 import { escapeTagLikeSpans } from "../escape";
 
@@ -36,8 +36,9 @@ function unitsOf(tokens: Token[], marks: string[], out: string[], autolinks: Aut
         return unitsOf(token.tokens ?? [], [...marks, INLINE_MARKS[token.type]], out, autolinks);
       case "link":
         // A bare URL or email the editor kept as plain text re-opens linked: that's accepted (the next
-        // save writes the link), so it counts as the plain text it was written as.
-        if (isAutolinkLiteral(token)) {
+        // save writes the link), so it counts as the plain text it was written as, if it links to that
+        // text ("a&amp;amp;" would link to more than it shows).
+        if (isAutolinkLiteral(token) && linksToItsText(token as Tokens.Link)) {
           const start = out.length;
           const complete = unitsOf(token.tokens ?? [], marks, out, autolinks);
           autolinks.push([start, out.length]);
@@ -56,6 +57,12 @@ function unitsOf(tokens: Token[], marks: string[], out: string[], autolinks: Aut
   });
 }
 
+/** Whether an autolink's address is its text, as the editor shows it (plus the scheme GFM adds). */
+function linksToItsText(token: Tokens.Link): boolean {
+  const text = decodeHtmlEntities(token.text);
+  return [text, `http://${text}`, `mailto:${text}`].includes(token.href);
+}
+
 /** What the editor meant: text characters, images and line breaks with their mark names. */
 export type IntendedUnit = { text?: string; node?: string; marks: string[] };
 
@@ -65,16 +72,60 @@ type Autolinks = Array<[start: number, end: number]>;
 export type Misread = { at: number; autolinks: Autolinks };
 
 /**
+ * A "|" after an odd number of backslashes. A table row escapes every "|" once more (escapeTablePipes),
+ * which leaves an even number before it, so the row would split there.
+ */
+const SPLITS_TABLE_ROW = /(?:^|[^\\])(?:\\\\)*\\\|/;
+
+/**
+ * Whether a run of backticks (not escaped, not in a code span) has no closing run in the markdown.
+ * Before splitting a table row into cells, Tiptap looks for code spans across the whole row to keep
+ * the "|"s inside them, so such a backtick would pair with one in another cell and join the cells.
+ */
+function hasUnclosedBacktick(markdown: string): boolean {
+  for (let i = 0; i < markdown.length; i++) {
+    if (markdown[i] === "\\") i++;
+    else if (markdown[i] === "`") {
+      let length = 1;
+      while (markdown[i + length] === "`") length++;
+      const close = closingRun(markdown, i + length, length);
+      if (close === -1) return true;
+      i = close + length - 1;
+    }
+  }
+  return false;
+}
+
+/** Where the next run of exactly `length` backticks starts, from `from` on, or -1. */
+function closingRun(markdown: string, from: number, length: number): number {
+  for (let j = from; j < markdown.length; j++) {
+    if (markdown[j] !== "`") continue;
+    let run = 1;
+    while (markdown[j + run] === "`") run++;
+    if (run === length) return j;
+    j += run - 1;
+  }
+  return -1;
+}
+
+/**
  * Where marked's reading of `markdown` first differs from the intended characters and marks, or null
  * when it reads back exactly. marked's emphasis matching has corner cases no flanking rule predicts
  * ("**a *b*c**"), so the serializer checks its own output instead of guessing, and simplifies near
- * the first difference. `inTable`: GFM unescapes `\|` before reading a cell.
+ * the first difference. `inTable`: the markdown also has to survive going into a table row, where
+ * GFM reads it the same unless a "|" splits the row.
  */
 export function firstMisread(markdown: string, intended: IntendedUnit[], inTable: boolean): Misread | null {
-  const source = escapeTagLikeSpans(inTable ? markdown.replace(/\\\|/g, "|") : markdown);
+  const source = escapeTagLikeSpans(markdown);
+  if (inTable && SPLITS_TABLE_ROW.test(source)) return { at: 0, autolinks: [] };
   const actual: string[] = [];
   const autolinks: Autolinks = [];
   const complete = unitsOf(Lexer.lexInline(source), [], actual, autolinks);
+  if (inTable && hasUnclosedBacktick(source)) {
+    // Most likely from a bare URL, where backticks aren't escaped: blame the first one that has one.
+    const address = autolinks.find(([start, end]) => actual.slice(start, end).some((u) => u[0] === "`"));
+    return { at: address?.[0] ?? 0, autolinks };
+  }
   const expected = intended.map((item) =>
     item.node === "hardBreak" ? unit(BREAK, []) : unit(item.node ? IMAGE : (item.text ?? ""), item.marks),
   );

@@ -1,4 +1,4 @@
-import { Lexer, Marked, type Token, type Tokens, type TokensList } from "marked";
+import { Marked, type Token, type Tokens, type TokensList } from "marked";
 import { finalizeMarkdown } from "./file-format";
 
 export type LossReason = "html" | "footnotes" | "math" | "references" | "escapes" | "structure";
@@ -8,69 +8,8 @@ const FENCED_CODE = /^ {0,3}(`{3,}|~{3,})[^\n]*\n[\s\S]*?(?:^ {0,3}\1[`~]*[ \t]*
 const INLINE_CODE = /(`+)[^\n]*?\1/g;
 const FOOTNOTE_DEFINITION = /^\[\^[^\]]+\]:/m;
 
-/**
- * Paragraphs longer than this open as Markdown source: marked's emphasis matching (used by Tiptap and by
- * this check) is quadratic in paragraph length, and a pasted log of that size can block the tab for seconds.
- * Real prose paragraphs stay far below it.
- */
-export const MAX_VISUAL_PARAGRAPH_CHARS = 16 * 1024;
-
-/**
- * The longest text marked reads as one inline run: a paragraph, a list item's text, a heading or a
- * table cell. Each is inline-lexed on its own, so a long list, table or quote is many short runs.
- * Only the block level is lexed here, which is linear; the inline level is the slow part.
- */
-function longestInlineRun(markdown: string): number {
-  let longest = 0;
-  const visit = (tokens: Token[]) =>
-    tokens.forEach((token) => {
-      if (token.type === "paragraph" || token.type === "text" || token.type === "heading") {
-        longest = Math.max(longest, token.text.length);
-      } else if (token.type === "table") {
-        const cells = [token.header, ...token.rows].flat() as Tokens.TableCell[];
-        cells.forEach((cell) => (longest = Math.max(longest, cell.text.length)));
-      } else if (token.type === "list") {
-        (token as Tokens.List).items.forEach((item) => visit(item.tokens));
-      } else if (token.type === "blockquote") {
-        visit(token.tokens ?? []);
-      }
-    });
-  visit(new Lexer({ gfm: true }).blockTokens(markdown.replace(/\r\n?/g, "\n")));
-  return longest;
-}
-
-/** Quotes or list items nested deeper than this on one line ("> > > …") open as source: marked recurses per level. */
-const MAX_NESTING = 32;
-const CONTAINER_MARKER = /^[ \t]*(?:>|(?:[-+*]|\d{1,9}[.)])(?=[ \t]|$))[ \t]?/;
-
-/** Whether a line opens more nested quotes or list items than MAX_NESTING. Linear. */
-function nestsTooDeep(markdown: string): boolean {
-  return markdown.split("\n").some((line) => {
-    let rest = line;
-    for (let depth = 0; depth <= MAX_NESTING; depth++) {
-      const marker = CONTAINER_MARKER.exec(rest);
-      if (!marker) return false;
-      rest = rest.slice(marker[0].length);
-    }
-    return true;
-  });
-}
-
-/**
- * Pre-check to run before parsing a note (or a paste) for the visual editor: true when some paragraph
- * (or list item, heading, table cell) is too long to parse without freezing the tab, or quotes and
- * lists nest so deep that parsing could overflow the stack.
- */
-export function hasOversizedParagraph(markdown: string): boolean {
-  if (nestsTooDeep(markdown)) return true;
-  // No paragraph can be longer than the whole text: most notes never need the lexer here.
-  if (markdown.length <= MAX_VISUAL_PARAGRAPH_CHARS) return false;
-  try {
-    return longestInlineRun(markdown) > MAX_VISUAL_PARAGRAPH_CHARS;
-  } catch {
-    return true; // marked gave up on it (too deeply nested), and so would the editor
-  }
-}
+// The size check runs before a note (or a paste) is parsed; it lives in its own file, re-exported here.
+export { hasOversizedParagraph, MAX_VISUAL_PARAGRAPH_CHARS } from "./oversized";
 
 const normalizeLabel = (label: string) => label.replace(/\s+/g, " ").toLowerCase();
 

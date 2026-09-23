@@ -43,17 +43,25 @@ function escapeUnbalancedBrackets(pieces: Piece[], from: number): void {
     });
 }
 
+/** A bracket after a literal (escaped) backslash: an even run of backslashes before it. */
+const BRACKET_AFTER_BACKSLASH = /(?<!\\)((?:\\\\)+)(?=[[\]])/g;
+
 /**
- * Escape link text so it stays the link's text: unbalanced brackets (see escapeUnbalancedBrackets), and,
- * because marked un-escapes brackets in link text before reading it, a "(" right after "]" ("[x](y)"
- * typed in link text isn't a link).
+ * Escape link text so it stays the link's text: unbalanced brackets (see escapeUnbalancedBrackets).
+ * marked also un-escapes brackets in link text before reading it, so a "(" right after "]" is escaped
+ * ("[x](y)" typed in link text isn't a link), and so is a bracket after a typed backslash ("\\[" would
+ * lose the backslash).
  */
 export function escapeLinkText(pieces: Piece[], from: number): void {
+  const escapeText = (escape: (md: string) => string) => {
+    for (let p = from; p < pieces.length; p++) {
+      if (pieces[p].text) pieces[p] = { ...pieces[p], md: escape(pieces[p].md) };
+    }
+  };
+  // First, so the brackets it escapes no longer count toward balancing the others.
+  escapeText((md) => md.replace(BRACKET_AFTER_BACKSLASH, "$1\\"));
   escapeUnbalancedBrackets(pieces, from);
-  for (let p = from; p < pieces.length; p++) {
-    const piece = pieces[p];
-    if (piece.text) pieces[p] = { ...piece, md: piece.md.replace(/\](?=\()/g, "]\\") };
-  }
+  escapeText((md) => md.replace(/\](?=\()/g, "]\\"));
 }
 
 /** An image's alt text; marked un-escapes brackets in it and keeps every other backslash as written. */
@@ -63,8 +71,12 @@ export function escapeAltText(alt: string): string {
   return pieces[0].md;
 }
 
-/** Characters a backslash can escape in CommonMark; a literal backslash before one must be doubled. */
-const BACKSLASH_BEFORE_PUNCTUATION = /\\(?=[!-/:-@[-`{-~])/g;
+/**
+ * A backslash marked removes from a destination: before any punctuation or symbol (marked unescapes
+ * Unicode ones too, "\\「"), or at the end, where the ")" or ">" closing the destination follows. A
+ * literal one there is doubled.
+ */
+const BACKSLASH_BEFORE_PUNCTUATION = /\\(?=[\p{P}\p{S}]|$)/gu;
 
 function parenthesesBalance(href: string): boolean {
   let depth = 0;
@@ -78,9 +90,11 @@ function parenthesesBalance(href: string): boolean {
 /**
  * A link or image destination that re-opens as the same href: bare when that's unambiguous, otherwise
  * in `<…>` (spaces, unbalanced parentheses, angle brackets), which keeps Wikipedia-style `Foo_(bar)` bare.
+ * A backtick is escaped: in a table row, Tiptap would pair it with one in another cell (and marked
+ * removes the backslash again).
  */
 export function linkDestination(href: string): string {
-  const escaped = href.replace(BACKSLASH_BEFORE_PUNCTUATION, "\\\\");
+  const escaped = href.replace(BACKSLASH_BEFORE_PUNCTUATION, "\\\\").replace(/`/g, "\\`");
   const bare = href !== "" && !/[\s<>\p{Cc}]/u.test(href) && parenthesesBalance(href);
   return bare ? escaped : `<${escaped.replace(/[<>]/g, "\\$&")}>`;
 }
@@ -89,6 +103,6 @@ export function linkDestination(href: string): string {
 export function linkSuffix(attrs: Record<string, unknown> = {}): string {
   const href = typeof attrs.href === "string" ? attrs.href : "";
   const title = typeof attrs.title === "string" && attrs.title ? attrs.title : "";
-  const titlePart = title ? ` "${title.replace(/["\\]/g, "\\$&")}"` : "";
+  const titlePart = title ? ` "${title.replace(/["\\`]/g, "\\$&")}"` : "";
   return `](${linkDestination(href)}${titlePart})`;
 }

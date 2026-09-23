@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useCallback, useTransition } from "react";
+import { noteCreated } from "@/components/note/known-notes";
 import { useToast } from "@/components/ui/toast";
 import { api } from "@/lib/api-client";
 import { DEFAULT_FOLDER } from "@/lib/constants";
@@ -35,6 +36,7 @@ export function useCreateNote(tree: Tree): { createNote: (folder?: string) => vo
       startTransition(async () => {
         try {
           const { note } = await api.createNote({ folder: folder ?? defaultNoteFolder(tree, activeFolder) });
+          noteCreated(note); // it may reuse a deleted or renamed note's name; it must open as itself
           startTransition(() => {
             router.push(noteHref(note));
             router.refresh();
