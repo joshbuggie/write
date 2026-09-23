@@ -36,23 +36,26 @@ npm run dev      # http://localhost:3000
 
 ### Testing on an iPhone
 
-Start the dev server bound to your computer's LAN address, then open it in Safari on a phone on the same
-Wi-Fi:
+Start the dev server on all interfaces, then open it in Safari on a phone on the same Wi-Fi, using your
+computer's LAN address or its Bonjour name:
 
 ```bash
-# macOS (en0 is usually Wi-Fi)
-npm run dev -- -H "$(ipconfig getifaddr en0)"
+npm run dev -- -H 0.0.0.0
 
-# Linux: -H takes exactly one address. `hostname -I` prints several, with a trailing space, so take the
-# first one, and check that it's your Wi-Fi address and not Docker or a VPN (`ip -4 addr show`).
-npm run dev -- -H "$(hostname -I | awk '{print $1}')"
-
-# then open http://<that-ip>:3000 on the phone
+# then open http://<your-computer's-ip>:3000 on the phone. To find the address:
+#   macOS: ipconfig getifaddr en0      (en0 is usually Wi-Fi)
+#   Linux: ip -4 addr show             (skip Docker and VPN interfaces)
+# On macOS, http://<name>.local:3000 works too (System Settings → General → Sharing shows the name).
 ```
 
-The `-H` matters. The Next.js dev server blocks dev assets requested from hostnames it doesn't know
-(`allowedDevOrigins`), and it only trusts `localhost` and the hostname it was started with. The Safari
-Web Inspector (Safari → Develop → your iPhone) shows the phone's console.
+**If the page shows but never comes alive** (the note body stays a gray skeleton, buttons do nothing),
+the dev server is blocking the phone. Next.js refuses dev-only resources to hostnames it doesn't trust,
+and Safari then never starts the page's JavaScript (Chrome is more forgiving, so it can look fine on a
+desktop). `next.config.ts` trusts this computer's own IPv4 addresses and its `.local` name
+(`devOrigins()`); for any other hostname, such as a tunnel, set `WRITE_DEV_ORIGINS` to a comma-separated
+list (`WRITE_DEV_ORIGINS=my-tunnel.example.com,*.ngrok.app npm run dev`). The dev server's terminal logs
+`Blocked cross-origin request … from "<host>"` with the hostname to add. Production (`npm start`) has no
+such check. The Safari Web Inspector (Safari → Develop → your iPhone) shows the phone's console.
 
 ---
 
