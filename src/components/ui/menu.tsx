@@ -3,6 +3,7 @@
 import { Ellipsis, type LucideIcon } from "lucide-react";
 import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import type React from "react";
+import { createPortal } from "react-dom";
 import { cn } from "@/lib/cn";
 import { IconButton } from "./button";
 
@@ -21,11 +22,15 @@ type MenuProps = {
 const GAP = 4;
 const EDGE = 8;
 
+/** The Popover API arrived in Safari 17; iOS 16 has neither the methods nor the `popover` attribute. */
+const supportsPopover = () => typeof HTMLElement !== "undefined" && "showPopover" in HTMLElement.prototype;
+
 /**
  * Icon button that opens a list of actions (the note and folder ⋯ menus).
- * The list is a manual popover in the browser's top layer, positioned next to the trigger, so it is never
- * clipped by a scrolling sidebar or trapped by a blurred sticky header. Closes on outside click, Esc, Tab,
- * scroll and resize; arrow keys, Home and End move between items.
+ * The list is rendered into <body> and positioned next to the trigger, so it is never clipped by a
+ * scrolling sidebar or trapped by a blurred sticky header. Where the Popover API exists (Safari 17+) it
+ * also goes into the browser's top layer; older browsers (iOS 16) rely on the portal and its z-index.
+ * Closes on outside click, Esc, Tab, scroll and resize; arrow keys, Home and End move between items.
  */
 export function Menu({ label, icon = Ellipsis, items, align = "end", className }: MenuProps) {
   const [open, setOpen] = useState(false);
@@ -39,7 +44,7 @@ export function Menu({ label, icon = Ellipsis, items, align = "end", className }
     const list = listRef.current;
     const trigger = triggerRef.current;
     if (!open || !list || !trigger) return;
-    list.showPopover();
+    if (supportsPopover()) list.showPopover();
     const t = trigger.getBoundingClientRect();
     const m = list.getBoundingClientRect();
     const left = align === "end" ? t.right - m.width : t.left;
@@ -113,50 +118,52 @@ export function Menu({ label, icon = Ellipsis, items, align = "end", className }
         aria-controls={open ? menuId : undefined}
         onClick={() => setOpen((o) => !o)}
       />
-      {open && (
-        <div
-          ref={listRef}
-          id={menuId}
-          popover="manual"
-          role="menu"
-          aria-label={label}
-          onKeyDown={onKeyDown}
-          className="fixed inset-auto m-0 min-w-48 rounded-lg border border-line bg-surface p-1 text-ink shadow-pop"
-        >
-          {items.map((item, i) =>
-            item === "separator" ? (
-              <div key={`sep-${i}`} role="separator" className="-mx-1 my-1 border-t border-line" />
-            ) : (
-              <button
-                key={item.label}
-                type="button"
-                role="menuitem"
-                tabIndex={-1}
-                disabled={item.disabled}
-                onClick={() => {
-                  closeAndRefocus();
-                  item.onSelect(); // synchronous, so a file picker opened here keeps the user gesture
-                }}
-                className={cn(
-                  "flex h-8 w-full items-center gap-2.5 rounded-md px-2.5 text-left text-[14px] whitespace-nowrap",
-                  "hover:bg-hover focus:bg-hover focus:outline-none disabled:opacity-40",
-                  "pointer-coarse:h-11 pointer-coarse:text-[16px]",
-                  item.destructive ? "text-danger" : "text-ink",
-                )}
-              >
-                {item.icon && (
-                  <item.icon
-                    aria-hidden
-                    strokeWidth={1.75}
-                    className={cn("size-4 shrink-0", !item.destructive && "text-muted")}
-                  />
-                )}
-                {item.label}
-              </button>
-            ),
-          )}
-        </div>
-      )}
+      {open &&
+        createPortal(
+          <div
+            ref={listRef}
+            id={menuId}
+            popover={supportsPopover() ? "manual" : undefined}
+            role="menu"
+            aria-label={label}
+            onKeyDown={onKeyDown}
+            className="fixed inset-auto z-50 m-0 min-w-48 rounded-lg border border-line bg-surface p-1 text-ink shadow-pop"
+          >
+            {items.map((item, i) =>
+              item === "separator" ? (
+                <div key={`sep-${i}`} role="separator" className="-mx-1 my-1 border-t border-line" />
+              ) : (
+                <button
+                  key={item.label}
+                  type="button"
+                  role="menuitem"
+                  tabIndex={-1}
+                  disabled={item.disabled}
+                  onClick={() => {
+                    closeAndRefocus();
+                    item.onSelect(); // synchronous, so a file picker opened here keeps the user gesture
+                  }}
+                  className={cn(
+                    "flex h-8 w-full items-center gap-2.5 rounded-md px-2.5 text-left text-[14px] whitespace-nowrap",
+                    "hover:bg-hover focus:bg-hover focus:outline-none disabled:opacity-40",
+                    "pointer-coarse:h-11 pointer-coarse:text-[16px]",
+                    item.destructive ? "text-danger" : "text-ink",
+                  )}
+                >
+                  {item.icon && (
+                    <item.icon
+                      aria-hidden
+                      strokeWidth={1.75}
+                      className={cn("size-4 shrink-0", !item.destructive && "text-muted")}
+                    />
+                  )}
+                  {item.label}
+                </button>
+              ),
+            )}
+          </div>,
+          document.body,
+        )}
     </div>
   );
 }
