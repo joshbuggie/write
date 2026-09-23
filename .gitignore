@@ -16,6 +16,9 @@
 # your notes when running locally (WRITE_DATA_DIR defaults to ./data)
 /data
 
+# write's own settings when running locally (WRITE_CONFIG_DIR defaults to ./config). Holds API keys.
+/config
+
 # next.js
 /.next/
 /out/

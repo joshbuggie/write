@@ -24,6 +24,7 @@ files.
 - Files in and out: [D23](#d23) downloads · [D24](#d24) import
 - UI: [D25](#d25) responsive layout · [D26](#d26) tokens and theme
 - Self-hosting: [D27](#d27) build output and health · [D28](#d28) configuration
+- Optional features: [D29](#d29) the AI assistant
 
 ---
 
@@ -603,10 +604,11 @@ In order, in `src/components/note/` and `src/components/editor/note-editor.tsx`:
 
 - `output: "standalone"` is enabled only when `BUILD_STANDALONE=1`, which the Dockerfile sets. The
   standalone `server.js` changes directory into `.next/standalone`, so on bare metal a relative `./data`
-  would land inside the build output and be wiped by the next build. `getDataDir()` also refuses any data
-  folder inside `.next/`, and `next.config.ts` keeps `./data` out of build tracing.
-- The `/* turbopackIgnore: true */` comment on the data-dir `path.resolve` in
-  `src/lib/server/storage/config.ts` is load-bearing. Without it, Turbopack traces the whole project into
+  would land inside the build output and be wiped by the next build. `getDataDir()` and `getConfigDir()`
+  also refuse any folder inside `.next/`, and `next.config.ts` keeps `./data` and `./config` out of build
+  tracing.
+- The `/* turbopackIgnore: true */` comments on the data-dir and config-dir `path.resolve` calls in
+  `src/lib/server/storage/config.ts` are load-bearing. Without them, Turbopack traces the whole project into
   the build.
 - The Docker image sets `HOSTNAME=0.0.0.0`, because Docker sets `HOSTNAME` to the container id and
   `server.js` would bind to that.
@@ -621,13 +623,114 @@ In order, in `src/components/note/` and `src/components/editor/note-editor.tsx`:
 
 <a id="d28"></a>
 
-## D28. Configuration comes from the environment
+## D28. Configuration comes from the environment, plus one settings file
 
-- There are only two app settings: `WRITE_DATA_DIR` (default `./data` relative to the working directory,
-  or `/data` in Docker) and `WRITE_PASSWORD`. Both are read at runtime, so they can live in `.env.local`
-  for `npm start` / `npm run dev`.
+- There are three environment settings: `WRITE_DATA_DIR` (default `./data` relative to the working
+  directory, or `/data` in Docker), `WRITE_CONFIG_DIR` (default `./config`, or `/config` in Docker) and
+  `WRITE_PASSWORD`. All are read at runtime, so they can live in `.env.local` for `npm start` /
+  `npm run dev`. How the server runs stays in the environment.
+- **One settings file.** What people change in the app, today only the AI assistant's settings
+  ([D29](#d29)), is saved by the Settings dialog (`PUT /api/settings`) in `WRITE_CONFIG_DIR/settings.json`
+  (`src/lib/server/storage/settings.ts`). Those settings are changed from a phone and include API keys, and
+  an environment variable would need shell access and a restart for each change. On the server rather than
+  in `localStorage`, they are shared by every device, and the keys never sit in a browser.
+- The file is versioned JSON (`"version": 1`), read defensively: unknown or malformed fields fall back to
+  defaults, and a read never creates anything (the folder and file appear on the first save). A file that
+  isn't valid JSON is refused, never overwritten: pages fall back to the defaults with the assistant off
+  (`loadAiSettings` logs the error), so a broken file never takes the notes down, and saving fails with a
+  message that names the file.
+- **The config folder is kept away from the notes.** `getConfigDir()` refuses a config folder it can see
+  is the data folder or inside it, because notes are often synced (iCloud, Dropbox, `git`) and API keys
+  must never travel with them. A folder there would also show up as a notebook. It compares the paths as
+  written and again with symlinks followed (the nearest existing folder, for one not created yet), since
+  the README suggests linking the data folder into a synced one. Two Docker mounts of the same host folder
+  look like separate folders from inside the container, so those must be kept apart by hand. `.gitignore`,
+  `.dockerignore` and `next.config.ts` keep `./config` out of commits, Docker build contexts and build
+  output.
 - **The port and bind address can't go in `.env.local`.** `next start` and `next dev` choose them from
   their command-line flags before `.env` files are loaded. Use `npm start -- -p 8080 -H 127.0.0.1`. `PORT`
   also works as a real environment variable (`PORT=8080 npm start`), but `next start` ignores `HOSTNAME`
   entirely. `HOSTNAME` only affects the Docker image's standalone `server.js`.
 - Hosting under a subpath isn't supported. Use a subdomain.
+
+---
+
+<a id="d29"></a>
+
+## D29. The AI assistant
+
+- **Optional, and off by default.** Off means no ✨ button, no shortcut listener and no editor plugin, so
+  people who don't want it get exactly the app they had. The server enforces it too: `POST /api/ai/complete`
+  answers `409 ai_disabled` while it's off. "Test connection" (`POST /api/ai/models`) still works, because
+  that is how a connection is set up before the switch is saved.
+- **The server makes every model call.** The browser only talks to write, and write calls the model
+  server. So API keys never reach the browser, there is no CORS to configure, and a phone can use a LAN
+  server such as Ollama (an HTTPS page can't fetch an `http://` server, and most model servers don't
+  send CORS headers). The cost: the server requests URLs that people type, which is why the password
+  matters (below).
+- **Two APIs, plain `fetch`.** OpenAI-compatible chat completions cover OpenAI, OpenRouter, Ollama, LM
+  Studio and most other servers. The Anthropic Messages API covers Anthropic. Each provider preset names
+  its API (`presetFor(id).api` in `src/lib/ai/settings.ts`), presets only prefill the URL, and "Other" takes
+  any OpenAI-compatible server. `src/lib/server/ai/` has one small adapter per API and parses server-sent
+  events by hand, with a 4 MB cap on each event (its `data:` lines so far included), so a broken server
+  can't fill the server's memory. No SDKs: two dependencies for two HTTP calls aren't worth it ([D4](#d4),
+  rule 8).
+- **Saved connections.** Several can be saved (say, a local model and a hosted one), with one default. The
+  prompt window shows a picker only when more than one is usable.
+- **Keys are write-only.** Settings are stored in `WRITE_CONFIG_DIR/settings.json` ([D28](#d28)), written
+  atomically under the write lock ([D7](#d7)) with mode 0600, because keys are in plain text. A config
+  folder that write creates gets mode 0700. `GET /api/settings` returns each connection with `keyHint`,
+  never the key: the key's last four characters, or `••••` for a key under 12 characters (a LAN server's
+  short token), whose last four would give most of it away. The form sends a new key, `clearKey`, or
+  neither to keep the saved one. A key must be visible ASCII once trimmed: that is what keys are, and HTTP
+  headers can't carry much else, so a zero-width space pasted along with a key is refused on save instead
+  of failing every request. A request that fails because the key can't be sent names the key, not the
+  network.
+- **A saved key is only sent to the origin it was saved for.** When a connection's URL changes origin, its
+  saved key is dropped, and "Test connection" on an unsaved form uses the saved key only for the same
+  origin. Changing the URL means typing the key again, so a key can't be sent to another server by a typo
+  or by anyone else who can edit the settings.
+- **The request is exactly what "What gets sent" shows.** The system prompt is the editable
+  **Instructions**. The user turn is the note text inside a `<note>` tag, then the request (`buildMessages`
+  in `src/lib/ai/prompt.ts`). Follow-ups send the conversation so far, as alternating turns. The body of
+  `POST /api/ai/complete` is `{ connectionId, system, messages }`. The server adds the connection's URL,
+  key and model, and the settings the API needs: `stream: true`, and for Anthropic the required
+  `max_tokens`, set to 64,000 so a reply's length is the user's call. A model that allows fewer (an older
+  one, or an Anthropic-compatible server) refuses that with a 400 naming its limit, and the request is sent
+  once more with that limit. No prompt text is added, so what people see is what the provider gets.
+- **Context.** The selection, as Markdown; otherwise the paragraph at the caret; otherwise (an empty line)
+  just the caret, with no note text. A "Whole note" toggle changes this for one request, and Settings sets
+  the default. A selection that spans blocks grows to whole blocks, so Replace never leaves half a list
+  item or a heading merged into a paragraph.
+- **Replies are previewed.** Only Replace or Insert changes the note, as one undo step. A reply is parsed
+  like a paste ([D22](#d22)): it passes the same fidelity check as opening a note ([D16](#d16)), and a reply
+  the editor would lose part of goes in as plain text, with a notice in the prompt window first. The reply
+  never inherits the replaced text's marks (replacing a bold word doesn't make the whole reply bold).
+  Inside a code block it goes in raw, and in a table cell it is flattened to one line.
+- **Markdown source mode** gets the same prompt window, docked at the bottom because a textarea can't say
+  where its caret is on screen. The context is the selection, else the lines around the caret up to the
+  nearest blank lines, and replies go in as the Markdown they are, as one textarea undo step
+  (`src/components/ai/source-target.ts`).
+- **Streaming.** `POST /api/ai/complete` answers with newline-delimited JSON (`application/x-ndjson`,
+  `CompleteEvent` in `src/lib/api-contract.ts`): `{text}` lines, then `{done, stop}`, where `stop` says
+  whether the reply ended, hit the length limit or was refused. NDJSON over `fetch` can carry a POST body;
+  `EventSource` can't. The server opens the upstream request before it answers, so early failures are
+  ordinary JSON errors: `ai_unreachable` (502: nothing answered, DNS, timeout), `ai_upstream` (502: the
+  model server answered with an error, such as a refused key or an unknown model) and `ai_disabled` (409).
+  Once the stream has started the status can't change, so a later failure arrives as a final `{error}`
+  line. Timeouts measure silence, not length: a request fails when the model server sends nothing for
+  10 minutes (20 seconds for a models list), first while it prepares its answer, since a model may think
+  for minutes on slow hardware, then between two chunks, since some servers answer at once and think
+  after. A reply that keeps streaming is never cut off, even past an hour on a slow machine; a runaway one
+  is stopped by the reply cap (`MAX_REPLY_CHARS`, one million characters, stop "length") instead
+  (`src/lib/server/ai/idle.ts`). Stop (or Esc) aborts the fetch, the server sees the disconnect and aborts its upstream request, so
+  the model stops generating, and billing. Error messages name the host, never the key.
+- **Security.** Without `WRITE_PASSWORD`, anyone who can reach write can run requests on the saved
+  connections (spending the owner's API credits) and use "Test connection" to make the server request any
+  http(s) URL, including addresses on the LAN that the outside can't reach. That is the same trust model as
+  the notes themselves, but the cost reaches beyond write, so the README says to set a password before
+  turning the assistant on anywhere shared. Cross-site pages can't trigger either request: both are JSON
+  POSTs behind the CSRF check ([D14](#d14)). Server URLs must be http(s) without credentials, and
+  redirects aren't followed, so a key never follows a redirect to another host.
+- Code: `src/lib/ai/`, `src/lib/server/ai/`, `src/lib/server/storage/settings.ts`, `src/app/api/settings/`,
+  `src/app/api/ai/`, `src/components/ai/` and `src/components/settings/`.

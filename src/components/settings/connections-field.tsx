@@ -3,18 +3,17 @@
 import { Pencil, Plus, Trash2 } from "lucide-react";
 import { useId, useState } from "react";
 import { Button, IconButton } from "@/components/ui/button";
-import {
-  connectionName,
-  newConnection,
-  presetFor,
-  type AiConnection,
-  type AiSettings,
-} from "@/lib/ai/settings";
+import { connectionName, newConnection, presetFor, type AiConnection } from "@/lib/ai/settings";
 import { ConnectionFields } from "./connection-fields";
+import { keepsSavedKey, keyHintLabel, type DraftConnection, type SettingsDraft } from "./settings-draft";
 
 type ConnectionsFieldProps = {
-  draft: AiSettings;
-  onChange: (patch: Partial<AiSettings>) => void;
+  draft: SettingsDraft;
+  /** The connections as last saved: their key hints, and the origins those keys belong to. */
+  saved: AiConnection[];
+  onChange: (patch: Partial<SettingsDraft>) => void;
+  /** Edits one connection against the latest draft, so an answer arriving late can't undo newer edits. */
+  onChangeConnection: (id: string, patch: Partial<DraftConnection>) => void;
 };
 
 /** Host and port only: enough to recognize a server in a one-line summary. */
@@ -26,10 +25,15 @@ function hostOf(url: string): string {
   }
 }
 
-/** "Ollama · llama3.1:8b · 192.168.1.20:11434", or "API key ••a3F9" in place of the host for hosted APIs. */
-function summary(c: AiConnection): string {
+/** "Ollama · llama3.1:8b · 192.168.1.20:11434", or "key ••a3F9" in place of the host for hosted APIs. */
+function summary(c: DraftConnection, saved: AiConnection | undefined): string {
   const preset = presetFor(c.provider);
-  const where = preset.needsKey ? (c.keyHint ? `key ••${c.keyHint}` : "no API key") : hostOf(c.baseUrl);
+  const key = c.apiKey?.trim()
+    ? "new key"
+    : keepsSavedKey(c, saved)
+      ? `key ${keyHintLabel(saved?.keyHint ?? "")}`
+      : "no API key";
+  const where = preset.needsKey ? key : hostOf(c.baseUrl);
   return [preset.label, c.model || "no model", where].join(" · ");
 }
 
@@ -38,15 +42,14 @@ function summary(c: AiConnection): string {
  * than one, the prompt window gets a picker; the default is what it starts with. When a form closes,
  * focus moves to a control that is still there instead of falling to the dialog.
  */
-export function ConnectionsField({ draft, onChange }: ConnectionsFieldProps) {
+export function ConnectionsField({ draft, saved, onChange, onChangeConnection }: ConnectionsFieldProps) {
   const { connections, defaultConnectionId } = draft;
   const [editing, setEditing] = useState<string | null>(null);
   const ids = useId();
   const editId = (id: string) => `${ids}-edit-${id}`;
   const addId = `${ids}-add`;
   const focusSoon = (id: string) => requestAnimationFrame(() => document.getElementById(id)?.focus());
-  const update = (id: string, patch: Partial<AiConnection>) =>
-    onChange({ connections: connections.map((c) => (c.id === id ? { ...c, ...patch } : c)) });
+  const savedById = (id: string) => saved.find((c) => c.id === id);
 
   function add() {
     const connection = newConnection();
@@ -76,7 +79,11 @@ export function ConnectionsField({ draft, onChange }: ConnectionsFieldProps) {
             if (editing === c.id) {
               return (
                 <li key={c.id} className="flex flex-col gap-3.5 bg-canvas px-3 py-3">
-                  <ConnectionFields connection={c} onChange={(patch) => update(c.id, patch)} />
+                  <ConnectionFields
+                    connection={c}
+                    saved={savedById(c.id)}
+                    onChange={(patch) => onChangeConnection(c.id, patch)}
+                  />
                   <div className="flex flex-wrap items-center gap-2">
                     <Button size="sm" variant="ghost" onClick={() => remove(c.id)}>
                       <Trash2 aria-hidden strokeWidth={1.75} className="size-4" />
@@ -116,7 +123,7 @@ export function ConnectionsField({ draft, onChange }: ConnectionsFieldProps) {
                       </span>
                     )}
                   </p>
-                  <p className="truncate text-[12.5px] text-muted">{summary(c)}</p>
+                  <p className="truncate text-[12.5px] text-muted">{summary(c, savedById(c.id))}</p>
                 </div>
                 <IconButton
                   id={editId(c.id)}

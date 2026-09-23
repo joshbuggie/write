@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useEffectEvent, useRef } from "react";
+import { useAi } from "@/components/ai/ai-provider";
+import { SourceAssist } from "@/components/ai/source-assist";
 import type { EditorReady, SourceReason } from "./note-editor";
 
 type SourceEditorProps = {
@@ -24,6 +26,7 @@ function fitHeight(el: HTMLTextAreaElement, allowShrink: boolean) {
  */
 export function SourceEditor({ content, sourceReason, onReady, onChange }: SourceEditorProps) {
   const ref = useRef<HTMLTextAreaElement>(null);
+  const ai = useAi();
 
   const announceReady = useEffectEvent((el: HTMLTextAreaElement) => {
     // The handle holds the element itself (not the ref), so it still works during unmount.
@@ -57,17 +60,20 @@ export function SourceEditor({ content, sourceReason, onReady, onChange }: Sourc
   }, []);
 
   return (
-    <textarea
-      ref={ref}
-      defaultValue={content}
-      aria-label="Note body (Markdown)"
-      spellCheck={false}
-      autoCapitalize="sentences"
-      onInput={(e) => {
-        fitHeight(e.currentTarget, false);
-        onChange();
-      }}
-      className="block w-full resize-none overflow-hidden bg-transparent pt-3 pb-[40vh] font-mono text-[16px] leading-[1.6] text-ink outline-none md:text-[15px]"
-    />
+    <>
+      <textarea
+        ref={ref}
+        defaultValue={content}
+        aria-label="Note body (Markdown)"
+        spellCheck={false}
+        autoCapitalize="sentences"
+        onInput={(e) => {
+          fitHeight(e.currentTarget, false);
+          onChange();
+        }}
+        className="block w-full resize-none overflow-hidden bg-transparent pt-3 pb-[40vh] font-mono text-[16px] leading-[1.6] text-ink outline-none md:text-[15px]"
+      />
+      {ai.settings.enabled && <SourceAssist textarea={ref} />}
+    </>
   );
 }

@@ -40,20 +40,27 @@ jobs:
       - name: Format
         run: npm run format:check
 
-      # A canary note in ./data proves the build never traces user notes into the output.
-      - name: Seed a canary note
-        run: mkdir -p data/notebook && echo "# trace canary" > data/notebook/trace-canary.md
+      # A canary note in ./data and a canary settings file in ./config prove the build never traces
+      # user notes or write's own settings (API keys) into the output.
+      - name: Seed canary files
+        run: |
+          mkdir -p data/notebook && echo "# trace canary" > data/notebook/trace-canary.md
+          mkdir -p config && echo '{"canary":true}' > config/trace-canary.json
 
       - name: Build (standalone, like the Docker image)
         run: npm run build
         env:
           BUILD_STANDALONE: "1"
 
-      - name: Check the build contains no notes
+      - name: Check the build contains no notes or settings
         run: |
           test -f .next/standalone/server.js
           if find .next -name 'trace-canary.md' | grep -q .; then
             echo "::error::A note from ./data was traced into the build output."
+            exit 1
+          fi
+          if find .next -name 'trace-canary.json' | grep -q .; then
+            echo "::error::A file from ./config was traced into the build output."
             exit 1
           fi
 
@@ -77,8 +84,10 @@ jobs:
 
       - name: Smoke test the container
         run: |
-          mkdir -p "$RUNNER_TEMP/data" && sudo chown 1000:1000 "$RUNNER_TEMP/data"
-          docker run -d --name write-ci -p 3000:3000 -v "$RUNNER_TEMP/data:/data" write:ci
+          mkdir -p "$RUNNER_TEMP/data" "$RUNNER_TEMP/config"
+          sudo chown 1000:1000 "$RUNNER_TEMP/data" "$RUNNER_TEMP/config"
+          docker run -d --name write-ci -p 3000:3000 \
+            -v "$RUNNER_TEMP/data:/data" -v "$RUNNER_TEMP/config:/config" write:ci
           for i in $(seq 1 30); do
             if curl -fsS http://127.0.0.1:3000/api/health; then echo; exit 0; fi
             sleep 1

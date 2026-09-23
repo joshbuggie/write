@@ -1,79 +1,8 @@
-/** Which API a provider speaks. Most hosted platforms and local servers speak OpenAI's chat format. */
-export type ProviderApi = "openai" | "anthropic";
+import { presetFor, type ProviderId } from "./providers";
 
-/** The presets in the Provider menu; saved with the settings so the form reopens on the same one. */
-export type ProviderId = "ollama" | "lmstudio" | "openai" | "anthropic" | "openrouter" | "custom";
-
-/**
- * A starting point for the connection fields. Presets only prefill the URL and hint the model name;
- * every field stays editable, so any OpenAI-compatible server works through "Other".
- */
-export type ProviderPreset = {
-  id: ProviderId;
-  label: string;
-  api: ProviderApi;
-  baseUrl: string;
-  /** Local servers usually run without a key. */
-  needsKey: boolean;
-  modelPlaceholder: string;
-};
-
-/** Local servers first: they need no account, and they keep note text on the user's own network. */
-export const PROVIDER_PRESETS: ProviderPreset[] = [
-  {
-    id: "ollama",
-    label: "Ollama",
-    api: "openai",
-    baseUrl: "http://localhost:11434/v1",
-    needsKey: false,
-    modelPlaceholder: "llama3.1:8b",
-  },
-  {
-    id: "lmstudio",
-    label: "LM Studio",
-    api: "openai",
-    baseUrl: "http://localhost:1234/v1",
-    needsKey: false,
-    modelPlaceholder: "qwen2.5-7b-instruct",
-  },
-  {
-    id: "openai",
-    label: "OpenAI",
-    api: "openai",
-    baseUrl: "https://api.openai.com/v1",
-    needsKey: true,
-    modelPlaceholder: "gpt-5-mini",
-  },
-  {
-    id: "anthropic",
-    label: "Anthropic",
-    api: "anthropic",
-    baseUrl: "https://api.anthropic.com",
-    needsKey: true,
-    modelPlaceholder: "claude-sonnet-5",
-  },
-  {
-    id: "openrouter",
-    label: "OpenRouter",
-    api: "openai",
-    baseUrl: "https://openrouter.ai/api/v1",
-    needsKey: true,
-    modelPlaceholder: "anthropic/claude-sonnet-5",
-  },
-  {
-    id: "custom",
-    label: "Other (OpenAI-compatible)",
-    api: "openai",
-    baseUrl: "",
-    needsKey: false,
-    modelPlaceholder: "model name",
-  },
-];
-
-/** The preset for an id; unknown ids (an older settings file) fall back to "Other". */
-export function presetFor(id: ProviderId): ProviderPreset {
-  return PROVIDER_PRESETS.find((p) => p.id === id) ?? PROVIDER_PRESETS[PROVIDER_PRESETS.length - 1];
-}
+// The provider presets live in ./providers; re-exported so settings code has one import.
+export { PROVIDER_IDS, PROVIDER_PRESETS, presetFor } from "./providers";
+export type { ProviderApi, ProviderId, ProviderPreset } from "./providers";
 
 /** What the prompt window sends when nothing else is chosen: the selection (or paragraph), or the whole note. */
 export type AiScope = "selection" | "note";
@@ -87,7 +16,8 @@ export type QuickAction = { id: string; label: string; prompt: string; apply: Ap
 /**
  * One saved place to send requests: a hosted API or a server on the network. Several can be saved (say, a
  * local model and a hosted one) and switched between in the prompt window. The browser only ever sees
- * `keyHint` (the key's last four characters), never the key itself.
+ * `keyHint` (the key's last four characters, or "••••" for a key too short to show part of), never the
+ * key itself.
  */
 export type AiConnection = {
   id: string;
@@ -192,3 +122,20 @@ export function newConnection(provider: ProviderId = "ollama"): AiConnection {
   const id = `conn-${Date.now().toString(36)}`;
   return { id, name: "", provider, baseUrl: presetFor(provider).baseUrl, keyHint: null, model: "" };
 }
+
+/**
+ * Size limits the server enforces on saved settings and requests (400 beyond them). Generous for real use;
+ * they only stop a runaway client or a pasted novel from ending up in the settings file.
+ */
+export const AI_LIMITS = {
+  connections: 20,
+  quickActions: 40,
+  /** Instructions (system prompt), in characters. */
+  instructions: 20_000,
+  /** A quick action's prompt, in characters. */
+  prompt: 4_000,
+  /** Names, URLs, model names and API keys, in characters. */
+  field: 500,
+  /** Turns in one prompt window conversation (the first request plus follow-ups and their replies). */
+  turns: 41,
+} as const;

@@ -8,18 +8,13 @@ import {
   useMemo,
   useRef,
   useState,
-  useSyncExternalStore,
   type ReactNode,
 } from "react";
 import { SettingsDialog } from "@/components/settings/settings-dialog";
 import { useActiveNote } from "@/components/shell/shell-context";
 import { useToast } from "@/components/ui/toast";
-import {
-  getMockSettings,
-  getServerMockSettings,
-  saveMockSettings,
-  subscribeMockSettings,
-} from "@/lib/ai/mock/settings-store";
+import type { SaveSettingsRequest } from "@/lib/api-contract";
+import { api } from "@/lib/api-client";
 import type { AiSettings } from "@/lib/ai/settings";
 import { matchesShortcut } from "@/lib/ai/shortcut";
 
@@ -41,11 +36,23 @@ const AiContext = createContext<AiValue | null>(null);
 /**
  * Owns the AI settings and the Settings dialog, and connects the header button and the global shortcut
  * to whichever editor is open. When the assistant is off, none of that is wired up: no shortcut listener,
- * no button, no editor plugin.
+ * no button, no editor plugin. The notes layout loads the settings on the server (so a switched-off
+ * assistant never flashes into view), and every refresh of the layout brings them up to date again.
  */
-export function AiProvider({ children }: { children: ReactNode }) {
-  // MOCKUP: settings come from localStorage; the real version loads them from the server in the layout.
-  const settings = useSyncExternalStore(subscribeMockSettings, getMockSettings, getServerMockSettings);
+export function AiProvider({
+  initialSettings,
+  children,
+}: {
+  initialSettings: AiSettings;
+  children: ReactNode;
+}) {
+  const [settings, setSettings] = useState(initialSettings);
+  const [loaded, setLoaded] = useState(initialSettings);
+  if (initialSettings !== loaded) {
+    // A fresh server render (router.refresh, focus): its settings win over what this tab last saw.
+    setLoaded(initialSettings);
+    setSettings(initialSettings);
+  }
   const [settingsOpen, setSettingsOpen] = useState(false);
   const toast = useToast();
   const noteOpen = useActiveNote() !== null;
@@ -82,10 +89,10 @@ export function AiProvider({ children }: { children: ReactNode }) {
       if (e.defaultPrevented || !matchesShortcut(e, shortcut)) return;
       if (document.querySelector("dialog:modal")) return; // a dialog is in front of the note
       if (!targetRef.current) {
-        // MOCKUP: a note open in the Markdown source editor. Say why nothing opened, rather than nothing.
+        // A note is open but has no editor (read-only, or still loading): say why nothing opened.
         if (!noteOpen) return;
         e.preventDefault();
-        toast.show({ message: "AI works in the visual editor for now." });
+        toast.show({ message: "There's no editor open for AI to work in." });
         return;
       }
       e.preventDefault();
@@ -110,7 +117,11 @@ export function AiProvider({ children }: { children: ReactNode }) {
     <AiContext.Provider value={value}>
       {children}
       {settingsOpen && (
-        <SettingsDialog initial={settings} onSave={saveMockSettings} onClose={() => setSettingsOpen(false)} />
+        <SettingsDialog
+          initial={settings}
+          onSave={async (ai: SaveSettingsRequest["ai"]) => setSettings((await api.saveSettings({ ai })).ai)}
+          onClose={() => setSettingsOpen(false)}
+        />
       )}
     </AiContext.Provider>
   );

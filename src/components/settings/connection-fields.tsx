@@ -1,37 +1,49 @@
 "use client";
 
 import { Check, TriangleAlert } from "lucide-react";
-import { useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { SelectField } from "@/components/ui/select-field";
 import { TextField } from "@/components/ui/text-field";
-import { MOCK_MODELS } from "@/lib/ai/mock/models";
+import { api } from "@/lib/api-client";
 import { PROVIDER_PRESETS, presetFor, type AiConnection, type ProviderId } from "@/lib/ai/settings";
 import { cn } from "@/lib/cn";
+import { ApiKeyField } from "./api-key-field";
+import { keyProblem, toConnectionInput, type DraftConnection } from "./settings-draft";
 
 type ConnectionFieldsProps = {
-  connection: AiConnection;
-  onChange: (patch: Partial<AiConnection>) => void;
+  connection: DraftConnection;
+  /** The connection as last saved, if it was (for its key hint and the origin the key belongs to). */
+  saved: AiConnection | undefined;
+  onChange: (patch: Partial<DraftConnection>) => void;
 };
 type TestResult = { ok: boolean; message: string } | null;
 
 const HINT = "text-[12.5px] leading-relaxed text-subtle";
 
+/** "Connected · 4 models available", plus a warning when the chosen model isn't among them. */
+function describeModels(models: string[], model: string): TestResult {
+  if (models.length === 0) return { ok: true, message: "Connected. The server didn't list its models." };
+  const listed = `Connected · ${models.length} ${models.length === 1 ? "model" : "models"} available`;
+  if (model && !models.includes(model)) return { ok: false, message: `${listed}, but not “${model}”.` };
+  return { ok: true, message: listed };
+}
+
 /**
- * One connection's form: name, provider preset, model, server URL and API key, plus "Test connection".
- * The key is write-only: once saved, only its last four characters are ever shown again.
+ * One connection's form: name, provider preset, model, server URL and API key, plus "Test connection",
+ * which asks the server (through write, with this form's values) for its models and fills the model
+ * suggestions from the answer.
  */
-export function ConnectionFields({ connection: draft, onChange }: ConnectionFieldsProps) {
+export function ConnectionFields({ connection: draft, saved, onChange }: ConnectionFieldsProps) {
   const preset = presetFor(draft.provider);
   const urlHintId = useId();
-  const keyHintId = useId();
   const modelsId = useId();
-  const [editingKey, setEditingKey] = useState(draft.keyHint === null);
-  const [focusKey, setFocusKey] = useState(false); // after Replace or Remove, the new field takes focus
-  const [key, setKey] = useState("");
   const [models, setModels] = useState<string[]>([]);
   const [testing, setTesting] = useState(false);
   const [result, setResult] = useState<TestResult>(null);
+  const inFlight = useRef<AbortController | null>(null);
+
+  useEffect(() => () => inFlight.current?.abort(), []);
 
   function changeProvider(id: ProviderId) {
     onChange({ provider: id, baseUrl: presetFor(id).baseUrl, model: "" });
@@ -39,22 +51,26 @@ export function ConnectionFields({ connection: draft, onChange }: ConnectionFiel
     setResult(null);
   }
 
-  // MOCKUP: pretends to reach the server. The real one calls it through the write server and lists models.
-  function test() {
+  async function test() {
+    const problem = keyProblem(draft);
+    if (problem) return setResult({ ok: false, message: problem });
+    inFlight.current?.abort();
+    const controller = new AbortController();
+    inFlight.current = controller;
     setTesting(true);
     setResult(null);
-    setTimeout(() => {
-      setTesting(false);
-      if (!/^https?:\/\/\S+$/.test(draft.baseUrl.trim())) {
-        setResult({ ok: false, message: "Enter a URL that starts with http:// or https://." });
-      } else if (preset.needsKey && !draft.keyHint) {
-        setResult({ ok: false, message: `${preset.label} needs an API key.` });
-      } else {
-        const found = MOCK_MODELS[draft.provider];
-        setModels(found);
-        setResult({ ok: true, message: `Connected · ${found.length} models available` });
-      }
-    }, 700);
+    try {
+      const input = { connection: toConnectionInput(draft) };
+      const found = (await api.testConnection(input, { signal: controller.signal })).models;
+      setModels(found);
+      if (!draft.model.trim() && found[0]) onChange({ model: found[0] });
+      setResult(describeModels(found, draft.model.trim() || (found[0] ?? "")));
+    } catch (err) {
+      if (controller.signal.aborted) return;
+      setResult({ ok: false, message: err instanceof Error ? err.message : "The test failed." });
+    } finally {
+      if (inFlight.current === controller) setTesting(false);
+    }
   }
 
   return (
@@ -106,64 +122,14 @@ export function ConnectionFields({ connection: draft, onChange }: ConnectionFiel
         />
         <p id={urlHintId} className={HINT}>
           Requests come from the write server, so <span className="font-mono">localhost</span> means the
-          machine write runs on. Use its LAN address to reach a server on another computer.
+          machine write runs on (in Docker, the container). Use a LAN address to reach another computer.
         </p>
       </div>
 
-      <div className="flex flex-col gap-1.5">
-        {editingKey || !draft.keyHint ? (
-          <TextField
-            label={preset.needsKey ? "API key" : "API key (optional)"}
-            type="password"
-            autoComplete="off"
-            spellCheck={false}
-            placeholder={preset.needsKey ? "Paste your API key" : "Not needed for most local servers"}
-            autoFocus={focusKey}
-            value={key}
-            aria-describedby={keyHintId}
-            onChange={(e) => {
-              setKey(e.target.value);
-              onChange({ keyHint: e.target.value ? e.target.value.slice(-4) : null });
-            }}
-          />
-        ) : (
-          <div className="flex flex-col gap-1.5">
-            <span className="text-[13px] font-medium text-muted">API key</span>
-            <div className="flex items-center gap-2">
-              <span className="min-w-0 flex-1 truncate font-mono text-[13px] text-ink">
-                •••• {draft.keyHint}
-                <span className="ml-2 font-sans text-muted">Saved</span>
-              </span>
-              <Button
-                size="sm"
-                onClick={() => {
-                  setEditingKey(true);
-                  setFocusKey(true);
-                }}
-              >
-                Replace
-              </Button>
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={() => {
-                  onChange({ keyHint: null });
-                  setEditingKey(true);
-                  setFocusKey(true);
-                }}
-              >
-                Remove
-              </Button>
-            </div>
-          </div>
-        )}
-        <p id={keyHintId} className={HINT}>
-          Kept on the write server and never sent back to the browser.
-        </p>
-      </div>
+      <ApiKeyField connection={draft} saved={saved} onChange={onChange} />
 
       <div className="flex flex-wrap items-center gap-3">
-        <Button size="sm" pending={testing} onClick={test}>
+        <Button size="sm" pending={testing} onClick={() => void test()}>
           Test connection
         </Button>
         {/* Always mounted, so screen readers announce the result when it appears. */}

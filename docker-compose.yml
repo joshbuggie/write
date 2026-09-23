@@ -1,4 +1,4 @@
-# Quick start: `mkdir -p data && docker compose up -d`, then open http://localhost:3000
+# Quick start: `mkdir -p data config && docker compose up -d`, then open http://localhost:3000
 services:
   write:
     build: .
@@ -10,5 +10,6 @@ services:
     environment:
       WRITE_PASSWORD: ${WRITE_PASSWORD:-} # set this whenever others can reach the server
     volumes:
-      - ./data:/data # your notes, as plain .md files on the host — run `mkdir -p data` first
-    # user: "1000:1000"                    # set to the owner of ./data if that isn't uid 1000
+      - ./data:/data # your notes, as plain .md files on the host — run `mkdir -p data config` first
+      - ./config:/config # write's own settings, including AI API keys in plain text: keep it private
+    # user: "1000:1000"                    # set to the owner of ./data and ./config if that isn't uid 1000

@@ -11,7 +11,6 @@ import {
   type RefObject,
 } from "react";
 import { useActiveNote } from "@/components/shell/shell-context";
-import { useToast } from "@/components/ui/toast";
 import { countWords, type AiContext } from "@/lib/ai/prompt";
 import type { AiScope, ApplyMode } from "@/lib/ai/settings";
 import { useAi } from "./ai-provider";
@@ -26,6 +25,7 @@ import {
 } from "./ai-target";
 import { insertBelow, keepsFormatting, replaceNote, replaceTarget } from "./apply-reply";
 import { PromptWindow } from "./prompt-window";
+import { useApplyFeedback } from "./use-apply-feedback";
 
 /** One opening of the prompt window: what it works on, captured at that moment, and where it sits. */
 type Session = { id: number; target: Target; scope: AiScope; note: string; top: number };
@@ -41,7 +41,7 @@ const DESKTOP = "(min-width: 768px)";
  */
 export function AiAssist({ editor, column }: { editor: Editor; column: RefObject<HTMLDivElement | null> }) {
   const { settings, registerPromptTarget, openSettings } = useAi();
-  const toast = useToast();
+  const feedback = useApplyFeedback();
   const noteTitle = useActiveNote()?.ref.name ?? "";
   const [session, setSession] = useState<Session | null>(null);
   const rootRef = useRef<HTMLDivElement | null>(null);
@@ -155,31 +155,13 @@ export function AiAssist({ editor, column }: { editor: Editor; column: RefObject
           ? replaceNote(editor, text)
           : replaceTarget(editor, target, text);
     close(false);
-    if (!ok) {
-      toast.show({ message: "Couldn't put the reply into the note here.", tone: "error" });
-      return;
-    }
-    const replaced = mode === "replace" && target.kind !== "cursor";
-    const done = wholeNote
-      ? "Replaced the note"
-      : replaced
-        ? "Replaced with the reply"
-        : "Inserted the reply";
-    toast.show({
-      message: keepsFormatting(text)
-        ? done
-        : `${done} as plain text: the editor can’t keep all of its formatting.`,
-      action: { label: "Undo", onClick: () => editor.chain().focus().undo().run() },
-    });
-  }
-
-  async function copy(text: string) {
-    try {
-      await navigator.clipboard.writeText(text);
-      toast.show({ message: "Copied" });
-    } catch {
-      toast.show({ message: "Couldn't copy: the browser blocked the clipboard.", tone: "error" });
-    }
+    const note = keepsFormatting(text) ? "" : " as plain text: the editor can’t keep all of its formatting";
+    feedback.applied(
+      ok,
+      { mode, wholeNote, atCursor: target.kind === "cursor" },
+      () => editor.chain().focus().undo().run(),
+      note,
+    );
   }
 
   return (
@@ -197,7 +179,7 @@ export function AiAssist({ editor, column }: { editor: Editor; column: RefObject
         context={context}
         noteWords={countWords(session.note)}
         onApply={apply}
-        onCopy={(text) => void copy(text)}
+        onCopy={(text) => void feedback.copy(text)}
         onClose={close}
         onOpenSettings={openSettings}
       />

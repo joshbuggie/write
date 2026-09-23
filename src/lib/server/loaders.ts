@@ -2,11 +2,20 @@ import { cookies } from "next/headers";
 import { notFound, redirect } from "next/navigation";
 import { connection } from "next/server";
 import { cache } from "react";
+import { type AiSettings, DEFAULT_AI_SETTINGS } from "@/lib/ai/settings";
 import { SESSION_COOKIE } from "@/lib/constants";
 import { loginHref } from "@/lib/routes";
 import type { Note, NoteRef, Tree } from "@/lib/types";
 import { isAuthEnabled, verifySessionToken } from "./auth";
-import { ensureBootstrap, listTree, mostRecentNote, readNote, StorageError } from "./storage";
+import {
+  ensureBootstrap,
+  listTree,
+  mostRecentNote,
+  readAiSettings,
+  readNote,
+  StorageError,
+  toAiSettingsView,
+} from "./storage";
 
 /**
  * Data access for Server Components (see docs/design-decisions.md#d1). Pages and layouts read through these
@@ -56,3 +65,18 @@ export async function loadMostRecentNote(): Promise<NoteRef | null> {
   await ensureBootstrap();
   return mostRecentNote();
 }
+
+/**
+ * The AI settings as the browser may see them (keys reduced to their last four characters). A broken
+ * settings file must never take the notes down, so any error is logged and the assistant reads as off.
+ */
+export const loadAiSettings = cache(async (): Promise<AiSettings> => {
+  await connection();
+  await requirePageAuth();
+  try {
+    return toAiSettingsView(await readAiSettings());
+  } catch (err) {
+    console.error("[write] Couldn't read the AI settings, so the assistant is off:", err);
+    return DEFAULT_AI_SETTINGS;
+  }
+});

@@ -4,13 +4,21 @@ import { useId } from "react";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { TextAreaField } from "@/components/ui/text-area-field";
-import { DEFAULT_INSTRUCTIONS, type AiScope, type AiSettings } from "@/lib/ai/settings";
+import { DEFAULT_INSTRUCTIONS, type AiConnection, type AiScope } from "@/lib/ai/settings";
 import { ConnectionsField } from "./connections-field";
 import { QuickActionsField } from "./quick-actions-field";
+import type { DraftConnection, SettingsDraft } from "./settings-draft";
 import { SettingsGroup } from "./settings-group";
 import { ShortcutField } from "./shortcut-field";
 
-type AiSettingsSectionProps = { draft: AiSettings; onChange: (patch: Partial<AiSettings>) => void };
+type AiSettingsSectionProps = {
+  draft: SettingsDraft;
+  /** The connections as last saved (key hints and the origins the keys belong to). */
+  savedConnections: AiConnection[];
+  onChange: (patch: Partial<SettingsDraft>) => void;
+  /** Edits one connection against the latest draft (see SettingsDialog). */
+  onChangeConnection: (id: string, patch: Partial<DraftConnection>) => void;
+};
 
 const SCOPES: { value: AiScope; label: string; hint: string }[] = [
   {
@@ -30,7 +38,8 @@ const SCOPES: { value: AiScope; label: string; hint: string }[] = [
  * footprint is this one row. The instructions (system prompt) are shown in full, not hidden behind an
  * "advanced" toggle, because they go out with every request.
  */
-export function AiSettingsSection({ draft, onChange }: AiSettingsSectionProps) {
+export function AiSettingsSection(props: AiSettingsSectionProps) {
+  const { draft, savedConnections, onChange, onChangeConnection } = props;
   const headingId = useId();
   return (
     <section aria-labelledby={headingId}>
@@ -58,7 +67,12 @@ export function AiSettingsSection({ draft, onChange }: AiSettingsSectionProps) {
             title="Connections"
             description="Hosted APIs or inference servers on your network. write sends note text only when you run a request, and only to the connection you picked. Save more than one to switch between them in the prompt window."
           >
-            <ConnectionsField draft={draft} onChange={onChange} />
+            <ConnectionsField
+              draft={draft}
+              saved={savedConnections}
+              onChange={onChange}
+              onChangeConnection={onChangeConnection}
+            />
           </SettingsGroup>
 
           <SettingsGroup title="Prompt window">

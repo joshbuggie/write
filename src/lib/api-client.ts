@@ -1,6 +1,8 @@
 import {
   API,
   type ApiErrorBody,
+  type CompleteEvent,
+  type CompleteRequest,
   type CreateNoteRequest,
   type DiscardNoteResponse,
   type ErrorCode,
@@ -8,6 +10,11 @@ import {
   type NoteResponse,
   type SaveNoteRequest,
   type SaveNoteResponse,
+  type SaveSettingsRequest,
+  type SettingsResponse,
+  type StopReason,
+  type TestConnectionRequest,
+  type TestConnectionResponse,
   type TreeResponse,
   type UpdateNoteRequest,
   type UpdateNoteResponse,
@@ -69,15 +76,9 @@ const encodeBody = (body: unknown) => JSON.stringify(body);
  */
 export const saveNoteBodyBytes = (input: SaveNoteRequest) => byteLength(encodeBody(input));
 
-async function request<T>(
-  method: string,
-  url: string,
-  body?: unknown,
-  opts: RequestOptions = {},
-): Promise<T> {
-  let res: Response;
+async function send(method: string, url: string, body: unknown, opts: RequestOptions): Promise<Response> {
   try {
-    res = await fetch(url, {
+    return await fetch(url, {
       method,
       headers: body === undefined ? undefined : { "Content-Type": "application/json" },
       body: body === undefined ? undefined : encodeBody(body),
@@ -90,15 +91,64 @@ async function request<T>(
     if (err instanceof DOMException && err.name === "AbortError") throw err;
     throw new ApiError(0, "network", "Can't reach the server.");
   }
+}
+
+/** The ApiError for a non-2xx response, from its ApiErrorBody when it has one. */
+async function errorFrom(res: Response): Promise<ApiError> {
+  const b = (await res.json().catch(() => null)) as ApiErrorBody | null;
+  const code = b?.error?.code ?? codeFromStatus(res.status);
+  const message = b?.error?.message ?? `Request failed (${res.status}).`;
+  return new ApiError(res.status, code, message, b, parseRetryAfter(res.headers.get("Retry-After")));
+}
+
+async function request<T>(
+  method: string,
+  url: string,
+  body?: unknown,
+  opts: RequestOptions = {},
+): Promise<T> {
+  const res = await send(method, url, body, opts);
   if (res.status === 204) return undefined as T;
-  const data: unknown = await res.json().catch(() => null);
-  if (!res.ok) {
-    const b = data as ApiErrorBody | null;
-    const code = b?.error?.code ?? codeFromStatus(res.status);
-    const message = b?.error?.message ?? `Request failed (${res.status}).`;
-    throw new ApiError(res.status, code, message, b, parseRetryAfter(res.headers.get("Retry-After")));
+  if (!res.ok) throw await errorFrom(res);
+  return (await res.json().catch(() => null)) as T;
+}
+
+/**
+ * Streams a reply from `POST /api/ai/complete`, calling `onText` with each piece as it arrives, and
+ * resolves with why it ended. Throws ApiError like any other call: before the stream (not configured, key
+ * refused) as an error response, during it as an in-band error line. Aborting `signal` stops the model.
+ */
+async function streamCompletion(
+  input: CompleteRequest,
+  onText: (text: string) => void,
+  opts: RequestOptions = {},
+): Promise<StopReason> {
+  const res = await send("POST", API.aiComplete, input, opts);
+  if (!res.ok) throw await errorFrom(res);
+  if (!res.body) throw new ApiError(res.status, "internal", "The server sent an empty reply.");
+  const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
+  let buffered = "";
+  for (;;) {
+    let chunk: ReadableStreamReadResult<string>;
+    try {
+      chunk = await reader.read();
+    } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") throw err;
+      throw new ApiError(0, "network", "The connection to the server dropped mid-reply.");
+    }
+    if (chunk.done) break;
+    buffered += chunk.value;
+    const lines = buffered.split("\n");
+    buffered = lines.pop() ?? "";
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      const event = JSON.parse(line) as CompleteEvent;
+      if ("text" in event) onText(event.text);
+      else if ("error" in event) throw new ApiError(502, event.error.code, event.error.message);
+      else return event.stop;
+    }
   }
-  return data as T;
+  throw new ApiError(0, "network", "The reply stopped before it was finished.");
 }
 
 export const api = {
@@ -133,4 +183,8 @@ export const api = {
     ),
   login: (password: string) => request<void>("POST", API.login, { password }),
   logout: () => request<void>("POST", API.logout, {}),
+  saveSettings: (input: SaveSettingsRequest) => request<SettingsResponse>("PUT", API.settings, input),
+  testConnection: (input: TestConnectionRequest, opts?: RequestOptions) =>
+    request<TestConnectionResponse>("POST", API.aiModels, input, opts),
+  streamCompletion,
 };
