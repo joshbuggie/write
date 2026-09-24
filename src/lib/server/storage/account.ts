@@ -1,7 +1,6 @@
 import { randomBytes } from "node:crypto";
-import path from "node:path";
 import { isPasswordHash } from "../password-hash";
-import { getConfigDir } from "./config";
+import { configFile } from "./config";
 import { readConfigText, writeConfigText } from "./config-files";
 import { StorageError } from "./errors";
 import { withWriteLock } from "./mutex";
@@ -23,8 +22,7 @@ export interface StoredAccount {
   sessionSecret: string;
 }
 
-// Runtime secrets must not become traced build assets (docs/design-decisions.md#d27).
-const accountFile = async () => path.join(/* turbopackIgnore: true */ await getConfigDir(), "account.json");
+const accountFile = () => configFile("account.json");
 const serialize = (account: StoredAccount) =>
   JSON.stringify({ version: FILE_VERSION, ...account }, null, 2) + "\n";
 const newSecret = () => randomBytes(32).toString("base64url");

@@ -32,7 +32,8 @@ const nextConfig: NextConfig = {
   output: process.env.BUILD_STANDALONE === "1" ? "standalone" : undefined,
   poweredByHeader: false,
   allowedDevOrigins: devOrigins(),
-  // Never trace user notes, or write's own settings (API keys), into the build.
+  // Keep user notes and write's own settings (API keys) out of page and API route traces. This doesn't
+  // reach the proxy's trace, which is why config paths go through configFile() (docs/design-decisions.md#d27).
   outputFileTracingExcludes: { "/*": ["./data/**/*", "./config/**/*"] },
   async headers() {
     return [{ source: "/:path*", headers: securityHeaders }];

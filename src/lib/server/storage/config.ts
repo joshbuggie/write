@@ -75,3 +75,12 @@ export async function getConfigDir(): Promise<string> {
   }
   return dir;
 }
+
+/**
+ * Absolute path of a file in the config folder. Build every config-file path here: a literal filename
+ * joined inline (`path.join(dir, "account.json")`) makes Turbopack copy that file, secrets included, into
+ * the build output, and next.config.ts's tracing excludes don't reach the proxy (docs/design-decisions.md#d27).
+ */
+export async function configFile(name: string): Promise<string> {
+  return path.join(/* turbopackIgnore: true */ await getConfigDir(), name);
+}
