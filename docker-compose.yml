@@ -2,7 +2,7 @@
 services:
   write:
     build: .
-    # image: ghcr.io/<owner>/write:latest   # use a published image instead of building locally
+    # image: ghcr.io/joshbuggie/write:main # use a published image instead of building locally
     init: true
     restart: unless-stopped
     ports:

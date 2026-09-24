@@ -619,6 +619,11 @@ In order, in `src/components/note/` and `src/components/editor/note-editor.tsx`:
 - The `/* turbopackIgnore: true */` comments on the data-dir and config-dir `path.resolve` calls in
   `src/lib/server/storage/config.ts` are load-bearing. Without them, Turbopack traces the whole project into
   the build.
+- The `path.join` calls constructing the runtime config filenames in `storage/settings.ts` and
+  `storage/account.ts` also have load-bearing `turbopackIgnore` comments. The auth proxy's trace can
+  include these files even with the page-route exclusions above. CI seeds the actual `settings.json`
+  and `account.json` filenames and rejects a standalone output containing the config folder; an
+  arbitrary canary filename missed this.
 - The Docker image sets `HOSTNAME=0.0.0.0`, because Docker sets `HOSTNAME` to the container id and
   `server.js` would bind to that.
 - **`GET /api/health`** is public, so it doesn't need a password, and it is used by the Docker

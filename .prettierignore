@@ -6,6 +6,9 @@ coverage
 # Your notes when running locally
 data
 
+# Private runtime settings and account credentials
+config
+
 # Generated or byte-exact files
 package-lock.json
 src/lib/markdown/__fixtures__

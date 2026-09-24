@@ -40,12 +40,14 @@ jobs:
       - name: Format
         run: npm run format:check
 
-      # A canary note in ./data and a canary settings file in ./config prove the build never traces
-      # user notes or write's own settings (API keys) into the output.
+      # Use the actual runtime config filenames: tracing can include those without tracing arbitrary
+      # canary filenames, especially through the auth proxy.
       - name: Seed canary files
         run: |
           mkdir -p data/notebook && echo "# trace canary" > data/notebook/trace-canary.md
-          mkdir -p config && echo '{"canary":true}' > config/trace-canary.json
+          mkdir -p config
+          echo '{"canary":true}' > config/settings.json
+          echo '{"canary":true}' > config/account.json
 
       - name: Build (standalone, like the Docker image)
         run: npm run build
@@ -59,8 +61,8 @@ jobs:
             echo "::error::A note from ./data was traced into the build output."
             exit 1
           fi
-          if find .next -name 'trace-canary.json' | grep -q .; then
-            echo "::error::A file from ./config was traced into the build output."
+          if test -e .next/standalone/config; then
+            echo "::error::Private runtime config was traced into the standalone output."
             exit 1
           fi
 

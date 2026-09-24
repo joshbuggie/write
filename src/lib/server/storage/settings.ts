@@ -21,7 +21,8 @@ import {
 
 export type { StoredAiSettings, StoredConnection };
 
-const settingsFile = async () => path.join(await getConfigDir(), "settings.json");
+// Runtime secrets must not become traced build assets (docs/design-decisions.md#d27).
+const settingsFile = async () => path.join(/* turbopackIgnore: true */ await getConfigDir(), "settings.json");
 
 /**
  * The key a connection from the Settings form ends up with: a typed key, none when cleared, else the saved
