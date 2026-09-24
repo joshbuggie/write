@@ -1,15 +1,17 @@
 "use client";
 
 import { Check, TriangleAlert } from "lucide-react";
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { SelectField } from "@/components/ui/select-field";
 import { TextField } from "@/components/ui/text-field";
 import { api } from "@/lib/api-client";
+import type { ConnectionInput } from "@/lib/api-contract";
 import { PROVIDER_PRESETS, presetFor, type AiConnection, type ProviderId } from "@/lib/ai/settings";
 import { cn } from "@/lib/cn";
 import { ApiKeyField } from "./api-key-field";
-import { keyProblem, toConnectionInput, type DraftConnection } from "./settings-draft";
+import { connectionIdentity, runConnectionTest, type TestResult } from "./connection-test";
+import { keyProblem, type DraftConnection } from "./settings-draft";
 
 type ConnectionFieldsProps = {
   connection: DraftConnection;
@@ -17,17 +19,10 @@ type ConnectionFieldsProps = {
   saved: AiConnection | undefined;
   onChange: (patch: Partial<DraftConnection>) => void;
 };
-type TestResult = { ok: boolean; message: string } | null;
+/** The last test's answer, for the connection (see connectionIdentity) it was about. */
+type Tested = { identity: string; models: string[]; result: TestResult };
 
 const HINT = "text-[12.5px] leading-relaxed text-subtle";
-
-/** "Connected · 4 models available", plus a warning when the chosen model isn't among them. */
-function describeModels(models: string[], model: string): TestResult {
-  if (models.length === 0) return { ok: true, message: "Connected. The server didn't list its models." };
-  const listed = `Connected · ${models.length} ${models.length === 1 ? "model" : "models"} available`;
-  if (model && !models.includes(model)) return { ok: false, message: `${listed}, but not “${model}”.` };
-  return { ok: true, message: listed };
-}
 
 /**
  * One connection's form: name, provider preset, model, server URL and API key, plus "Test connection",
@@ -38,39 +33,42 @@ export function ConnectionFields({ connection: draft, saved, onChange }: Connect
   const preset = presetFor(draft.provider);
   const urlHintId = useId();
   const modelsId = useId();
-  const [models, setModels] = useState<string[]>([]);
   const [testing, setTesting] = useState(false);
-  const [result, setResult] = useState<TestResult>(null);
+  const [tested, setTested] = useState<Tested | null>(null);
   const inFlight = useRef<AbortController | null>(null);
+  // The form as it is now, for a test's answer to be judged against when it arrives.
+  const latest = useRef(draft);
+  const identity = connectionIdentity(draft);
+  // Suggestions and the result only show for the connection they came from.
+  const shown = tested?.identity === identity ? tested : null;
+  const models = shown?.models ?? [];
+  const result = shown?.result ?? null;
 
-  useEffect(() => () => inFlight.current?.abort(), []);
+  useLayoutEffect(() => {
+    latest.current = draft;
+  });
+  // A test of a provider, URL or key the form no longer has is abandoned (and on unmount).
+  useEffect(() => () => inFlight.current?.abort(), [identity]);
 
   function changeProvider(id: ProviderId) {
     onChange({ provider: id, baseUrl: presetFor(id).baseUrl, model: "" });
-    setModels([]);
-    setResult(null);
   }
 
   async function test() {
     const problem = keyProblem(draft);
-    if (problem) return setResult({ ok: false, message: problem });
+    if (problem) return setTested({ identity, models: [], result: { ok: false, message: problem } });
     inFlight.current?.abort();
     const controller = new AbortController();
     inFlight.current = controller;
     setTesting(true);
-    setResult(null);
-    try {
-      const input = { connection: toConnectionInput(draft) };
-      const found = (await api.testConnection(input, { signal: controller.signal })).models;
-      setModels(found);
-      if (!draft.model.trim() && found[0]) onChange({ model: found[0] });
-      setResult(describeModels(found, draft.model.trim() || (found[0] ?? "")));
-    } catch (err) {
-      if (controller.signal.aborted) return;
-      setResult({ ok: false, message: err instanceof Error ? err.message : "The test failed." });
-    } finally {
-      if (inFlight.current === controller) setTesting(false);
-    }
+    setTested(null);
+    const fetchModels = async (connection: ConnectionInput) =>
+      (await api.testConnection({ connection }, { signal: controller.signal })).models;
+    const outcome = await runConnectionTest(draft, fetchModels, () => latest.current);
+    if (inFlight.current === controller) setTesting(false);
+    if (!outcome || controller.signal.aborted) return;
+    if (outcome.autofill) onChange({ model: outcome.autofill });
+    setTested({ identity, models: outcome.models, result: outcome.result });
   }
 
   return (
