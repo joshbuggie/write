@@ -399,9 +399,9 @@ Settings also hold the shortcut, the **Instructions** sent with every request, a
 - Press **⌘J** (Ctrl+J on Windows and Linux), click **✨** in the note header, or on a phone tap **✨** at
   the left of the formatting toolbar. A prompt window opens at the cursor (on a phone, above the keyboard).
 - Pick a quick action, or type a request and press Enter.
-- **What goes with it:** the selection, or the paragraph at the cursor when nothing is selected, or no
-  note text at all on an empty line. A selection that spans several paragraphs or list items grows to the
-  whole blocks. Choose **Whole note** to send the whole note with one request, or make that the default in
+- **What goes with it:** the selection, or the paragraph at the cursor when nothing is selected. On an
+  empty line, no note text is sent. Every request includes the note's title. A selection that spans
+  several paragraphs or list items grows to the whole blocks. Choose **Whole note** to send the whole note with one request, or make that the default in
   Settings.
 - The reply streams into the window. **Stop** (or Esc) ends it. Your note doesn't change until you click
   **Replace** or **Insert below**, and one ⌘Z undoes either. Follow-ups refine the reply: they send the

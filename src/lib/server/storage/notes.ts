@@ -104,6 +104,9 @@ export async function saveNote(input: {
 }): Promise<SavedNote> {
   const { ref, baseVersion, force = false } = input;
   const text = toLf(input.content);
+  // Too large as LF is too large in any style (CRLF and a BOM only add bytes), so say so before any
+  // version check: a conflict banner would only lead to the same error after "Keep mine".
+  if (Buffer.byteLength(text) > MAX_NOTE_BYTES) throw tooLarge();
   return withWriteLock(async () => {
     const dataDir = getDataDir();
     try {

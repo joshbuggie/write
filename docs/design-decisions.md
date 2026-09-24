@@ -273,7 +273,11 @@ storage_unavailable`. Nothing gets through, and nothing reopens setup.
   as another host. The login page (server redirect) and the login form (`router.replace`) both use it.
 - Handlers (`handle()`) and loaders check auth again. The proxy's matcher is easy to get subtly wrong, so
   it shouldn't be the only check.
-- The note size cap (5 MiB) stays below the proxy's 10 MB request body buffer.
+- The proxy buffers at most 10 MiB of a request body (`experimental.proxyClientMaxBodySize`) and passes
+  anything longer on truncated. So note create and save accept JSON bodies up to exactly 10 MiB
+  (`MAX_NOTE_JSON_BYTES` in `src/lib/server/http.ts`): about twice the 5 MiB note cap, room for JSON
+  escaping (a quote or newline becomes two bytes). Storage enforces the 5 MiB cap on the decoded text. Other
+  bodies keep the smaller `MAX_JSON_BYTES`.
 
 <a id="d14"></a>
 
