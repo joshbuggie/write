@@ -78,7 +78,7 @@ docker run -d --name write --init --restart unless-stopped \
 
 If the project publishes images, you can skip the build: releases are pushed to
 `ghcr.io/<owner>/write:<version>` and `:latest`, for `linux/amd64` and `linux/arm64`, so they run on a
-Raspberry Pi too.
+Raspberry Pi too. Every commit on `main` that passes CI is also pushed as `:main` (and `:sha-<commit>`).
 
 ### Option 3: Bare metal (Node.js)
 
