@@ -11,6 +11,7 @@ import {
 } from "./escape";
 import { createMarkdownManager } from "./extensions";
 import { firstMisread } from "./nodes/read-back";
+import { budget } from "./test-timing";
 
 describe("encodeText", () => {
   it.each([
@@ -203,11 +204,11 @@ describe("linear time on hostile paragraphs (runs on every save)", () => {
     ["'a <1 _'", "a <1 _".repeat(20_000)],
     ["'['", "[a ".repeat(40_000)],
   ])("serializes a 100 KB+ paragraph of %s in well under 100 ms", (_, text) => {
-    expect(elapsed(() => serializeParagraph(text))).toBeLessThan(100);
+    expect(elapsed(() => serializeParagraph(text))).toBeLessThan(budget(100));
   });
 
   it("escapeTagLikeSpans handles 200 KB of '<' and delimiters without a closing '>'", () => {
-    expect(elapsed(() => escapeTagLikeSpans("x <1 _".repeat(35_000)))).toBeLessThan(100);
+    expect(elapsed(() => escapeTagLikeSpans("x <1 _".repeat(35_000)))).toBeLessThan(budget(100));
   });
 });
 

@@ -2,6 +2,7 @@ import { Lexer, type Token, type Tokens } from "marked";
 import { describe, expect, it } from "vitest";
 import { looksLikeMarkdown } from "./markdown-paste";
 import { hasOversizedParagraph, scanBlocks } from "./oversized";
+import { budget } from "./test-timing";
 
 const K = 1024;
 /** `make(i)` repeated until the text is `size` characters long. */
@@ -54,7 +55,7 @@ describe("hasOversizedParagraph on note open and paste", () => {
   it.each(hostile)("decides %s in well under 150 ms", (_, markdown) => {
     hasOversizedParagraph(markdown); // warm up
     // A few milliseconds on a laptop; the bound only catches a return of super-linear time.
-    expect(elapsed(() => hasOversizedParagraph(markdown))).toBeLessThan(150);
+    expect(elapsed(() => hasOversizedParagraph(markdown))).toBeLessThan(budget(150));
   });
 
   it("still sends the long runs among them to source mode", () => {
@@ -107,7 +108,7 @@ describe("hasOversizedParagraph on note open and paste", () => {
 
   it("checks pasted text quickly too, before any parsing", () => {
     for (const text of ["[a](x".repeat(50_000), "[a](".repeat(64 * K), "**a".repeat(80_000)]) {
-      expect(elapsed(() => looksLikeMarkdown(text) && hasOversizedParagraph(text))).toBeLessThan(150);
+      expect(elapsed(() => looksLikeMarkdown(text) && hasOversizedParagraph(text))).toBeLessThan(budget(150));
     }
   });
 });
