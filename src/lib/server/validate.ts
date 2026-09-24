@@ -5,15 +5,19 @@ import type {
   ConnectionInput,
   CreateFolderRequest,
   CreateNoteRequest,
+  IntegrationRequest,
   LoginRequest,
+  RotateTokenRequest,
   SetupRequest,
   RenameFolderRequest,
   SaveNoteRequest,
   SaveSettingsRequest,
   TestConnectionRequest,
+  UpdateIntegrationRequest,
   UpdateNoteRequest,
 } from "@/lib/api-contract";
 import { AI_LIMITS, PROVIDER_IDS, type QuickAction } from "@/lib/ai/settings";
+import { isIntegrationKind } from "@/lib/integrations";
 
 /**
  * Hand-written type guards for request bodies (no schema library, see docs/design-decisions.md#d4). They
@@ -162,4 +166,23 @@ export function isCompleteRequest(v: unknown): v is CompleteRequest {
   const turns = v.messages;
   if (!isArrayOf(turns, AI_LIMITS.turns, isChatTurn) || turns.length === 0) return false;
   return turns.every((t, i) => t.role === (i % 2 === 0 ? "user" : "assistant")) && turns.length % 2 === 1;
+}
+
+/** An integration from the dialog: a name, its kind and folder names (checked against disk by storage). */
+export function isIntegrationRequest(v: unknown): v is IntegrationRequest {
+  return (
+    isObject(v) &&
+    isString(v.name) &&
+    isIntegrationKind(v.kind) &&
+    Array.isArray(v.folders) &&
+    v.folders.every(isString)
+  );
+}
+
+export function isUpdateIntegrationRequest(v: unknown): v is UpdateIntegrationRequest {
+  return isObject(v) && isString(v.id) && isIntegrationRequest(v);
+}
+
+export function isRotateTokenRequest(v: unknown): v is RotateTokenRequest {
+  return isObject(v) && isString(v.id);
 }

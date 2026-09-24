@@ -8,6 +8,10 @@ import {
   type DiscardNoteResponse,
   type ErrorCode,
   type FolderResponse,
+  type IntegrationRequest,
+  type IntegrationResponse,
+  type IntegrationsResponse,
+  type IntegrationTokenResponse,
   type LoginRequest,
   type NoteResponse,
   type SaveNoteRequest,
@@ -19,6 +23,7 @@ import {
   type TestConnectionRequest,
   type TestConnectionResponse,
   type TreeResponse,
+  type UpdateIntegrationRequest,
   type UpdateNoteRequest,
   type UpdateNoteResponse,
 } from "./api-contract";
@@ -192,4 +197,12 @@ export const api = {
   testConnection: (input: TestConnectionRequest, opts?: RequestOptions) =>
     request<TestConnectionResponse>("POST", API.aiModels, input, opts),
   streamCompletion,
+  listIntegrations: () => request<IntegrationsResponse>("GET", API.integrations),
+  createIntegration: (input: IntegrationRequest) =>
+    request<IntegrationTokenResponse>("POST", API.integrations, input),
+  updateIntegration: (input: UpdateIntegrationRequest) =>
+    request<IntegrationResponse>("PATCH", API.integrations, input),
+  deleteIntegration: (id: string) => request<void>("DELETE", API.integrations + apiQuery({ id })),
+  rotateIntegrationToken: (id: string) =>
+    request<IntegrationTokenResponse>("POST", API.integrationToken, { id }),
 };

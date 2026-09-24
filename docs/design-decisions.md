@@ -25,7 +25,7 @@ files.
 - Files in and out: [D23](#d23) downloads · [D24](#d24) import
 - UI: [D25](#d25) responsive layout · [D26](#d26) tokens and theme
 - Self-hosting: [D27](#d27) build output and health · [D28](#d28) configuration
-- Optional features: [D29](#d29) the AI assistant
+- Optional features: [D29](#d29) the AI assistant · [D31](#d31) integrations with agent harnesses
 
 ---
 
@@ -824,3 +824,58 @@ wrong_password`. A wrong current password is `403 wrong_password`, not `401`, wh
 - Code: `src/lib/server/auth.ts`, `password-guard.ts`, `password-hash.ts`,
   `src/lib/server/storage/account.ts`, `src/lib/account.ts`, `src/app/setup/`, `src/app/login/` and
   `src/app/api/auth/`.
+
+<a id="d31"></a>
+
+## D31. Integrations: agent harnesses read chosen folders with their own token
+
+- **Why.** People draft with agent harnesses (Turnstone, Hermes Agent, or any client that speaks MCP or
+  HTTP) and bring the result into write by copy and paste. The assistant in [D29](#d29) is for a
+  sentence or a paragraph; a harness runs several agents for minutes over a whole note. Integrations
+  let a harness read notes directly, so the note stays the one source of truth across both.
+- **Three layers, and only the last is per harness.** (1) What write exposes, the same for every
+  harness: the agent API under `/api/agent`. (2) Identity: one integration per harness, each with its
+  own token and folder list. (3) Launchers that start a job in a harness (planned). A harness that can
+  only read, or only be started from its own UI, still works with layers 1 and 2.
+- **Planned, in this order.** Proposals: a harness sends changes to a note as a proposal, stored apart
+  from the note and reviewed section by section (`##` headings), with a three-way merge against edits
+  made while it worked. Nothing but the owner's accept ever writes a note ([D9](#d9)). Then an MCP
+  endpoint at `/api/agent/mcp` over the same code, stateless and tools only, whose server instructions
+  carry the workflow so no harness needs its own skill. Then launchers (Turnstone's workstream API,
+  Hermes Agent's runs API, and a generic webhook) that start a job with a write-chosen idempotency key
+  (Turnstone's `ws_id`, Hermes's `Idempotency-Key`) and continue it on later passes. Update this entry
+  as each lands.
+- **Tokens.** `wrt_` plus 32 random bytes as base64url, made by the server and shown once. Only the
+  SHA-256 and the last four characters are saved: with 256 random bits there is nothing to guess, so no
+  slow hash and no lockout are needed. The exact shape lets auth tell a token from a password without
+  hashing: `authenticateRequest` refuses a token-shaped Bearer outright, so a harness with a stale
+  token never spends the password budget and never locks the owner out ([D30](#d30)). A new token
+  replaces the old one at once.
+- **Two separate doors.** `/api/agent/*` accepts only integration tokens, even with sign-in off,
+  because the token is what names the folders; a session cookie or the password doesn't open it. The
+  rest of the API never accepts a token, so a harness can't reach `/api/integrations` to widen its own
+  folders or make more tokens. The proxy checks the token first ([D13](#d13)), and `handleAgent()`
+  (`src/lib/server/agent-http.ts`) checks it again, with the same CSRF check and error mapping as
+  `handle()` ([D3](#d3)).
+- **Folders, not notes, and nothing by default.** An integration reads only the folders ticked for it;
+  there is no "all folders" switch. A folder outside its list answers exactly like a missing one (404
+  "Note not found."), and `/api/agent/tree` leaves such folders out, so probing reveals nothing. Folder
+  names are saved as on disk. Renaming a folder in write renames it in every list, and deleting one
+  removes it from every list, so a new folder made later with the old name isn't readable by accident.
+  Both happen under the write lock with the folder change; if the integrations file can't be written
+  then, the folder change stands and the error is logged. A folder renamed outside write drops out of
+  reach (it fails closed) and the dialog shows it as no longer in the library.
+- **Sign-in off.** With `WRITE_AUTH=off` the rest of the API is open to anything that can reach write, so
+  folder limits only bind harnesses that go through `/api/agent`. The Integrations dialog says so.
+- **Storage.** `WRITE_CONFIG_DIR/integrations.json` (0600, [D28](#d28)): `{ version, integrations: [{ id,
+name, kind, folders, tokenHash, tokenHint, createdAt }] }`. Unlike `settings.json` it is read strictly:
+  it decides who reads which notes, so a file that exists but isn't valid refuses every agent request
+  with 503 instead of reading as "no integrations". "Last used" is kept in memory, so an agent request
+  never rewrites the file; it resets when the server restarts or the token is replaced.
+- **The dialog.** Integrations has its own dialog, opened from the sidebar apart from Settings: an
+  integration is a door into the notes, not a preference. Changes save at once, like the password. The
+  token sits in a read-only field that selects itself, since the clipboard API needs HTTPS or
+  localhost and write is often reached over plain HTTP on a LAN.
+- Code: `src/lib/integrations.ts`, `src/lib/server/integration-*.ts`, `src/lib/server/agent-http.ts`,
+  `src/lib/server/storage/integrations*.ts`, `src/app/api/integrations/`, `src/app/api/agent/` and
+  `src/components/integrations/`.

@@ -87,7 +87,7 @@ function isJsonRequest(req: Request): boolean {
  * write is refused outright; requiring a JSON content type forces a CORS preflight that we never answer. No
  * Origin/Host comparison, so reverse proxies need no configuration.
  */
-function checkCsrf(req: Request): void {
+export function checkCsrf(req: Request): void {
   if (req.method === "GET" || req.method === "HEAD") return;
   const site = req.headers.get("sec-fetch-site");
   if (site !== null && site !== "same-origin" && site !== "none") {

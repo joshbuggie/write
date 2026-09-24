@@ -1,4 +1,5 @@
 import type { AiSettings, ProviderId } from "./ai/settings";
+import type { IntegrationKind, IntegrationView } from "./integrations";
 import type { FolderSummary, Note, NoteSummary, SavedNote, Tree } from "./types";
 
 export type ErrorCode =
@@ -67,6 +68,10 @@ export const API = {
   settings: "/api/settings",
   aiModels: "/api/ai/models",
   aiComplete: "/api/ai/complete",
+  integrations: "/api/integrations",
+  integrationToken: "/api/integrations/token",
+  agentTree: "/api/agent/tree",
+  agentNotes: "/api/agent/notes",
 } as const;
 
 export type HealthResponse = { ok: true } | { ok: false; error: string };
@@ -203,3 +208,35 @@ export type StopReason = "end" | "length" | "refusal";
  */
 export type CompleteEvent =
   { text: string } | { done: true; stop: StopReason } | { error: { code: ErrorCode; message: string } };
+
+/** `GET /api/integrations`: every integration, without tokens (docs/design-decisions.md#d31). */
+export interface IntegrationsResponse {
+  integrations: IntegrationView[];
+}
+
+/** `POST /api/integrations` makes one; `PATCH` changes one, with its `id`. Folders must exist. */
+export interface IntegrationRequest {
+  name: string;
+  kind: IntegrationKind;
+  folders: string[];
+}
+export interface UpdateIntegrationRequest extends IntegrationRequest {
+  id: string;
+}
+export interface IntegrationResponse {
+  integration: IntegrationView;
+}
+
+/** `POST /api/integrations/token`: replaces the integration's token. The old one stops working at once. */
+export interface RotateTokenRequest {
+  id: string;
+}
+
+/** Making an integration or replacing its token: the only time the token is ever shown. */
+export interface IntegrationTokenResponse {
+  integration: IntegrationView;
+  token: string;
+}
+
+/** `GET /api/agent/tree`, for integrations: only the folders the integration can read. */
+export type AgentTreeResponse = Tree;

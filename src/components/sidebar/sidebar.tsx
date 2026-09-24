@@ -26,6 +26,7 @@ export function Sidebar({ tree, authEnabled, variant }: SidebarProps) {
   const openRef = useOpenNoteRef();
   const { createNote, pending } = useCreateNote(tree);
   const page = variant === "page";
+  const folderNames = tree.folders.map((f) => f.name);
   const needle = nameKey(query.trim());
   const sections = tree.folders
     .map((folder) => ({ folder, notes: matching(folder.notes, needle) }))
@@ -105,7 +106,7 @@ export function Sidebar({ tree, authEnabled, variant }: SidebarProps) {
         )}
         {page && (
           <div className="mt-4 border-t border-line pt-2">
-            <SidebarActions variant="page" authEnabled={authEnabled} />
+            <SidebarActions variant="page" authEnabled={authEnabled} folders={folderNames} />
           </div>
         )}
       </nav>
@@ -113,7 +114,7 @@ export function Sidebar({ tree, authEnabled, variant }: SidebarProps) {
       {page ? (
         <LibraryBottomBar onNewNote={() => createNote()} pending={pending} />
       ) : (
-        <SidebarActions variant="panel" authEnabled={authEnabled} />
+        <SidebarActions variant="panel" authEnabled={authEnabled} folders={folderNames} />
       )}
     </div>
   );

@@ -1,6 +1,7 @@
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import { sameUsername } from "@/lib/account";
 import { SESSION_COOKIE } from "@/lib/constants";
+import { isTokenShaped } from "@/lib/integrations";
 import { attemptPassword, type PasswordCheck } from "./password-guard";
 import { verifyPassword } from "./password-hash";
 import { readAccount, type StoredAccount } from "./storage";
@@ -110,8 +111,10 @@ export type AuthStatus = PasswordCheck | "setup";
 
 /**
  * "ok" if sign-in is off, the session cookie is valid, or `Authorization: Bearer <password>` (scripts).
- * The Bearer password counts against the same brute-force budget as the sign-in page. Throws
- * storage_unavailable when the account file can't be read.
+ * The Bearer password counts against the same brute-force budget as the sign-in page. An integration token
+ * is never a password guess: it only opens /api/agent (docs/design-decisions.md#d31), so here it is simply
+ * refused, without touching the lockout budget. Throws storage_unavailable when the account file can't be
+ * read.
  */
 export async function authenticateRequest(req: Request): Promise<AuthStatus> {
   const state = await readAuthState();
@@ -120,7 +123,7 @@ export async function authenticateRequest(req: Request): Promise<AuthStatus> {
   const { account } = state;
   if (verifySessionToken(readCookie(req.headers.get("cookie"), SESSION_COOKIE), account)) return "ok";
   const match = req.headers.get("authorization")?.match(/^Bearer\s+(.+)$/i);
-  if (!match) return "unauthorized";
+  if (!match || isTokenShaped(match[1])) return "unauthorized";
   return attemptPassword(() => verifyPassword(match[1], account.passwordHash));
 }
 

@@ -1,8 +1,9 @@
 "use client";
 
-import { Download, FolderPlus, LogOut, Settings, SquarePen, type LucideIcon } from "lucide-react";
+import { Download, FolderPlus, LogOut, Plug, Settings, SquarePen, type LucideIcon } from "lucide-react";
 import { useState } from "react";
 import { useAi } from "@/components/ai/ai-provider";
+import { IntegrationsDialog } from "@/components/integrations/integrations-dialog";
 import { useFlushActiveNote } from "@/components/shell/shell-context";
 import { Button, buttonStyles } from "@/components/ui/button";
 import { DownloadLink } from "@/components/ui/download-link";
@@ -18,12 +19,20 @@ const ROW = {
   page: "h-11 text-[16px]",
 } as const;
 
+type SidebarActionsProps = {
+  variant: Variant;
+  authEnabled: boolean;
+  /** Every folder in the library, for the Integrations dialog's folder choices. */
+  folders: string[];
+};
+
 /**
- * Library-level actions at the end of the list: New folder, Settings, and Sign out while sign-in is on.
- * The desktop panel also puts "Download all" here; phones have it in the bottom bar instead.
+ * Library-level actions at the end of the list: New folder, Integrations, Settings, and Sign out while
+ * sign-in is on. The desktop panel also puts "Download all" here; phones have it in the bottom bar instead.
  */
-export function SidebarActions({ variant, authEnabled }: { variant: Variant; authEnabled: boolean }) {
+export function SidebarActions({ variant, authEnabled, folders }: SidebarActionsProps) {
   const [addingFolder, setAddingFolder] = useState(false);
+  const [integrationsOpen, setIntegrationsOpen] = useState(false);
   const { signOut, signingOut } = useSignOut();
   const { openSettings } = useAi();
   const row = cn(
@@ -45,6 +54,17 @@ export function SidebarActions({ variant, authEnabled }: { variant: Variant; aut
           <RowIcon icon={Download} />
           Download all (.zip)
         </DownloadLink>
+      )}
+      <button type="button" className={row} onClick={() => setIntegrationsOpen(true)}>
+        <RowIcon icon={Plug} />
+        Integrations
+      </button>
+      {integrationsOpen && (
+        <IntegrationsDialog
+          library={folders}
+          authEnabled={authEnabled}
+          onClose={() => setIntegrationsOpen(false)}
+        />
       )}
       <button type="button" className={row} onClick={openSettings}>
         <RowIcon icon={Settings} />

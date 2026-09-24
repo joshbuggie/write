@@ -26,6 +26,7 @@ open in vim, Obsidian, iA Writer or anything else.
 - [Security](#security)
 - [iPhone and iPad](#iphone-and-ipad)
 - [AI assistant (optional)](#ai-assistant-optional)
+- [Integrations (optional)](#integrations-optional)
 - [Keyboard shortcuts](#keyboard-shortcuts)
 - [Upgrading](#upgrading)
 - [FAQ and troubleshooting](#faq-and-troubleshooting)
@@ -447,6 +448,37 @@ works when Ollama runs on the same computer as write. In Docker, `localhost` is 
 the host's LAN address, or `host.docker.internal` (built into Docker Desktop; on Linux, add
 `extra_hosts: ["host.docker.internal:host-gateway"]` to the service in `docker-compose.yml`), and make sure
 the model server listens on the network, not only on its own `localhost`.
+
+---
+
+## Integrations (optional)
+
+Agent harnesses such as [Turnstone](https://github.com/turnstonelabs/turnstone) or
+[Hermes Agent](https://github.com/NousResearch/hermes-agent) can read your notes directly, so you don't
+have to copy them over by hand. Each harness gets its own token, and reads only the folders you choose.
+Integrations can't change notes.
+
+1. Open **Integrations** at the bottom of the sidebar (on a phone, at the end of the Notes screen) and
+   click **Add integration**.
+2. Name it, pick the harness, and tick the folders it may read. Notes in other folders stay invisible to
+   it, as if they didn't exist.
+3. Click **Add and show token** and copy the token into the harness. **write shows it only once.** If it's
+   lost, open the integration and click **New token**: the old one stops working at once.
+
+The harness sends the token as `Authorization: Bearer <token>` to `https://<your write server>/api/agent`:
+
+- `GET /api/agent/tree` lists the folders it can read and their notes.
+- `GET /api/agent/notes?folder=<folder>&name=<note>` reads one note, with its text and version.
+
+A few things to know:
+
+- **Keep sign-in on.** Integration tokens only open `/api/agent`, and the rest of the API never accepts
+  them. With `WRITE_AUTH=off`, though, everything else is open to anyone who can reach write, so folder
+  limits mean little.
+- Renaming a folder in write keeps it readable under its new name. Deleting a folder removes it from every
+  integration, so a new folder with the same name isn't shared by accident.
+- Tokens are saved as fingerprints (SHA-256) in `integrations.json` inside `WRITE_CONFIG_DIR`, never in
+  plain text. **Last used** shows when a token last reached write since the server started.
 
 ---
 
