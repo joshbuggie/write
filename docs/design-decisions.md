@@ -766,8 +766,10 @@ In order, in `src/components/note/` and `src/components/editor/note-editor.tsx`:
   behind the CSRF check ([D14](#d14)), so a web page can't claim a fresh server on your LAN from a
   browser.
 - **Once it exists, the account can't be replaced from the web.** Setup answers `409 already_set_up`, and
-  the file is created with a no-clobber link ([D7](#d7)), so two people finishing setup at once can't both
-  win. `/setup` then forwards to `/login`.
+  the file is created under the write lock with a no-clobber link ([D7](#d7)), so two people finishing
+  setup at once can't both win. The lock matters where hard links don't work (some network shares and
+  Docker volume drivers): there the no-clobber write falls back to check-then-rename. `/setup` then
+  forwards to `/login`.
 - **One account, in the config folder.** `WRITE_CONFIG_DIR/account.json` (0600, [D28](#d28)) holds
   `{ version, username, passwordHash, sessionSecret }`, away from the notes, which may be synced. It is
   read on every check, not cached, so deleting it takes effect at once: that is how a forgotten password

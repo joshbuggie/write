@@ -68,17 +68,21 @@ export async function readAccount(): Promise<StoredAccount | null> {
 /**
  * Saves the account made at setup, with a fresh session secret, and returns it. Returns null when an
  * account already exists: the file is created without ever replacing one, so two people finishing setup
- * at the same moment can't both win.
+ * at the same moment can't both win. The write lock matters where hard links don't work (some network
+ * shares and Docker volume drivers): there the no-clobber write falls back to check-then-rename, which
+ * two setups in flight could both pass.
  */
-export async function createAccount(username: string, passwordHash: string): Promise<StoredAccount | null> {
-  const account: StoredAccount = { username, passwordHash, sessionSecret: newSecret() };
-  try {
-    await writeConfigText(await accountFile(), serialize(account), { noClobber: true });
-  } catch (err) {
-    if (err instanceof StorageError && err.code === "name_taken") return null;
-    throw err;
-  }
-  return account;
+export function createAccount(username: string, passwordHash: string): Promise<StoredAccount | null> {
+  return withWriteLock(async () => {
+    const account: StoredAccount = { username, passwordHash, sessionSecret: newSecret() };
+    try {
+      await writeConfigText(await accountFile(), serialize(account), { noClobber: true });
+    } catch (err) {
+      if (err instanceof StorageError && err.code === "name_taken") return null;
+      throw err;
+    }
+    return account;
+  });
 }
 
 /**
