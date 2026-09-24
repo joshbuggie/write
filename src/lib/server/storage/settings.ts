@@ -1,7 +1,6 @@
-import path from "node:path";
 import type { AiSettings } from "@/lib/ai/settings";
 import type { ConnectionInput, SaveSettingsRequest } from "@/lib/api-contract";
-import { getConfigDir } from "./config";
+import { configFile } from "./config";
 import { readConfigText, writeConfigText } from "./config-files";
 import { withWriteLock } from "./mutex";
 import {
@@ -21,8 +20,7 @@ import {
 
 export type { StoredAiSettings, StoredConnection };
 
-// Runtime secrets must not become traced build assets (docs/design-decisions.md#d27).
-const settingsFile = async () => path.join(/* turbopackIgnore: true */ await getConfigDir(), "settings.json");
+const settingsFile = () => configFile("settings.json");
 
 /**
  * The key a connection from the Settings form ends up with: a typed key, none when cleared, else the saved
