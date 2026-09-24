@@ -4,9 +4,9 @@ import { connection } from "next/server";
 import { cache } from "react";
 import { type AiSettings, DEFAULT_AI_SETTINGS } from "@/lib/ai/settings";
 import { SESSION_COOKIE } from "@/lib/constants";
-import { loginHref } from "@/lib/routes";
+import { loginHref, SETUP_HREF } from "@/lib/routes";
 import type { Note, NoteRef, Tree } from "@/lib/types";
-import { isAuthEnabled, verifySessionToken } from "./auth";
+import { isAuthEnabled, readAuthState, verifySessionToken } from "./auth";
 import {
   ensureBootstrap,
   listTree,
@@ -25,11 +25,16 @@ import {
 
 export { isAuthEnabled };
 
-/** If WRITE_PASSWORD is set and the session cookie is invalid, redirect to the login page. */
+/**
+ * Sends a visitor without a valid session to /login, or to /setup before the account exists. Throws
+ * storage_unavailable when the account file can't be read, which the notes layout explains.
+ */
 export async function requirePageAuth(): Promise<void> {
-  if (!isAuthEnabled()) return;
+  const state = await readAuthState();
+  if (state.mode === "off") return;
+  if (state.mode === "setup") redirect(SETUP_HREF);
   const token = (await cookies()).get(SESSION_COOKIE)?.value;
-  if (!verifySessionToken(token)) redirect(loginHref());
+  if (!verifySessionToken(token, state.account)) redirect(loginHref());
 }
 
 /**
@@ -65,6 +70,17 @@ export async function loadMostRecentNote(): Promise<NoteRef | null> {
   await ensureBootstrap();
   return mostRecentNote();
 }
+
+/**
+ * The signed-in account's username for Settings, or null while sign-in is off. Only the name: the hash
+ * and session secret never leave the server.
+ */
+export const loadUsername = cache(async (): Promise<string | null> => {
+  await connection();
+  await requirePageAuth();
+  const state = await readAuthState();
+  return state.mode === "on" ? state.account.username : null;
+});
 
 /**
  * The AI settings as the browser may see them (keys reduced to their last four characters). A broken

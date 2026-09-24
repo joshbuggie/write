@@ -6,11 +6,14 @@ import { Dialog } from "@/components/ui/dialog";
 import { useToast } from "@/components/ui/toast";
 import type { SaveSettingsRequest } from "@/lib/api-contract";
 import { connectionName, type AiSettings } from "@/lib/ai/settings";
+import { AccountSection } from "./account-section";
 import { AiSettingsSection } from "./ai-settings-section";
 import { keyProblem, toSaveRequest, type DraftConnection, type SettingsDraft } from "./settings-draft";
 
 type SettingsDialogProps = {
   initial: AiSettings;
+  /** The signed-in account; null while sign-in is off, which hides the Account section. */
+  username: string | null;
   /** Saves on the server; throws (ApiError) with a message to show when that fails. */
   onSave: (next: SaveSettingsRequest["ai"]) => Promise<void>;
   onClose: () => void;
@@ -18,10 +21,11 @@ type SettingsDialogProps = {
 
 /**
  * App settings, opened from the sidebar (or from the prompt window). Changes are a draft until Save, so
- * Cancel leaves everything as it was, and a failed save keeps the dialog open with the reason. Today the
- * only section is the AI assistant. Mount it only while open: the draft starts from the saved settings.
+ * Cancel leaves everything as it was, and a failed save keeps the dialog open with the reason. Mount it
+ * only while open: the draft starts from the saved settings. The Account section sits outside that form,
+ * with its own button: a password change is saved at once, never held in the draft.
  */
-export function SettingsDialog({ initial, onSave, onClose }: SettingsDialogProps) {
+export function SettingsDialog({ initial, username, onSave, onClose }: SettingsDialogProps) {
   const formId = useId();
   const toast = useToast();
   const [draft, setDraft] = useState<SettingsDraft>(initial);
@@ -75,6 +79,7 @@ export function SettingsDialog({ initial, onSave, onClose }: SettingsDialogProps
         </>
       }
     >
+      {username !== null && <AccountSection username={username} />}
       <form id={formId} noValidate onSubmit={(e) => void save(e)}>
         <AiSettingsSection
           draft={draft}

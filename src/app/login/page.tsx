@@ -2,16 +2,20 @@ import type { Metadata } from "next";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { connection } from "next/server";
+import { AuthCard } from "@/components/auth/auth-card";
+import { StorageUnavailable } from "@/components/shell/storage-unavailable";
 import { SESSION_COOKIE } from "@/lib/constants";
-import { safeNextPath } from "@/lib/routes";
-import { isAuthEnabled, verifySessionToken } from "@/lib/server/auth";
+import { safeNextPath, SETUP_HREF } from "@/lib/routes";
+import { readAuthState, verifySessionToken, type AuthState } from "@/lib/server/auth";
+import { StorageError } from "@/lib/server/storage";
 import { LoginForm } from "./login-form";
 
 export const metadata: Metadata = { title: "Sign in" };
 
 /**
- * Sign-in screen, only meaningful when WRITE_PASSWORD is set. Without a password (or when already signed in)
- * it just forwards you on, so bookmarking /login is harmless.
+ * Sign-in screen. With sign-in off, or when already signed in, it forwards you on, so bookmarking /login is
+ * harmless; before first-run setup it sends you to /setup. When the account file can't be read it explains
+ * that instead (the proxy sends every page here in that case).
  */
 export default async function LoginPage({ searchParams }: PageProps<"/login">) {
   // Auth is configured at runtime, so this page must never be prerendered with build-time env.
@@ -19,16 +23,21 @@ export default async function LoginPage({ searchParams }: PageProps<"/login">) {
   const { next } = await searchParams;
   const nextPath = typeof next === "string" ? next : undefined;
 
-  if (!isAuthEnabled()) redirect("/");
-  if (verifySessionToken((await cookies()).get(SESSION_COOKIE)?.value)) redirect(safeNextPath(nextPath));
+  let state: AuthState;
+  try {
+    state = await readAuthState();
+  } catch (err) {
+    if (err instanceof StorageError) return <StorageUnavailable message={err.message} folder="config" />;
+    throw err;
+  }
+  if (state.mode === "off") redirect("/");
+  if (state.mode === "setup") redirect(SETUP_HREF);
+  const token = (await cookies()).get(SESSION_COOKIE)?.value;
+  if (verifySessionToken(token, state.account)) redirect(safeNextPath(nextPath));
 
   return (
-    <main className="flex min-h-dvh items-center justify-center bg-canvas px-4 pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
-      <div className="w-full max-w-sm rounded-xl border border-line bg-surface p-6">
-        <h1 className="mb-1 text-[22px] font-semibold tracking-tight text-ink">write</h1>
-        <p className="mb-6 text-[14px] text-muted">Enter the password to open your notes.</p>
-        <LoginForm next={nextPath} />
-      </div>
-    </main>
+    <AuthCard intro="Sign in to open your notes.">
+      <LoginForm next={nextPath} />
+    </AuthCard>
   );
 }

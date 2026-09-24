@@ -28,7 +28,7 @@ describe("request errors", () => {
       vi.fn(async () => res),
     );
   const failure = () =>
-    api.login("x").then(
+    api.login({ username: "x", password: "x" }).then(
       () => null,
       (err: unknown) => err,
     );

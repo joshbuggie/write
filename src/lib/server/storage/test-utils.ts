@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -32,4 +32,11 @@ export async function withTempDataDir<T>(fn: (dataDir: string) => Promise<T> | T
     await rm(dataDir, { recursive: true, force: true });
     await rm(configDir, { recursive: true, force: true });
   }
+}
+
+/** Writes a file into the current test's config dir, e.g. a broken account.json. Only inside withTempDataDir. */
+export async function writeTestConfigFile(name: string, text: string): Promise<void> {
+  const dir = process.env.WRITE_CONFIG_DIR;
+  if (!dir) throw new Error("writeTestConfigFile: call it inside withTempDataDir()");
+  await writeFile(path.join(dir, name), text);
 }

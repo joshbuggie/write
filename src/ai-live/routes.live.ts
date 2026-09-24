@@ -54,7 +54,7 @@ async function saveConnection(p: LiveProvider, enabled = true): Promise<string> 
   return res.text();
 }
 
-beforeEach(() => vi.stubEnv("WRITE_PASSWORD", ""));
+beforeEach(() => vi.stubEnv("WRITE_AUTH", "off"));
 afterEach(() => {
   vi.unstubAllEnvs();
   vi.restoreAllMocks();

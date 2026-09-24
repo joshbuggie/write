@@ -7,9 +7,9 @@ services:
     restart: unless-stopped
     ports:
       - "3000:3000" # behind a reverse proxy prefer "127.0.0.1:3000:3000"
-    environment:
-      WRITE_PASSWORD: ${WRITE_PASSWORD:-} # set this whenever others can reach the server
+    # environment:
+    #   WRITE_AUTH: "off"                  # only if a VPN or reverse proxy in front already signs people in
     volumes:
       - ./data:/data # your notes, as plain .md files on the host — run `mkdir -p data config` first
-      - ./config:/config # write's own settings, including AI API keys in plain text: keep it private
+      - ./config:/config # your account, and write's settings with AI API keys in plain text: keep it private
     # user: "1000:1000"                    # set to the owner of ./data and ./config if that isn't uid 1000

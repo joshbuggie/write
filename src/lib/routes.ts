@@ -15,6 +15,7 @@ export const downloadNoteHref = (r: NoteRef) => `${API.download}${query({ folder
 export const downloadFolderHref = (folder: string) => `${API.download}${query({ folder })}`;
 export const downloadAllHref = () => API.download;
 export const loginHref = (next?: string) => `/login${query({ next })}`;
+export const SETUP_HREF = "/setup";
 export const apiQuery = query;
 
 /**

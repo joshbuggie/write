@@ -49,15 +49,9 @@ mkdir -p data config          # your notes, and write's own settings, live here 
 docker compose up -d
 ```
 
-Open <http://localhost:3000>. Your notes are in `./data` as plain files. `./config` holds write's own
-settings, such as the AI assistant's connections.
-
-To turn on the password, create a `.env` file next to `docker-compose.yml` and recreate the container:
-
-```bash
-echo 'WRITE_PASSWORD=choose-a-long-passphrase' > .env
-docker compose up -d
-```
+Open <http://localhost:3000> and create your account (see [First run](#first-run)). Your notes are in
+`./data` as plain files. `./config` holds write's own files: your account, and settings such as the AI
+assistant's connections.
 
 > **Permission denied?** The container runs as uid `1000`. If `./data` or `./config` belongs to another
 > user, run `sudo chown -R 1000:1000 ./data ./config`, or uncomment `user:` in `docker-compose.yml` and set
@@ -72,7 +66,6 @@ docker run -d --name write --init --restart unless-stopped \
   -p 3000:3000 \
   -v "$PWD/data:/data" \
   -v "$PWD/config:/config" \
-  -e WRITE_PASSWORD=choose-a-long-passphrase \
   write
 ```
 
@@ -88,14 +81,15 @@ You need Node.js 24 (LTS). Anything from 20.9 runs the app, but 24 is what we te
 git clone <this-repo-url> write && cd write
 npm ci
 npm run build
-WRITE_DATA_DIR="$HOME/Notes" WRITE_PASSWORD=choose-a-long-passphrase npm start
+WRITE_DATA_DIR="$HOME/Notes" npm start
 ```
 
 - Without `WRITE_DATA_DIR`, notes go to `./data`, relative to the directory you start the server in. An
-  absolute path is safer. The same goes for `WRITE_CONFIG_DIR` (write's own settings, default `./config`).
+  absolute path is safer. The same goes for `WRITE_CONFIG_DIR` (your account and write's own settings,
+  default `./config`).
 - `npm start` listens on all interfaces at port 3000. Use `npm start -- -p 8080` for another port, or
   `npm start -- -H 127.0.0.1` to only accept connections from this machine.
-- Instead of exporting `WRITE_DATA_DIR`, `WRITE_CONFIG_DIR` and `WRITE_PASSWORD`, you can copy
+- Instead of exporting `WRITE_DATA_DIR`, `WRITE_CONFIG_DIR` and `WRITE_AUTH`, you can copy
   `.env.example` to `.env.local` and set them there. The port and bind address can't go in that file,
   because `npm start` picks them before it reads it. Use the `-p` and `-H` flags above.
 
@@ -114,7 +108,6 @@ WorkingDirectory=/opt/write
 Environment=NODE_ENV=production
 Environment=WRITE_DATA_DIR=/home/notes/Notes
 Environment=WRITE_CONFIG_DIR=/home/notes/.config/write
-Environment=WRITE_PASSWORD=choose-a-long-passphrase
 ExecStart=/usr/bin/npm start -- -H 127.0.0.1
 Restart=on-failure
 
@@ -126,21 +119,36 @@ Then run `sudo systemctl enable --now write`.
 
 </details>
 
+### First run
+
+The first time you open write, it asks you to create an account: a username and a password of at
+least 8 characters. That account is the only way in, on every device. To change the password later, open
+**Settings** → **Account** → **Change password**; your other devices are signed out. Scripts can use its password too
+(see [Scripted backups](#scripted-backups)).
+
+**Create the account right after the first start.** Until you do, anyone who can reach the server can
+create it instead. If write will be reachable from the internet, finish setup on your own network (or on
+`localhost`) before you open it up.
+
+If you already protect write with a VPN, or with a reverse proxy that signs people in, you can turn
+write's own sign-in off with `WRITE_AUTH=off`.
+
 ---
 
 ## Configuration
 
-The server is configured with environment variables. The settings you change in the app (today only
-the AI assistant's) are saved in one file, `settings.json` in `WRITE_CONFIG_DIR`.
+The server is configured with environment variables. Your account is saved in `account.json`, and the
+settings you change in the app (today only the AI assistant's) in `settings.json`, both in
+`WRITE_CONFIG_DIR`.
 
-| Variable           | Default                                                                     | What it does                                                                                                                                                                                                                                                                                                                                      |
-| ------------------ | --------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `WRITE_DATA_DIR`   | `./data` on bare metal (relative to the working dir), `/data` in Docker     | The folder that holds your notes. It may be a symlink, for example into a synced folder. A path inside `.next/` is refused, because builds wipe it.                                                                                                                                                                                               |
-| `WRITE_CONFIG_DIR` | `./config` on bare metal (relative to the working dir), `/config` in Docker | Where write keeps its own settings, in `settings.json`: the AI assistant's, API keys included. Keep it outside the data folder, so synced notes never carry your keys: write refuses a folder it can see is inside the data folder, symlinks followed, but two Docker mounts of the same host folder look separate, so keep those apart yourself. |
-| `WRITE_PASSWORD`   | unset: no sign-in                                                           | Turns on the sign-in page and a 30-day session cookie. Scripts can send `Authorization: Bearer <password>` instead. Changing the password signs out every device.                                                                                                                                                                                 |
-| `PORT`             | `3000`                                                                      | The port to listen on. Set it in the real environment (shell, systemd, Docker), not in `.env.local`. With `npm start`, `-p <port>` also works.                                                                                                                                                                                                    |
-| `HOSTNAME`         | `0.0.0.0` in Docker                                                         | The address the Docker image's server binds to. `npm start` ignores it, even as a real environment variable: use `npm start -- -H <address>`.                                                                                                                                                                                                     |
-| `BUILD_STANDALONE` | unset (the Dockerfile sets `1`)                                             | Build-time only. Produces the self-contained server that the Docker image runs. You don't need it for `npm start`.                                                                                                                                                                                                                                |
+| Variable           | Default                                                                     | What it does                                                                                                                                                                                                                                                                                                                                                                      |
+| ------------------ | --------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `WRITE_DATA_DIR`   | `./data` on bare metal (relative to the working dir), `/data` in Docker     | The folder that holds your notes. It may be a symlink, for example into a synced folder. A path inside `.next/` is refused, because builds wipe it.                                                                                                                                                                                                                               |
+| `WRITE_CONFIG_DIR` | `./config` on bare metal (relative to the working dir), `/config` in Docker | Where write keeps your account (`account.json`) and its own settings (`settings.json`): the AI assistant's, API keys included. Keep it outside the data folder, so synced notes never carry your keys: write refuses a folder it can see is inside the data folder, symlinks followed, but two Docker mounts of the same host folder look separate, so keep those apart yourself. |
+| `WRITE_AUTH`       | on                                                                          | Set to `off` to turn sign-in off, only when something in front of write already signs people in (a VPN, or a reverse proxy with its own sign-in). Any other value leaves sign-in on.                                                                                                                                                                                              |
+| `PORT`             | `3000`                                                                      | The port to listen on. Set it in the real environment (shell, systemd, Docker), not in `.env.local`. With `npm start`, `-p <port>` also works.                                                                                                                                                                                                                                    |
+| `HOSTNAME`         | `0.0.0.0` in Docker                                                         | The address the Docker image's server binds to. `npm start` ignores it, even as a real environment variable: use `npm start -- -H <address>`.                                                                                                                                                                                                                                     |
+| `BUILD_STANDALONE` | unset (the Dockerfile sets `1`)                                             | Build-time only. Produces the self-contained server that the Docker image runs. You don't need it for `npm start`.                                                                                                                                                                                                                                                                |
 
 `GET /api/health` returns `200 {"ok":true}` when the data folder is usable, and `503` otherwise. It
 never needs a password, so you can point uptime monitors at it. It does a real write test of the data
@@ -260,10 +268,11 @@ outside write or you were signed out, write shows an error message and stays whe
 
 ### Scripted backups
 
-The same zip is available to scripts. With a password set, send it as a Bearer token:
+The same zip is available to scripts. Send your account's password as a Bearer token (with
+`WRITE_AUTH=off`, leave the header out):
 
 ```bash
-curl -fsS -H "Authorization: Bearer $WRITE_PASSWORD" \
+curl -fsS -H "Authorization: Bearer $NOTES_PASSWORD" \
   -o "notes-$(date +%F).zip" http://localhost:3000/api/download
 ```
 
@@ -276,18 +285,19 @@ For example, as a nightly cron job:
 Because your notes are plain files, you can also back up the data folder directly with restic, Time
 Machine, `rsync` or `git`. That also captures `.trash`.
 
-The config folder (`WRITE_CONFIG_DIR`) isn't in the zip. It holds the AI assistant's settings, with your
-API keys in plain text. Back it up too if you want to keep your connections, and protect it (and its
+The config folder (`WRITE_CONFIG_DIR`) isn't in the zip. It holds your account (the password is hashed)
+and the AI assistant's settings, with your API keys in plain text. Back it up too if you want to keep your connections, and protect it (and its
 backups) like the keys themselves: don't put it in a synced or shared folder, or in `git`.
 
 ---
 
 ## Security
 
-- **Auth is off by default.** Without `WRITE_PASSWORD`, anyone who can reach the port can read and edit
-  your notes. That's only fine on `localhost` or a network you trust. Whenever the server is reachable by
-  others, **set `WRITE_PASSWORD` and put TLS in front of it**, or keep it private with a VPN such as
-  [Tailscale](https://tailscale.com).
+- **Sign-in is on by default.** The first visitor creates the account ([First run](#first-run)), so do that
+  right after the first start, before anyone else can reach the server. Whenever the server is reachable
+  by others, **put TLS in front of it**, or keep it private with a VPN such as
+  [Tailscale](https://tailscale.com). With `WRITE_AUTH=off`, anyone who can reach the port can read and
+  edit your notes: only use it when something in front of write already signs people in.
 - **Use HTTPS.** The simplest option is [Caddy](https://caddyserver.com), which gets certificates
   automatically:
 
@@ -314,14 +324,15 @@ backups) like the keys themselves: don't put it in a synced or shared folder, or
 - **Cross-site requests are blocked** even without a password. Every change has to be a same-origin JSON
   request, which the browser checks with `Sec-Fetch-Site`, so a malicious web page can't write to a write
   server on your LAN.
-- **Set a password before you turn on the AI assistant** on any server others can reach. Without
-  `WRITE_PASSWORD`, anyone who can reach write can use your saved connections (and your API credits), and
+- **Keep sign-in on before you turn on the AI assistant** on any server others can reach. With
+  `WRITE_AUTH=off`, anyone who can reach write can use your saved connections (and your API credits), and
   can use **Test connection** to make the server send requests to addresses on your network, even while
   the assistant is off. API keys are stored on the server in plain text, in `settings.json` inside
   `WRITE_CONFIG_DIR`, readable only by the user write runs as. They never reach the browser, which sees
   at most a key's last four characters. See [AI assistant](#ai-assistant-optional).
-- **Sign-in** uses an HTTP-only session cookie that lasts 30 days. Changing `WRITE_PASSWORD` signs out
-  every device.
+- **Sign-in** uses an HTTP-only session cookie that lasts 30 days. Your password is stored as a salted
+  scrypt hash in `account.json`, never in plain text. Resetting the account (below) signs out every
+  device.
 - **Wrong passwords lock sign-in for everyone, for a while.** After 10 wrong passwords within 15 minutes
   (at the sign-in page or in an `Authorization: Bearer` header), every password check is refused for
   15 minutes with `429 Too Many Requests` and a `Retry-After` header, even the right password. The sign-in
@@ -520,7 +531,9 @@ connection** in Settings names the server and what went wrong. If it says the se
 key" right after you changed the URL, enter the key again: a saved key is only sent to the server it was
 saved for.
 
-**I forgot the password.** It's just the `WRITE_PASSWORD` environment variable. Set a new one and restart.
+**I forgot the password.** Changing it in Settings needs the current one, so instead delete `account.json` from the config folder (`./config` with Docker Compose),
+then open write and create the account again. Your notes aren't touched, and every device is signed out.
+Until you finish, anyone who can reach write could create the account, so do it right away.
 
 ---
 

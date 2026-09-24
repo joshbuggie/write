@@ -90,11 +90,15 @@ function checkCsrf(req: Request): void {
   }
 }
 
-function requireAuth(req: Request): void {
-  const status = authenticateRequest(req);
+async function requireAuth(req: Request): Promise<void> {
+  const status = await authenticateRequest(req);
   if (status === "rate_limited") throw rateLimitedError();
   if (status === "unauthorized") throw new HttpError("unauthorized", "Sign in to continue.");
+  if (status === "setup") throw new HttpError("unauthorized", SETUP_FIRST);
 }
+
+/** What API calls get before first-run setup: there is no account to sign in to yet. */
+export const SETUP_FIRST = "Open write in a browser to create the account first.";
 
 /** Wrap every Route Handler: auth (unless opts.public) → CSRF (non-GET/HEAD) → fn → error mapping. */
 export function handle<C = unknown>(
@@ -103,7 +107,7 @@ export function handle<C = unknown>(
 ): (req: Request, ctx: C) => Promise<Response> {
   return async (req, ctx) => {
     try {
-      if (!opts.public) requireAuth(req);
+      if (!opts.public) await requireAuth(req);
       checkCsrf(req);
       return await fn(req, ctx);
     } catch (err) {
