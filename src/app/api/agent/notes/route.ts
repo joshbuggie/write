@@ -1,23 +1,15 @@
 import type { NoteResponse } from "@/lib/api-contract";
+import { agentReadNote } from "@/lib/server/agent-actions";
 import { handleAgent } from "@/lib/server/agent-http";
 import { json, requireParam } from "@/lib/server/http";
-import { rememberBase } from "@/lib/server/proposal-bases";
-import { canReadFolder, readNote, StorageError } from "@/lib/server/storage";
 
 /**
  * For integrations (docs/design-decisions.md#d31): one note, `?folder=&name=`, with the version a later
- * proposal is based on (its text is remembered for that). A folder the integration can't read answers exactly like a missing note, so
- * probing can't tell which folders exist.
+ * proposal is based on. A folder the integration can't read answers exactly like a missing note.
  */
 export const GET = handleAgent(async (req, integration) => {
   const url = new URL(req.url);
   const ref = { folder: requireParam(url, "folder"), name: requireParam(url, "name") };
-  const hidden = () => new StorageError("not_found", "Note not found.");
-  if (!canReadFolder(integration, ref.folder)) throw hidden();
-  const note = await readNote(ref);
-  if (!canReadFolder(integration, note.folder)) throw hidden();
-  // Kept so a proposal based on this version can still be compared after the owner edits the note.
-  if (!note.readOnly) rememberBase(note.version, note.content);
-  const body: NoteResponse = { note };
+  const body: NoteResponse = { note: await agentReadNote(integration, ref) };
   return json(body);
 });
