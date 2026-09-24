@@ -671,9 +671,10 @@ In order, in `src/components/note/` and `src/components/editor/note-editor.tsx`:
 - **Two APIs, plain `fetch`.** OpenAI-compatible chat completions cover OpenAI, OpenRouter, Ollama, LM
   Studio and most other servers. The Anthropic Messages API covers Anthropic. Each provider preset names
   its API (`presetFor(id).api` in `src/lib/ai/settings.ts`), presets only prefill the URL, and "Other" takes
-  any OpenAI-compatible server. `src/lib/server/ai/` has one small adapter per API and parses server-sent
-  events by hand, with a 4 MB cap on each event (its `data:` lines so far included), so a broken server
-  can't fill the server's memory. No SDKs: two dependencies for two HTTP calls aren't worth it ([D4](#d4),
+  any OpenAI-compatible server. "Test connection" reads the server's models list, which also proves the
+  key, except at OpenRouter, whose `/models` is public: there it reads `/models/user`, which needs the key.
+  `src/lib/server/ai/` has one small adapter per API and parses server-sent events by hand, with a 4 MB
+  cap on each event (its `data:` lines so far included), so a broken server can't fill the server's memory. No SDKs: two dependencies for two HTTP calls aren't worth it ([D4](#d4),
   rule 8).
 - **Saved connections.** Several can be saved (say, a local model and a hosted one), with one default. The
   prompt window shows a picker only when more than one is usable.
@@ -702,7 +703,9 @@ In order, in `src/components/note/` and `src/components/editor/note-editor.tsx`:
   just the caret, with no note text. A "Whole note" toggle changes this for one request, and Settings sets
   the default. A selection that spans blocks grows to whole blocks, so Replace never leaves half a list
   item or a heading merged into a paragraph.
-- **Replies are previewed.** Only Replace or Insert changes the note, as one undo step. A reply is parsed
+- **Replies are previewed.** Only Replace or Insert changes the note, as one undo step. Some models echo
+  the `<note …>` tag their context came in; the prompt window takes it off (`unwrapReply`), since the
+  editor can't keep it and the reply would otherwise go in as plain text with the tag showing. A reply is parsed
   like a paste ([D22](#d22)): it passes the same fidelity check as opening a note ([D16](#d16)), and a reply
   the editor would lose part of goes in as plain text, with a notice in the prompt window first. The reply
   never inherits the replaced text's marks (replacing a bold word doesn't make the whole reply bold).

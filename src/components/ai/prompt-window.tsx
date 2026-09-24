@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState, type CSSProperties, type KeyboardEvent, type RefObject } from "react";
 import type { ChatTurn } from "@/lib/api-contract";
-import { buildMessages, countWords, type AiContext } from "@/lib/ai/prompt";
+import { buildMessages, countWords, unwrapReply, type AiContext } from "@/lib/ai/prompt";
 import {
   connectionName,
   usableConnections,
@@ -65,6 +65,9 @@ export function PromptWindow(props: PromptWindowProps) {
   const [connectionId, setConnectionId] = useState(connections[0]?.id ?? "");
   const connection = connections.find((c) => c.id === connectionId) ?? connections[0] ?? null;
   const stream = useReplyStream();
+  // Everything shown, applied, copied or sent back as a follow-up is the reply without an echoed <note> tag.
+  const streamed = stream.state?.text ?? "";
+  const reply = useMemo(() => unwrapReply(streamed), [streamed]);
   // The turns of the latest request: the first request, then each earlier reply and follow-up.
   const [sent, setSent] = useState<ChatTurn[]>([]);
   const hasReply = request !== null;
@@ -101,7 +104,7 @@ export function PromptWindow(props: PromptWindowProps) {
   const followUp = (text: string) =>
     send({ actionId: null, label: text, prompt: text }, [
       ...sent,
-      { role: "assistant", content: stream.state?.text ?? "" },
+      { role: "assistant", content: reply },
       { role: "user", content: text },
     ]);
 
@@ -113,7 +116,6 @@ export function PromptWindow(props: PromptWindowProps) {
     else onClose(true);
   }
 
-  const reply = stream.state?.text ?? "";
   const done = stream.state?.phase === "done";
   // Checked once the reply is complete: what the note will get if the editor can't keep its formatting.
   const raw = props.rawReply ?? false;
@@ -165,7 +167,7 @@ export function PromptWindow(props: PromptWindowProps) {
         <PromptReply
           request={request}
           via={connectionName(connection)}
-          state={stream.state}
+          state={{ ...stream.state, text: reply }}
           replaceLabel={replaceLabel}
           plain={plain}
           imageHosts={imageHosts}
