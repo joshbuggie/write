@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 import {
   encodeText,
   escapeBlockStarts,
@@ -191,6 +191,12 @@ describe("linear time on hostile paragraphs (runs on every save)", () => {
     run();
     return performance.now() - start;
   };
+
+  // The first serialization pays one-time costs (marked's lexer, JIT warm-up) that took the first case past
+  // 100 ms on a shared CI runner. Warm up on small inputs of each shape, so the budget measures scaling.
+  beforeAll(() => {
+    for (const warm of ["<".repeat(2_000), "a <1 _".repeat(400), "[a ".repeat(800)]) serializeParagraph(warm);
+  });
 
   it.each([
     ["'<'", "<".repeat(100_000)],
