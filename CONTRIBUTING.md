@@ -133,6 +133,9 @@ src/proxy.ts: optional auth gate in front of everything except health/login/stat
 | `src/lib/integrations.ts`                  | Integrations (agent harnesses): the view type, kinds, name rules and the token's shape. Shared by the dialog and the server.                                     |
 | `src/lib/server/integration-*.ts`          | Integration tokens (made, hashed, compared) and who is calling `/api/agent`; `agent-http.ts` has `handleAgent()`, the agent routes' `handle()`.                  |
 | `src/components/integrations/`             | The Integrations dialog: the list, the add/edit form with folder checkboxes, and the one-time token view.                                                        |
+| `src/lib/proposals/`                       | Proposals' framework-free core: sections (`#`/`##`), the three-way review, applying decisions, and the word diff.                                                |
+| `src/lib/server/proposal-*.ts`             | Proposals on the server: making one from what an agent sends, remembered base versions, reviewing and resolving.                                                 |
+| `src/components/proposals/`                | The banner above a note with changes waiting, the review dialog with one card per section, and Undo after Apply.                                                 |
 | `src/app/globals.css`                      | Design tokens (colors for light and dark) exposed as Tailwind utilities.                                                                                         |
 
 ### Key ideas, in the order you'll meet them
@@ -411,6 +414,12 @@ mode.
       even after 15 tries, the account password still works as a Bearer (no lockout). Rename the folder in
       write: the token still reads it under the new name. New token: the old one gets 401 at once.
       `integrations.json` in the config folder is 0600 and doesn't contain the token.
+- [ ] **Proposals** (if touched): read a note with an integration token, edit one section in the app, then
+      `POST /api/agent/proposals` changes to that section and another against the version read. The
+      banner appears; the review shows one clean change and one conflict with its warning. Accept one,
+      reject the other, Apply: `diff` the file, which has only the accepted section changed and your edit
+      kept, front matter untouched. Undo in the toast restores the exact bytes (`shasum` before and after).
+      Leave a change undecided: the banner stays with what is left. Rename the note: the banner follows.
 
 ---
 

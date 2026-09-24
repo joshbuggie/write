@@ -52,8 +52,9 @@ export function TokenReveal({ integration, token, onDone }: TokenRevealProps) {
         <p className="mt-1 font-mono break-all text-ink">{agentApiBase(origin)}</p>
         <p className="mt-1">
           with the header <code className="font-mono text-ink">Authorization: Bearer &lt;token&gt;</code>.{" "}
-          <code className="font-mono text-ink">GET /tree</code> lists the folders it can read, and{" "}
-          <code className="font-mono text-ink">GET /notes?folder=…&amp;name=…</code> reads a note.
+          <code className="font-mono text-ink">GET /tree</code> lists the folders it can read,{" "}
+          <code className="font-mono text-ink">GET /notes?folder=…&amp;name=…</code> reads a note, and{" "}
+          <code className="font-mono text-ink">POST /proposals</code> proposes changes for you to review.
         </p>
       </div>
       <div className="flex justify-end">

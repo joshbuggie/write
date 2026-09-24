@@ -9,6 +9,7 @@ import { StorageError } from "./errors";
 import { atomicWrite, mapFsError, renameCaseOnly, renameNoClobber } from "./fs-utils";
 import { listTree, toSummary } from "./folders";
 import { withWriteLock } from "./mutex";
+import { orphanProposals, proposalsFollowNote, sameNoteRef } from "./proposals";
 import {
   lookupNote,
   noteNotFound,
@@ -159,7 +160,10 @@ export async function saveNote(input: {
   });
 }
 
-/** Renames and/or moves a note without ever overwriting another file. Case-only renames work. */
+/**
+ * Renames and/or moves a note without ever overwriting another file. Case-only renames work. Its pending
+ * proposals go with it (docs/design-decisions.md#d31).
+ */
 export async function updateNote(input: {
   ref: NoteRef;
   newName?: string;
@@ -182,6 +186,7 @@ export async function updateNote(input: {
       const dest = safeJoin(target.path, name + NOTE_EXT);
       if (sameFolder && nameKey(name) === nameKey(note.name)) await renameCaseOnly(note.path, dest);
       else await renameNoClobber(note.path, dest);
+      await proposalsFollowNote({ folder: folder.name, name: note.name }, { folder: target.name, name });
       return toSummary(target.name, name, await lstat(dest));
     } catch (err) {
       throw mapFsError(err, "Note not found.");
@@ -189,13 +194,17 @@ export async function updateNote(input: {
   });
 }
 
-/** Soft-deletes a note into .trash, keeping its folder name so it's easy to find and restore by hand. */
+/**
+ * Soft-deletes a note into .trash, keeping its folder name so it's easy to find and restore by hand. Its
+ * pending proposals are closed (docs/design-decisions.md#d31).
+ */
 export async function deleteNote(ref: NoteRef): Promise<void> {
   return withWriteLock(async () => {
     const dataDir = getDataDir();
     try {
       const { folder, note } = await resolveNote(dataDir, ref);
       await moveToTrash(dataDir, note.path, [folder.name, note.name + NOTE_EXT]);
+      await orphanProposals((p) => sameNoteRef(p, { folder: folder.name, name: note.name }));
     } catch (err) {
       throw mapFsError(err, "Note not found.");
     }
@@ -209,11 +218,12 @@ export async function deleteNote(ref: NoteRef): Promise<void> {
 export async function discardIfEmpty(ref: NoteRef): Promise<boolean> {
   return withWriteLock(async () => {
     try {
-      const { note } = await resolveNote(getDataDir(), ref);
+      const { folder, note } = await resolveNote(getDataDir(), ref);
       if (note.stats.size > MAX_NOTE_BYTES) return false;
       const { text, utf8Ok } = decode(await readFile(note.path));
       if (!utf8Ok || text.trim() !== "") return false;
       await unlink(note.path);
+      await orphanProposals((p) => sameNoteRef(p, { folder: folder.name, name: note.name }));
       return true;
     } catch (err) {
       const mapped = mapFsError(err, "Note not found.");

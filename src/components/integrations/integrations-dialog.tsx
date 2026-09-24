@@ -44,7 +44,7 @@ export function IntegrationsDialog({ library, authEnabled, onClose }: Integratio
       size="lg"
       onClose={onClose}
       title="Integrations"
-      description="Agent harnesses such as Turnstone or Hermes Agent can read the folders you choose here, each with its own token. They can't change your notes."
+      description="Agent harnesses such as Turnstone or Hermes Agent can read the folders you choose here, each with its own token, and propose changes. Nothing in a note changes until you accept it."
       footer={<Button onClick={onClose}>Close</Button>}
     >
       {!authEnabled && (

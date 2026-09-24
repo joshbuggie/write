@@ -33,6 +33,16 @@ export {
   type StoredIntegration,
 } from "./integrations";
 export {
+  addProposal,
+  getProposal,
+  pendingProposalsFor,
+  updateProposal,
+  MAX_PENDING_PER_INTEGRATION,
+  type NewProposal,
+  type StoredProposal,
+} from "./proposals";
+export { isProposalId } from "./proposals-file";
+export {
   readAiSettings,
   saveAiSettings,
   apiKeyFor,

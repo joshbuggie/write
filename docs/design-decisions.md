@@ -25,7 +25,7 @@ files.
 - Files in and out: [D23](#d23) downloads · [D24](#d24) import
 - UI: [D25](#d25) responsive layout · [D26](#d26) tokens and theme
 - Self-hosting: [D27](#d27) build output and health · [D28](#d28) configuration
-- Optional features: [D29](#d29) the AI assistant · [D31](#d31) integrations with agent harnesses
+- Optional features: [D29](#d29) the AI assistant · [D31](#d31) integrations and proposals from agent harnesses
 
 ---
 
@@ -827,7 +827,7 @@ wrong_password`. A wrong current password is `403 wrong_password`, not `401`, wh
 
 <a id="d31"></a>
 
-## D31. Integrations: agent harnesses read chosen folders with their own token
+## D31. Integrations: agent harnesses read chosen folders and propose changes
 
 - **Why.** People draft with agent harnesses (Turnstone, Hermes Agent, or any client that speaks MCP or
   HTTP) and bring the result into write by copy and paste. The assistant in [D29](#d29) is for a
@@ -837,14 +837,51 @@ wrong_password`. A wrong current password is `403 wrong_password`, not `401`, wh
   harness: the agent API under `/api/agent`. (2) Identity: one integration per harness, each with its
   own token and folder list. (3) Launchers that start a job in a harness (planned). A harness that can
   only read, or only be started from its own UI, still works with layers 1 and 2.
-- **Planned, in this order.** Proposals: a harness sends changes to a note as a proposal, stored apart
-  from the note and reviewed section by section (`##` headings), with a three-way merge against edits
-  made while it worked. Nothing but the owner's accept ever writes a note ([D9](#d9)). Then an MCP
-  endpoint at `/api/agent/mcp` over the same code, stateless and tools only, whose server instructions
-  carry the workflow so no harness needs its own skill. Then launchers (Turnstone's workstream API,
-  Hermes Agent's runs API, and a generic webhook) that start a job with a write-chosen idempotency key
-  (Turnstone's `ws_id`, Hermes's `Idempotency-Key`) and continue it on later passes. Update this entry
-  as each lands.
+- **Proposals: harnesses suggest, the owner decides.** A harness never writes a note. It reads one
+  (`GET /api/agent/notes`, which returns the version), then sends `POST /api/agent/proposals` with that
+  `baseVersion` and either the whole revised note or only the sections it changed (`sections`, by
+  heading, so agents that each write one section needn't send the note back). The owner reviews it
+  section by section and only an accept writes the note ([D9](#d9)).
+  - **Sections** are cut at `#` and `##` headings outside fenced code (`src/lib/proposals/sections.ts`);
+    `###` and deeper stay inside their section. A section is known by its heading's level and text, case
+    and spacing ignored, numbered when repeated.
+  - **Three-way comparison** (`src/lib/proposals/review.ts`): what the harness read, what it proposes and
+    the note now. A section it changed that you left alone is a clean change; one you changed too is a
+    conflict, and the card says accepting replaces your version; one you removed is "gone" and accepting
+    brings it back. Changes already in the note are left out, and trailing whitespace doesn't count. The
+    owner can keep writing during a long run: edits outside the changed sections are never at risk.
+  - **The version it read.** When the note hasn't changed, it is the base. Otherwise the text read by an
+    agent is remembered in memory by version (`src/lib/server/proposal-bases.ts`, bounded), so the
+    harness only echoes the version. After a restart with the note also changed, the proposal is
+    refused with 409 and the note as it is now, saying to read it again. Nothing about the note is
+    guessed.
+  - **Front matter is never proposed.** It is split off all three versions, and the note's own is kept.
+  - **Applying** (`POST /api/proposals/resolve`) happens on the server, in one conditional save against
+    the version the review was worked out against (409 if the note changed meanwhile; the dialog then
+    reloads the review). Untouched sections keep their exact bytes (`src/lib/proposals/apply.ts`);
+    a new section goes after the section before it in the proposal. The dialog saves the note first, so
+    the review sees the latest text. Afterwards the editor reloads the saved text, recorded as this tab's
+    own save so it isn't "Updated from disk" ([D20](#d20)). Because the editor remounts, ⌘Z can't reach
+    the change, so the toast offers Undo for 10 seconds; Undo puts the old text back with a conditional
+    save, so it never overwrites a newer edit.
+  - **Undecided changes keep waiting.** Accepted and rejected changes are recorded per section and never
+    offered again; a proposal closes as "applied" or "dismissed" once nothing is left, and the harness
+    reads the decisions with `GET /api/agent/proposals?id=`, so its next pass knows what was kept.
+  - **Stored** as one JSON file per proposal in `<dataDir>/.proposals/` (hidden, like `.trash`, so it is
+    never listed or exported), next to the notes they are about. They follow their note through renames
+    and moves, and close as "orphaned" when it is deleted, so a new note with the same name doesn't
+    inherit them. A newer proposal from the same integration for the same note replaces the older one.
+    A `requestId` makes a retried request return the first proposal. At most 20 wait per integration.
+    A closed proposal drops the note text it carried (only its decisions are looked up
+    later) and is removed after 30 days.
+  - **Word diffs** in the review (`src/lib/proposals/word-diff.ts`): Myers on words, with bounded work.
+    Small shared words between edits fold into the edits, and a mostly rewritten passage shows as the old
+    text then the new, which reads far better than alternating fragments.
+- **Planned, in this order.** An MCP endpoint at `/api/agent/mcp` over the same code, stateless and tools
+  only, whose server instructions carry the workflow so no harness needs its own skill. Then launchers
+  (Turnstone's workstream API, Hermes Agent's runs API, and a generic webhook) that start a job with a
+  write-chosen idempotency key (Turnstone's `ws_id`, Hermes's `Idempotency-Key`) and continue it on
+  later passes. Update this entry as each lands.
 - **Tokens.** `wrt_` plus 32 random bytes as base64url, made by the server and shown once. Only the
   SHA-256 and the last four characters are saved: with 256 random bits there is nothing to guess, so no
   slow hash and no lockout are needed. The exact shape lets auth tell a token from a password without
@@ -878,4 +915,5 @@ name, kind, folders, tokenHash, tokenHint, createdAt }] }`. Unlike `settings.jso
   localhost and write is often reached over plain HTTP on a LAN.
 - Code: `src/lib/integrations.ts`, `src/lib/server/integration-*.ts`, `src/lib/server/agent-http.ts`,
   `src/lib/server/storage/integrations*.ts`, `src/app/api/integrations/`, `src/app/api/agent/` and
-  `src/components/integrations/`.
+  `src/components/integrations/`; for proposals, `src/lib/proposals/`, `src/lib/server/proposal-*.ts`,
+  `src/lib/server/storage/proposals*.ts`, `src/app/api/proposals/` and `src/components/proposals/`.

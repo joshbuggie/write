@@ -14,6 +14,9 @@ import {
   type IntegrationTokenResponse,
   type LoginRequest,
   type NoteResponse,
+  type ProposalsResponse,
+  type ResolveProposalRequest,
+  type ResolveProposalResponse,
   type SaveNoteRequest,
   type SaveNoteResponse,
   type SaveSettingsRequest,
@@ -205,4 +208,8 @@ export const api = {
   deleteIntegration: (id: string) => request<void>("DELETE", API.integrations + apiQuery({ id })),
   rotateIntegrationToken: (id: string) =>
     request<IntegrationTokenResponse>("POST", API.integrationToken, { id }),
+  listProposals: (ref: NoteRef) =>
+    request<ProposalsResponse>("GET", API.proposals + apiQuery({ folder: ref.folder, name: ref.name })),
+  resolveProposal: (input: ResolveProposalRequest) =>
+    request<ResolveProposalResponse>("POST", API.resolveProposal, input),
 };

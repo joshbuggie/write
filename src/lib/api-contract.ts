@@ -1,6 +1,8 @@
 import type { AiSettings, ProviderId } from "./ai/settings";
 import type { IntegrationKind, IntegrationView } from "./integrations";
-import type { FolderSummary, Note, NoteSummary, SavedNote, Tree } from "./types";
+import type { SectionEdit } from "./proposals/apply";
+import type { ChangeDecision, ProposalReview, ProposalStatus } from "./proposals/types";
+import type { FolderSummary, Note, NoteRef, NoteSummary, SavedNote, Tree } from "./types";
 
 export type ErrorCode =
   | "bad_request"
@@ -72,6 +74,9 @@ export const API = {
   integrationToken: "/api/integrations/token",
   agentTree: "/api/agent/tree",
   agentNotes: "/api/agent/notes",
+  agentProposals: "/api/agent/proposals",
+  proposals: "/api/proposals",
+  resolveProposal: "/api/proposals/resolve",
 } as const;
 
 export type HealthResponse = { ok: true } | { ok: false; error: string };
@@ -240,3 +245,70 @@ export interface IntegrationTokenResponse {
 
 /** `GET /api/agent/tree`, for integrations: only the folders the integration can read. */
 export type AgentTreeResponse = Tree;
+
+/**
+ * `POST /api/agent/proposals`: changes to one note, for the owner to review (docs/design-decisions.md#d31).
+ * `baseVersion` is the version the harness read with `GET /api/agent/notes`. Send the whole revised note
+ * as `content`, or only the sections that changed as `sections`, never both.
+ */
+export interface AgentProposalRequest {
+  folder: string;
+  name: string;
+  baseVersion: string;
+  content?: string;
+  sections?: SectionEdit[];
+  /** One line on what changed and why, shown with the review. */
+  summary?: string;
+  /** Why each section changed, by heading ("Plan" or "## Plan"). */
+  reasons?: Record<string, string>;
+  /** The harness's own id for this request: sending it again returns the first proposal instead of a new one. */
+  requestId?: string;
+}
+
+/** A proposal as its harness sees it. */
+export interface AgentProposal {
+  id: string;
+  status: ProposalStatus;
+  note: NoteRef;
+  summary: string;
+  /** ISO 8601. */
+  createdAt: string;
+  /** Changes still waiting for the owner; 0 once everything is decided. */
+  waiting: number;
+  /** The owner's decisions so far, one per section. */
+  decisions: ChangeDecision[];
+  /** The note's version now, to read it again from; null when the note is gone. */
+  noteVersion: string | null;
+}
+
+/** Answer to creating a proposal (201) or to a retry of one already made (200), and to looking one up. */
+export interface AgentProposalResponse {
+  proposal: AgentProposal;
+}
+
+/** `GET /api/proposals?folder=&name=`: the note's pending proposals, each reviewed against the note now. */
+export interface ProposalsResponse {
+  reviews: ProposalReview[];
+}
+
+/**
+ * `POST /api/proposals/resolve`: the owner's decisions. Accepted sections are applied to the note in one
+ * save, which needs the note still at `noteVersion` (else 409 with the note as it is now). Changes left
+ * undecided keep waiting.
+ */
+export interface ResolveProposalRequest {
+  id: string;
+  noteVersion: string;
+  accept: string[];
+  reject: string[];
+}
+export interface ResolveProposalResponse {
+  /** The note after the save, or as it was when nothing was accepted. */
+  note: SavedNote;
+  /** The note's whole text now. */
+  content: string;
+  /** The whole text before, for Undo. */
+  previousContent: string;
+  /** Changes still waiting after these decisions. */
+  waiting: number;
+}

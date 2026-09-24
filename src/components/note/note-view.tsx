@@ -4,6 +4,9 @@ import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { startTransition, useEffect, useRef, useState } from "react";
 import { AiButton } from "@/components/ai/ai-button";
+import { ProposalBanner } from "@/components/proposals/proposal-banner";
+import { ProposalReviewDialog } from "@/components/proposals/proposal-review-dialog";
+import { useProposalReview } from "@/components/proposals/use-proposal-review";
 import { EditorSkeleton, TEXT_COLUMN } from "@/components/editor/editor-skeleton";
 import type { EditorRequest } from "@/components/editor/note-editor";
 import { useRegisterActiveNote } from "@/components/shell/shell-context";
@@ -12,6 +15,7 @@ import { useDownload } from "@/components/ui/download-link";
 import { useToast } from "@/components/ui/toast";
 import { api, isApiError } from "@/lib/api-client";
 import { moveDraft } from "@/lib/drafts";
+import type { ProposalSummary } from "@/lib/proposals/types";
 import { downloadNoteHref, LIBRARY_HREF, noteHref } from "@/lib/routes";
 import type { Note, NoteRef } from "@/lib/types";
 import { CONFLICT_BANNER_ID, ConflictBanner } from "./conflict-banner";
@@ -39,18 +43,24 @@ const messageOf = (err: unknown) => (err instanceof Error ? err.message : "Somet
  * note's folder and name; `mount` also remounts the editor when a new file takes this same name from this
  * screen ("Save as new note" after the note was deleted), so it opens as a live editor on that file.
  */
-export function NoteView({ note, folders }: { note: Note; folders: string[] }) {
+export function NoteView(props: { note: Note; folders: string[]; proposals: ProposalSummary[] }) {
+  const { note } = props;
   const [mount, setMount] = useState(0);
   if (note.readOnly) return <ReadOnlyNote note={{ ...note, readOnly: note.readOnly }} />;
-  return <EditableNote key={mount} note={note} folders={folders} onReopen={() => setMount((n) => n + 1)} />;
+  return <EditableNote key={mount} {...props} onReopen={() => setMount((n) => n + 1)} />;
 }
 
 /**
  * Orchestrates one open note: header, banners, title and editor, plus every file-level action
  * (rename, move, delete, conflicts, mode switch). Saving itself lives in useNoteSync.
  */
-function EditableNote(props: { note: Note; folders: string[]; onReopen: () => void }) {
-  const { note, folders, onReopen } = props;
+function EditableNote(props: {
+  note: Note;
+  folders: string[];
+  proposals: ProposalSummary[];
+  onReopen: () => void;
+}) {
+  const { note, folders, proposals, onReopen } = props;
   const router = useRouter();
   const toast = useToast();
   const ref: NoteRef = { folder: note.folder, name: note.name };
@@ -72,6 +82,11 @@ function EditableNote(props: { note: Note; folders: string[]; onReopen: () => vo
   useRegisterActiveNote(ref, async () => {
     await pendingRelocate.current;
     await autosaver.flush();
+  });
+  const review = useProposalReview({
+    noteRef: ref,
+    flush: () => autosaver.flush(),
+    reloadEditor: (content, version) => session.reloadEditor(content, version),
   });
   const startDownload = useDownload();
   /** This note's download URL once any rename or move in flight has landed (see DownloadTarget). */
@@ -204,6 +219,7 @@ function EditableNote(props: { note: Note; folders: string[]; onReopen: () => vo
           onReload={session.reloadEditor}
           onReopen={onReopen}
         />
+        <ProposalBanner proposals={proposals} onReview={(id) => void review.open(id)} />
         {sourceReason && (
           <SourceModeNotice reason={sourceReason} onEditVisually={() => setDialog("edit-visually")} />
         )}
@@ -226,6 +242,14 @@ function EditableNote(props: { note: Note; folders: string[]; onReopen: () => vo
         />
       </article>
 
+      {review.reviewing && (
+        <ProposalReviewDialog
+          noteRef={ref}
+          proposalId={review.reviewing}
+          onClose={review.close}
+          onApplied={review.applied}
+        />
+      )}
       {dialog === "move" && (
         <MoveNoteDialog
           noteName={note.name}

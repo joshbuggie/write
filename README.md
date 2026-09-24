@@ -454,9 +454,9 @@ the model server listens on the network, not only on its own `localhost`.
 ## Integrations (optional)
 
 Agent harnesses such as [Turnstone](https://github.com/turnstonelabs/turnstone) or
-[Hermes Agent](https://github.com/NousResearch/hermes-agent) can read your notes directly, so you don't
-have to copy them over by hand. Each harness gets its own token, and reads only the folders you choose.
-Integrations can't change notes.
+[Hermes Agent](https://github.com/NousResearch/hermes-agent) can read your notes directly and propose
+changes to them, so you don't have to copy text back and forth by hand. Each harness gets its own token,
+and reads only the folders you choose. **Nothing in a note changes until you accept it.**
 
 1. Open **Integrations** at the bottom of the sidebar (on a phone, at the end of the Notes screen) and
    click **Add integration**.
@@ -469,6 +469,28 @@ The harness sends the token as `Authorization: Bearer <token>` to `https://<your
 
 - `GET /api/agent/tree` lists the folders it can read and their notes.
 - `GET /api/agent/notes?folder=<folder>&name=<note>` reads one note, with its text and version.
+- `POST /api/agent/proposals` proposes changes to a note it read: the `folder`, `name` and the
+  `baseVersion` it read, then either the whole revised note as `content`, or only the changed sections as
+  `sections: [{ "heading": "Plan", "content": "## Plan\n\nNew text\n" }]` (an empty `content` removes the
+  section; a heading the note doesn't have adds one at the end). Optional: a one-line `summary`, a
+  `reasons` object by heading, and a `requestId` that makes a retried request harmless.
+- `GET /api/agent/proposals?id=<id>` tells the harness which sections you accepted or rejected, so its
+  next pass starts from what you kept.
+
+### Reviewing proposed changes
+
+When a harness has proposed changes, the note shows a banner with **Review changes**. The review lists
+each changed section (at `#` and `##` headings) with the words that would change, and why, if the harness
+said. Accept or reject each one, then **Apply**.
+
+- **You can keep writing while a harness works.** Sections you didn't touch apply cleanly. When you also
+  changed a section the harness changed, its card says so: accepting replaces your version of that
+  section, rejecting keeps it. Your edits elsewhere in the note are never at risk.
+- Changes you don't decide on keep waiting for another time. What you rejected isn't offered again.
+- Right after Apply, **Undo** in the message at the bottom puts the note back as it was.
+- Front matter is never changed by a proposal.
+- Proposals wait in a hidden `.proposals` folder inside your data folder, next to your notes. They follow a
+  note when you rename or move it, and are closed when you delete it.
 
 A few things to know:
 

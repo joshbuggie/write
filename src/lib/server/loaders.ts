@@ -5,8 +5,10 @@ import { cache } from "react";
 import { type AiSettings, DEFAULT_AI_SETTINGS } from "@/lib/ai/settings";
 import { SESSION_COOKIE } from "@/lib/constants";
 import { loginHref, SETUP_HREF } from "@/lib/routes";
+import type { ProposalSummary } from "@/lib/proposals/types";
 import type { Note, NoteRef, Tree } from "@/lib/types";
 import { isAuthEnabled, readAuthState, verifySessionToken } from "./auth";
+import { summariesFor } from "./proposal-review";
 import {
   ensureBootstrap,
   listTree,
@@ -96,3 +98,18 @@ export const loadAiSettings = cache(async (): Promise<AiSettings> => {
     return DEFAULT_AI_SETTINGS;
   }
 });
+
+/**
+ * The note's pending proposals, for the banner above it (docs/design-decisions.md#d31). A problem reading
+ * them must never keep the note from opening, so any error is logged and the banner stays away.
+ */
+export async function loadNoteProposals(note: Note): Promise<ProposalSummary[]> {
+  await connection();
+  await requirePageAuth();
+  try {
+    return await summariesFor(note);
+  } catch (err) {
+    console.error("[write] Couldn't read the note's proposals:", err);
+    return [];
+  }
+}
