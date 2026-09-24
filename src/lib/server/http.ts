@@ -24,6 +24,14 @@ export class HttpError extends Error {
 /** JSON bodies may carry a full note plus some JSON overhead; anything bigger is rejected before parsing. */
 export const MAX_JSON_BYTES = MAX_NOTE_BYTES + 64 * 1024;
 
+/**
+ * For bodies that carry a note's text (create, save). JSON escaping grows text (a quote or newline becomes
+ * two bytes), so a note under MAX_NOTE_BYTES can need up to about twice that. 10 MiB is also the most
+ * Next.js's proxy passes on intact (experimental.proxyClientMaxBodySize); a bigger body would arrive
+ * truncated. Storage still enforces MAX_NOTE_BYTES on the decoded text.
+ */
+export const MAX_NOTE_JSON_BYTES = 10 * 1024 * 1024;
+
 const NO_STORE = "no-store";
 
 /** JSON response that is never cached (notes change underneath the browser all the time). */
@@ -147,13 +155,18 @@ async function readCappedBody(req: Request, maxBytes: number): Promise<Uint8Arra
 
 /**
  * Parses and validates a JSON body. 415 if content-type isn't application/json; 413 if Content-Length or the
- * actual bytes exceed MAX_JSON_BYTES; 400 on bad JSON or when `guard` rejects the shape.
+ * actual bytes exceed `maxBytes` (MAX_NOTE_JSON_BYTES for note text); 400 on bad JSON or when `guard`
+ * rejects the shape.
  */
-export async function readJson<T>(req: Request, guard: (v: unknown) => v is T): Promise<T> {
+export async function readJson<T>(
+  req: Request,
+  guard: (v: unknown) => v is T,
+  maxBytes = MAX_JSON_BYTES,
+): Promise<T> {
   if (!isJsonRequest(req)) {
     throw new HttpError("unsupported_media_type", "Send the request body as application/json.");
   }
-  const bytes = await readCappedBody(req, MAX_JSON_BYTES);
+  const bytes = await readCappedBody(req, maxBytes);
   let value: unknown;
   try {
     value = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));

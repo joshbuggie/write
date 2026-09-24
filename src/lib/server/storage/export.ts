@@ -63,7 +63,9 @@ function localDate(d = new Date()): string {
 export async function zipAll(): Promise<{ bytes: Uint8Array; filename: string }> {
   const dataDir = getDataDir();
   const root = `write-notes-${localDate()}`;
-  const folders: Zippable = {};
+  // No prototype: on a plain object, `folders["__proto__"] = …` would replace the prototype, and fflate's
+  // for…in would then put that folder's notes at the archive root.
+  const folders: Zippable = Object.create(null);
   for (const folder of (await listTree()).folders) {
     const name = uniqueName(folder.name.normalize("NFC"), Object.keys(folders));
     folders[name] = await folderEntries(dataDir, folder);

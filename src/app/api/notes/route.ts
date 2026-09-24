@@ -4,7 +4,7 @@ import type {
   SaveNoteResponse,
   UpdateNoteResponse,
 } from "@/lib/api-contract";
-import { handle, json, noContent, readJson, requireParam } from "@/lib/server/http";
+import { handle, json, MAX_NOTE_JSON_BYTES, noContent, readJson, requireParam } from "@/lib/server/http";
 import { createNote, deleteNote, discardIfEmpty, readNote, saveNote, updateNote } from "@/lib/server/storage";
 import { isCreateNoteRequest, isSaveNoteRequest, isUpdateNoteRequest } from "@/lib/server/validate";
 import type { NoteRef } from "@/lib/types";
@@ -23,14 +23,18 @@ export const GET = handle(async (req) => {
 
 /** Create a note; a taken name is auto-suffixed (" 2", " 3"…), so this never returns name_taken. */
 export const POST = handle(async (req) => {
-  const input = await readJson(req, isCreateNoteRequest);
+  const input = await readJson(req, isCreateNoteRequest, MAX_NOTE_JSON_BYTES);
   const body: NoteResponse = { note: await createNote(input) };
   return json(body, 201);
 });
 
 /** Autosave. 409 version_conflict carries `current` so the client can offer "Keep mine / Use disk version". */
 export const PUT = handle(async (req) => {
-  const { folder, name, content, baseVersion, force } = await readJson(req, isSaveNoteRequest);
+  const { folder, name, content, baseVersion, force } = await readJson(
+    req,
+    isSaveNoteRequest,
+    MAX_NOTE_JSON_BYTES,
+  );
   const body: SaveNoteResponse = {
     note: await saveNote({ ref: { folder, name }, content, baseVersion, force }),
   };

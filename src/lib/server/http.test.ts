@@ -9,6 +9,7 @@ import {
   HttpError,
   json,
   MAX_JSON_BYTES,
+  MAX_NOTE_JSON_BYTES,
   noContent,
   readJson,
   requireParam,
@@ -160,6 +161,15 @@ describe("readJson", () => {
     expect(await codeOf(readJson(declared, isNamed))).toBe("too_large");
     const big = JSON.stringify({ name: "x".repeat(MAX_NOTE_BYTES + 64 * 1024) });
     expect(await codeOf(readJson(jsonRequest(big), isNamed))).toBe("too_large");
+  });
+
+  it("gives note bodies room for JSON escaping, up to MAX_NOTE_JSON_BYTES", async () => {
+    // A 4 MiB note of quoted code grows past MAX_JSON_BYTES once escaped.
+    const escaped = JSON.stringify({ name: '  x = "y";\n'.repeat(Math.floor((4 * 1024 * 1024) / 11)) });
+    expect(new TextEncoder().encode(escaped).length).toBeGreaterThan(MAX_JSON_BYTES);
+    expect(await readJson(jsonRequest(escaped), isNamed, MAX_NOTE_JSON_BYTES)).toHaveProperty("name");
+    const declared = jsonRequest("{}", { "content-length": String(MAX_NOTE_JSON_BYTES + 1) });
+    expect(await codeOf(readJson(declared, isNamed, MAX_NOTE_JSON_BYTES))).toBe("too_large");
   });
 });
 

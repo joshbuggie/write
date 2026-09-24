@@ -73,6 +73,25 @@ describe("zipAll", () => {
       const names = Object.keys(unzipSync((await zipAll()).bytes));
       expect(names).toContain(`write-notes-${today()}/Café/Café.md`);
     }));
+
+  it("keeps folders named like Object.prototype keys", () =>
+    withTempDataDir(async (dir) => {
+      await seed(dir, { "__proto__/Plan.md": "a", "constructor/Note.md": "b", "Work/Other.md": "c" });
+      const root = `write-notes-${today()}`;
+      const files = unzipSync((await zipAll()).bytes);
+      expect(Object.keys(files).sort()).toEqual(
+        [
+          `${root}/`,
+          `${root}/Work/`,
+          `${root}/Work/Other.md`,
+          `${root}/__proto__/`,
+          `${root}/__proto__/Plan.md`,
+          `${root}/constructor/`,
+          `${root}/constructor/Note.md`,
+        ].sort(),
+      );
+      expect(strFromU8(files[`${root}/__proto__/Plan.md`]!)).toBe("a");
+    }));
 });
 
 describe("zipFolder", () => {
