@@ -2,7 +2,7 @@
 
 **Plain-markdown notes you own.** write is a calm, self-hosted writing app for your notes. It runs on your
 own machine or server, and every note is an ordinary `.md` file in a folder you choose. There is no
-database, no account and no lock-in: stop the app and your notes are still just files that you can
+database, no cloud account and no lock-in: stop the app and your notes are still just files that you can
 open in vim, Obsidian, iA Writer or anything else.
 
 - A clean editor for rich text that saves plain Markdown: headings, lists, task lists, tables, code,
@@ -11,7 +11,7 @@ open in vim, Obsidian, iA Writer or anything else.
   and asks before overwriting anything.
 - Folders in a sidebar, and a library view on the phone. Works well as an iPhone Home Screen app.
 - Download a single note, a folder, or everything as a `.zip`, from the app or with `curl`.
-- An optional password, and light and dark mode that follow your system.
+- Password-protected access by default, and light and dark mode that follow your system.
 - An optional AI assistant, off until you turn it on, that works with the model you choose: one on your
   own network such as Ollama, or a hosted API.
 
@@ -36,15 +36,15 @@ open in vim, Obsidian, iA Writer or anything else.
 
 ## Quick start
 
-Choose one. Each option gets you to <http://localhost:3000>. On first start write creates a `notebook`
-folder with a short Welcome note.
+Choose one. Each option gets you to <http://localhost:3000>. When you first open the notes, write creates
+a `notebook` folder with a short Welcome note if your data folder is empty.
 
 ### Option 1: Docker Compose (recommended)
 
 You need Docker with the Compose plugin.
 
 ```bash
-git clone <this-repo-url> write && cd write
+git clone https://github.com/joshbuggie/write.git && cd write
 mkdir -p data config          # your notes, and write's own settings, live here on the host
 docker compose up -d
 ```
@@ -60,6 +60,7 @@ assistant's connections.
 ### Option 2: `docker run`
 
 ```bash
+git clone https://github.com/joshbuggie/write.git && cd write
 docker build -t write .
 mkdir -p data config
 docker run -d --name write --init --restart unless-stopped \
@@ -69,16 +70,17 @@ docker run -d --name write --init --restart unless-stopped \
   write
 ```
 
-If the project publishes images, you can skip the build: releases are pushed to
-`ghcr.io/<owner>/write:<version>` and `:latest`, for `linux/amd64` and `linux/arm64`, so they run on a
-Raspberry Pi too. Every commit on `main` that passes CI is also pushed as `:main` (and `:sha-<commit>`).
+The release workflow publishes version tags to `ghcr.io/joshbuggie/write:<version>` and stable releases
+to `:latest`, for `linux/amd64` and `linux/arm64` (including 64-bit Raspberry Pi systems). Once an image
+is published and its package is public, you can use it instead of building locally. Every commit on
+`main` that passes CI is also published as `:main` (and `:sha-<short-commit>`).
 
 ### Option 3: Bare metal (Node.js)
 
 You need Node.js 24 (LTS). Anything from 20.9 runs the app, but 24 is what we test.
 
 ```bash
-git clone <this-repo-url> write && cd write
+git clone https://github.com/joshbuggie/write.git && cd write
 npm ci
 npm run build
 WRITE_DATA_DIR="$HOME/Notes" npm start
@@ -152,9 +154,9 @@ settings you change in the app (today only the AI assistant's) in `settings.json
 
 `GET /api/health` returns `200 {"ok":true}` when the data folder is usable, and `503` otherwise. It
 never needs a password, so you can point uptime monitors at it. It does a real write test of the data
-folder (a hidden `.write-health-*.tmp` file, removed at once) at most every 10 minutes, and only a
-read-only permission check in between, so frequent checks don't wake your sync tools. The Docker image
-uses it for its `HEALTHCHECK`.
+folder (a hidden `.write-health-*.tmp` file, removed at once) normally at most every 10 minutes per server
+process, with only a read-only permission check in between. Failed checks aren't cached. The Docker
+image uses it for its `HEALTHCHECK`.
 
 ---
 
@@ -178,7 +180,8 @@ data/                          ← WRITE_DATA_DIR
   (starting with `.`), symlinks and anything that isn't `.md` (lowercase) are ignored and never touched.
   The one exception: renaming or deleting a folder moves the whole directory, including those files.
 - **Nothing else is stored.** No database, no index, no sidecar files, and nothing is added to your notes.
-  Line endings (LF or CRLF) and a UTF-8 BOM are kept as they are in each file. write's own settings live in
+  A UTF-8 BOM and the line-ending style (LF or CRLF, based on the first line break) are preserved when
+  saving. Mixed line endings normalize to that style. write's own settings live in
   a separate folder (`WRITE_CONFIG_DIR`), never in the data folder.
 - **Names are portable.** New note and folder names can't contain `/ \ : * ? " < > |`, can't start or end
   with a dot, and can't be Windows device names like `CON`. Two names that differ only in case count as
@@ -222,8 +225,9 @@ or come back to the tab:
   **Keep mine**, **Use disk version**, or **Save mine as a copy**. Keep mine copies the version that was
   on disk to `.trash` before saving yours, so neither side's edits are lost.
 
-Autosave also keeps a copy of unsaved edits in the browser, so a crash, a closed tab or a lost
-connection doesn't lose your typing. The next time you open the note you get your changes back.
+Autosave also keeps a copy of unsaved edits in browser storage, so they can be recovered after a crash,
+a closed tab or a lost connection. Reopen the note in the same browser to recover that draft. This is
+best effort: blocked, full or cleared browser storage can prevent recovery.
 
 ### How your Markdown is kept
 
@@ -232,7 +236,7 @@ saves, the editor writes standard Markdown, which can differ slightly from what 
 
 | What's in your file                                                                                                                                                                                                                                                                                                                                                           | What happens                                                                                                                                                        |
 | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `#` headings, **bold**/_italic_/~~strike~~/`code`, links (with titles), blockquotes, `---`, nested and numbered lists (including the start number), nested task lists, fenced code with a language, images, and text like `&`, `<`, `snake_case`, `[[wiki links]]`, `[^1]`                                                                                                    | **Kept exactly.**                                                                                                                                                   |
+| `#` headings, **bold**/_italic_/~~strike~~/`code`, links (with titles), blockquotes, `---`, nested and numbered lists (including the start number), nested task lists, fenced code with a language, images, and text like `&`, `<`, `snake_case`, `[[wiki links]]`, `[^1]`                                                                                                    | **Supported.** Formatting and text are kept; Markdown spelling can normalize as described below.                                                                    |
 | Tables (column padding), `_em_` → `*em*`, `* item` → `- item`, underlined (setext) headings → `#` headings, closing `##` on headings dropped, `~~~` and indented code → ` ``` ` fences, a `\` line break → two trailing spaces, a lone `~` → `\~`, bare URLs and `<autolinks>` → `[url](url)`, reference links → inline links, loose lists → tight lists, runs of blank lines | **Normalized** to the equivalent standard form. This only happens the first time you edit that note.                                                                |
 | YAML (`---`) or TOML (`+++`) front matter at the top of the file                                                                                                                                                                                                                                                                                                              | **Kept byte for byte.** It's shown read-only as "Properties" above the note, and can be edited in Markdown mode.                                                    |
 | Raw HTML, HTML comments, footnote definitions, math (`$…$`, `$$…$$`), link definitions nothing links to (bookmark lists, `[//]: #` comments), backslash escapes other apps rely on (`\#tag`, `\[\[x]]`, `\$5`)                                                                                                                                                                | The visual editor can't keep these, so the note **opens as Markdown source** instead, with a banner. Choose "Edit visually anyway" only if you're fine losing them. |
@@ -321,9 +325,9 @@ backups) like the keys themselves: don't put it in a synced or shared folder, or
   Behind a reverse proxy, publish the port on localhost only: `"127.0.0.1:3000:3000"` in
   `docker-compose.yml`, or `npm start -- -H 127.0.0.1`.
 
-- **Cross-site requests are blocked** even without a password. Every change has to be a same-origin JSON
-  request, which the browser checks with `Sec-Fetch-Site`, so a malicious web page can't write to a write
-  server on your LAN.
+- **Cross-site requests are blocked** even without a password. Browser changes must be same-origin,
+  and POST, PUT and PATCH requests must use JSON. The server checks the browser's `Sec-Fetch-Site`
+  header, so a malicious web page can't write to a write server on your LAN.
 - **Keep sign-in on before you turn on the AI assistant** on any server others can reach. With
   `WRITE_AUTH=off`, anyone who can reach write can use your saved connections (and your API credits), and
   can use **Test connection** to make the server send requests to addresses on your network, even while
@@ -421,8 +425,8 @@ Settings also hold the shortcut, the **Instructions** sent with every request, a
   provider does with it is up to that provider's terms.
 - API keys are saved on the write server, in plain text, in `settings.json` inside `WRITE_CONFIG_DIR`. The
   browser only ever sees a key's last four characters, or none for a key shorter than 12 characters. A
-  saved key is only sent to the server it was saved for: if you change a connection's URL, enter the key
-  again.
+  saved key is only sent to the origin it was saved for: if you change a connection's scheme, host or
+  port, enter the key again.
 
 ### Connection examples
 
@@ -433,8 +437,8 @@ Settings also hold the shortcut, the **Instructions** sent with every request, a
   local network if write runs on another machine.
 - **OpenAI:** `https://api.openai.com/v1` and an API key.
 - **Anthropic:** `https://api.anthropic.com` and an API key. write talks to Anthropic's Messages API.
-- **OpenRouter:** `https://openrouter.ai/api/v1` and an API key. Models are named like
-  `anthropic/claude-opus-5`.
+- **OpenRouter:** `https://openrouter.ai/api/v1` and an API key. Use **Test connection** to choose a model
+  from the models available to your account.
 - **Any other OpenAI-compatible server** (llama.cpp's server, vLLM, LocalAI…): choose **Other** and enter
   its base URL, which usually ends in `/v1`.
 
@@ -494,8 +498,9 @@ With `docker run`, create the folder the same way and add `-v "$PWD/config:/conf
 Without it, the settings (API keys included) go to an anonymous volume and are lost the next time the
 container is recreated.
 
-Your notes and settings are never part of the build, so upgrading can't touch them. Still, it's worth
-taking a backup first.
+The default `./data` and `./config` folders are excluded from the build. Keep custom data and config
+folders outside the checkout so they cannot enter a Docker build context. Back up both folders before
+upgrading.
 
 ---
 
@@ -521,8 +526,8 @@ with other apps at the same time is fine.
 
 **Can I use my iCloud Drive or Dropbox folder?** Yes, on bare metal: set `WRITE_DATA_DIR` to a folder
 inside it, or symlink it. write only writes the files you edit, and it never rewrites a file with identical
-content, so sync tools stay quiet. The only other write is the health check's short-lived hidden
-`.write-health-*.tmp` file, at most every 10 minutes.
+content, so sync tools stay quiet. The health check also writes a short-lived hidden `.write-health-*.tmp`
+file, normally at most every 10 minutes per server process; failed checks retry without that delay.
 
 **The AI assistant can't reach my model server.** The write server makes the request, not your browser,
 so `localhost` means the machine write runs on (in Docker, the container). Use the model server's LAN

@@ -48,5 +48,7 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
-# local agent/editor tooling
+# local agent/editor tooling (can contain private session data)
 /.claude/
+/.codex/
+/.agents/

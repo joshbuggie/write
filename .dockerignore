@@ -9,3 +9,8 @@ coverage
 *.log
 *.tsbuildinfo
 .DS_Store
+**/*.pem
+# Local agent/editor files can contain private session data.
+.claude
+.codex
+.agents
