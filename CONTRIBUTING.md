@@ -74,6 +74,7 @@ such check. The Safari Web Inspector (Safari → Develop → your iPhone) shows 
 | `npm run typecheck`               | `next typegen` (route types such as `PageProps<…>`) followed by `tsc --noEmit`          |
 | `npm run format`                  | Prettier, which also sorts Tailwind classes                                             |
 | `npm run check`                   | lint, typecheck, test and format check. **Run this before every PR.** CI runs the same. |
+| `npm run test:ai-live`            | Opt-in live AI suite with real API keys (see Testing). Never runs in CI.                |
 | `npm run build` / `npm start`     | Production build and server                                                             |
 
 To build the Docker image locally, run `docker build -t write .`. It sets `BUILD_STANDALONE=1` itself.
@@ -340,6 +341,14 @@ phone toolbars both render from it.
   afterwards. They never touch `./data` or `./config`.
 - **AI tests** mock `fetch` with canned model responses and streams, so they never call a real model and
   need no key.
+- **Live AI suite (opt-in, never in CI).** `src/ai-live/*.live.ts` calls the real Anthropic, OpenAI and
+  OpenRouter APIs through the adapters, the `/api` routes and a headless editor, to catch what canned
+  answers can't: changed error wording, a public models list, a model echoing the `<note>` tag. Put keys
+  in `.env.ai-live` (gitignored; any provider left blank is skipped) and run `npm run test:ai-live`. It
+  uses cheap models by default (override with `AI_LIVE_<PROVIDER>_MODEL`), and a full run costs a few
+  cents. `npm test` never picks up `*.live.ts`, and its config (`vitest.ai-live.config.mts`) refuses to
+  run when `CI` is set. The verbose output shows every reply, which is also a quick way to judge a
+  change to the default Instructions.
 - **Markdown tests** are driven by fixtures. When you change escaping or an extension, read the fixture
   diffs carefully: they show exactly what would change in people's files.
 - **Round-trip fuzz** (`src/lib/markdown/roundtrip-fuzz.test.ts`) builds seeded documents with real

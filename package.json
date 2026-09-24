@@ -17,7 +17,8 @@
     "test:watch": "vitest",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "check": "npm run lint && npm run typecheck && npm test && npm run format:check"
+    "check": "npm run lint && npm run typecheck && npm test && npm run format:check",
+    "test:ai-live": "vitest run --config vitest.ai-live.config.mts"
   },
   "dependencies": {
     "@tiptap/core": "3.31.3",
