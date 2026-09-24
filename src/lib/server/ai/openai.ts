@@ -112,12 +112,19 @@ export async function openAiReply(
   return readReply(up, decoder);
 }
 
-/** `GET {base}/models`; see listModels in ./index.ts. */
+/**
+ * Where the models list is. OpenRouter's `/models` is public, so it answers a wrong key with the full list
+ * and "Test connection" would pass; `/models/user` is the same list for the key, and refuses a bad one.
+ */
+const modelsPath = (target: Omit<ConnectionTarget, "model">) =>
+  target.provider === "openrouter" ? "/models/user" : "/models";
+
+/** `GET {base}/models` (OpenRouter: `/models/user`); see listModels in ./index.ts. */
 export async function openAiModels(
   target: Omit<ConnectionTarget, "model">,
   signal: AbortSignal,
 ): Promise<string[]> {
-  const url = endpoint(target.baseUrl, "/models");
+  const url = endpoint(target.baseUrl, modelsPath(target));
   const up = await callUpstream({
     url,
     method: "GET",

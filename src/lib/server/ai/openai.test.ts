@@ -163,6 +163,18 @@ describe("listModels (OpenAI-compatible)", () => {
     expect(calls[0].headers.get("authorization")).toBe("Bearer sk-test-secret-1234");
   });
 
+  it("asks OpenRouter for the key's own list, since its public list accepts any key", async () => {
+    const calls = mockFetch(() => jsonAnswer({ data: [{ id: "openai/gpt-5" }] }));
+    const openRouter = {
+      ...OPENAI,
+      provider: "openrouter" as const,
+      baseUrl: "https://openrouter.ai/api/v1",
+    };
+    expect(await listModels(openRouter, never())).toEqual(["openai/gpt-5"]);
+    expect(calls[0].url).toBe("https://openrouter.ai/api/v1/models/user");
+    expect(calls[0].headers.get("authorization")).toBe("Bearer sk-test-secret-1234");
+  });
+
   it("reads models[].name and models[].id, and sends no key when none is set", async () => {
     const calls = mockFetch(() =>
       jsonAnswer({
