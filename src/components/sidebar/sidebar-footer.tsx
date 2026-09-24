@@ -19,7 +19,7 @@ const ROW = {
 } as const;
 
 /**
- * Library-level actions at the end of the list: New folder, Settings, and Sign out when a password is set.
+ * Library-level actions at the end of the list: New folder, Settings, and Sign out while sign-in is on.
  * The desktop panel also puts "Download all" here; phones have it in the bottom bar instead.
  */
 export function SidebarActions({ variant, authEnabled }: { variant: Variant; authEnabled: boolean }) {

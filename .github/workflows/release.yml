@@ -1,9 +1,11 @@
 name: Release
 
 # Push a tag like v1.2.3 to publish ghcr.io/<owner>/<repo>:1.2.3 and :latest for amd64 and arm64.
+# CI also calls this after it passes on main, publishing :main and :sha-<short sha>.
 on:
   push:
     tags: ["v*"]
+  workflow_call:
 
 permissions:
   contents: read
@@ -27,12 +29,15 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       # Tags: the version without the "v" (1.2.3), plus "latest" for non-prerelease versions.
+      # Pushes to main get "main" and "sha-<short sha>" instead, and never move "latest".
       - id: meta
         uses: docker/metadata-action@v5
         with:
           images: ghcr.io/${{ github.repository }}
           tags: |
             type=semver,pattern={{version}}
+            type=ref,event=branch,enable={{is_default_branch}}
+            type=sha,enable={{is_default_branch}}
 
       - uses: docker/build-push-action@v6
         with:

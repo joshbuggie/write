@@ -10,10 +10,7 @@ import type {
   UpdateNoteResponse,
 } from "@/lib/api-contract";
 import { MAX_NOTE_BYTES } from "@/lib/constants";
-import { resetPasswordGuard } from "@/lib/server/auth";
 import { withTempDataDir } from "@/lib/server/storage/test-utils";
-import * as login from "./auth/login/route";
-import * as logout from "./auth/logout/route";
 import * as download from "./download/route";
 import * as folders from "./folders/route";
 import * as health from "./health/route";
@@ -48,12 +45,9 @@ async function createNote(body: { folder: string; name?: string; content?: strin
 }
 const q = (params: Record<string, string>) => "?" + new URLSearchParams(params).toString();
 
-// Auth off unless a test turns it on, even if the developer shell exports WRITE_PASSWORD.
-beforeEach(() => vi.stubEnv("WRITE_PASSWORD", ""));
-afterEach(() => {
-  vi.unstubAllEnvs();
-  resetPasswordGuard();
-});
+// Sign-in off unless a test turns it on, so most tests need no account.
+beforeEach(() => vi.stubEnv("WRITE_AUTH", "off"));
+afterEach(() => vi.unstubAllEnvs());
 
 describe("GET /api/health", () => {
   it("is 200 when the data dir is writable", () =>
@@ -367,91 +361,5 @@ describe("CSRF on real routes", () => {
       );
       expect(crossSite.status).toBe(403);
       expect(await errorCode(crossSite)).toBe("forbidden");
-    }));
-});
-
-describe("auth", () => {
-  it("login is 400 when auth is disabled", () =>
-    withTempDataDir(async () => {
-      vi.stubEnv("WRITE_PASSWORD", "");
-      const res = await call(login.POST, "POST", "/api/auth/login", { body: { password: "x" } });
-      expect(res.status).toBe(400);
-    }));
-
-  it("401 without credentials; 200 with Bearer; login cookie works; logout clears it", () =>
-    withTempDataDir(async () => {
-      vi.stubEnv("WRITE_PASSWORD", "pw");
-      const denied = await call(tree.GET, "GET", "/api/tree");
-      expect(denied.status).toBe(401);
-      expect(await errorCode(denied)).toBe("unauthorized");
-      expect((await call(health.GET, "GET", "/api/health")).status).toBe(200);
-      expect(
-        (await call(tree.GET, "GET", "/api/tree", { headers: { authorization: "Bearer pw" } })).status,
-      ).toBe(200);
-
-      const signedIn = await call(login.POST, "POST", "/api/auth/login", { body: { password: "pw" } });
-      expect(signedIn.status).toBe(204);
-      const setCookie = signedIn.headers.get("set-cookie") ?? "";
-      expect(setCookie).toMatch(
-        /^write_session=v1\.\d+\.[\w-]+; HttpOnly; SameSite=Lax; Path=\/; Max-Age=2592000$/,
-      );
-      const cookie = setCookie.split(";")[0];
-      expect((await call(tree.GET, "GET", "/api/tree", { headers: { cookie } })).status).toBe(200);
-
-      const out = await call(logout.POST, "POST", "/api/auth/logout", { body: {}, headers: { cookie } });
-      expect(out.status).toBe(204);
-      expect(out.headers.get("set-cookie")).toContain("Max-Age=0");
-      expect((await call(logout.POST, "POST", "/api/auth/logout", { body: {} })).status).toBe(401);
-    }));
-
-  it("sets Secure behind an https reverse proxy", () =>
-    withTempDataDir(async () => {
-      vi.stubEnv("WRITE_PASSWORD", "pw");
-      const res = await call(login.POST, "POST", "/api/auth/login", {
-        body: { password: "pw" },
-        headers: { "x-forwarded-proto": "https" },
-      });
-      expect(res.headers.get("set-cookie")).toMatch(/; Secure$/);
-    }));
-
-  it("wrong passwords get 401, then an immediate 429 with Retry-After once the budget is spent", () =>
-    withTempDataDir(async () => {
-      vi.stubEnv("WRITE_PASSWORD", "pw");
-      vi.spyOn(console, "warn").mockImplementation(() => {});
-      const attempt = (password: string) =>
-        call(login.POST, "POST", "/api/auth/login", { body: { password } });
-      for (let i = 0; i < 10; i++) {
-        const res = await attempt("nope");
-        expect(res.status).toBe(401);
-        expect(((await res.json()) as ApiErrorBody).error.message).toBe("Wrong password.");
-      }
-      const locked = await attempt("pw");
-      expect(locked.status).toBe(429);
-      // The login form shows this message as is, so it must carry the same wait as Retry-After.
-      const retryAfterS = Number(locked.headers.get("retry-after"));
-      expect(retryAfterS).toBeGreaterThan(0);
-      expect(await locked.json()).toEqual({
-        error: {
-          code: "rate_limited",
-          message: `Too many sign-in attempts. Try again in ${Math.ceil(retryAfterS / 60)} minutes.`,
-        },
-      });
-    }));
-
-  it("parallel wrong passwords (login and Bearer) share one budget", () =>
-    withTempDataDir(async () => {
-      vi.stubEnv("WRITE_PASSWORD", "pw");
-      vi.spyOn(console, "warn").mockImplementation(() => {});
-      const statuses = await Promise.all(
-        Array.from({ length: 50 }, (_, i) =>
-          i % 2
-            ? call(tree.GET, "GET", "/api/tree", { headers: { authorization: `Bearer guess${i}` } })
-            : call(login.POST, "POST", "/api/auth/login", { body: { password: `guess${i}` } }),
-        ).map(async (res) => (await res).status),
-      );
-      expect(statuses.filter((s) => s === 401)).toHaveLength(10);
-      expect(statuses.filter((s) => s === 429)).toHaveLength(40);
-      const bearer = await call(tree.GET, "GET", "/api/tree", { headers: { authorization: "Bearer pw" } });
-      expect(bearer.status).toBe(429);
     }));
 });

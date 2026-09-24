@@ -41,9 +41,12 @@ const AiContext = createContext<AiValue | null>(null);
  */
 export function AiProvider({
   initialSettings,
+  username,
   children,
 }: {
   initialSettings: AiSettings;
+  /** The signed-in account, for the Account section of Settings; null while sign-in is off. */
+  username: string | null;
   children: ReactNode;
 }) {
   const [settings, setSettings] = useState(initialSettings);
@@ -119,6 +122,7 @@ export function AiProvider({
       {settingsOpen && (
         <SettingsDialog
           initial={settings}
+          username={username}
           onSave={async (ai: SaveSettingsRequest["ai"]) => setSettings((await api.saveSettings({ ai })).ai)}
           onClose={() => setSettingsOpen(false)}
         />

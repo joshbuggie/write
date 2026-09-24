@@ -11,6 +11,7 @@ import type {
 } from "@/lib/api-contract";
 import { chunkLine, eventLine, hangingBody, jsonAnswer, mockFetch, sse } from "@/lib/server/ai/test-utils";
 import { resetPasswordGuard } from "@/lib/server/auth";
+import { setUpTestAccount } from "@/lib/server/auth-test-utils";
 import { withTempDataDir } from "@/lib/server/storage/test-utils";
 import * as complete from "./ai/complete/route";
 import * as models from "./ai/models/route";
@@ -111,8 +112,8 @@ const refused = () =>
     new TypeError("fetch failed", { cause: Object.assign(new Error("connect"), { code: "ECONNREFUSED" }) }),
   );
 
-// Auth off unless a test turns it on, even if the developer shell exports WRITE_PASSWORD.
-beforeEach(() => vi.stubEnv("WRITE_PASSWORD", ""));
+// Sign-in off unless a test turns it on, so most tests need no account.
+beforeEach(() => vi.stubEnv("WRITE_AUTH", "off"));
 afterEach(() => {
   vi.unstubAllEnvs();
   vi.unstubAllGlobals();
@@ -394,9 +395,10 @@ describe("POST /api/ai/complete", () => {
 });
 
 describe("auth and CSRF", () => {
-  it("401 without a session when a password is set", () =>
+  it("401 without a session when sign-in is on", () =>
     withTempDataDir(async () => {
-      vi.stubEnv("WRITE_PASSWORD", "pw");
+      vi.stubEnv("WRITE_AUTH", "");
+      await setUpTestAccount("sam", "pw");
       const calls = mockFetch(() => jsonAnswer({ data: [] }));
       const responses = [
         await call(settings.GET, "GET", "/api/settings"),

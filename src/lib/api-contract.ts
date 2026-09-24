@@ -13,6 +13,8 @@ export type ErrorCode =
   | "too_large"
   | "unsupported_media_type"
   | "rate_limited"
+  | "already_set_up"
+  | "wrong_password"
   | "storage_unavailable"
   | "ai_disabled"
   | "ai_unreachable"
@@ -31,6 +33,10 @@ export const ERROR_STATUS: Record<ErrorCode, number> = {
   too_large: 413,
   unsupported_media_type: 415,
   rate_limited: 429,
+  /** First-run setup was already done (by another tab or person): sign in instead. */
+  already_set_up: 409,
+  /** Changing the password: the current password given doesn't match. */
+  wrong_password: 403,
   /** The AI assistant is switched off in Settings, so nothing may be sent. */
   ai_disabled: 409,
   internal: 500,
@@ -56,6 +62,8 @@ export const API = {
   download: "/api/download",
   login: "/api/auth/login",
   logout: "/api/auth/logout",
+  setup: "/api/auth/setup",
+  password: "/api/auth/password",
   settings: "/api/settings",
   aiModels: "/api/ai/models",
   aiComplete: "/api/ai/complete",
@@ -117,6 +125,22 @@ export interface DiscardNoteResponse {
 }
 
 export interface LoginRequest {
+  username: string;
+  password: string;
+}
+
+/**
+ * `POST /api/auth/password`, from Settings. Answers 204 with a new session cookie for this browser; every
+ * other device is signed out.
+ */
+export interface ChangePasswordRequest {
+  currentPassword: string;
+  newPassword: string;
+}
+
+/** `POST /api/auth/setup`: the account to create on first run. Answers 204 with a session cookie. */
+export interface SetupRequest {
+  username: string;
   password: string;
 }
 

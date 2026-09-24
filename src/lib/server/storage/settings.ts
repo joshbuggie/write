@@ -1,10 +1,8 @@
-import { mkdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import type { AiSettings } from "@/lib/ai/settings";
 import type { ConnectionInput, SaveSettingsRequest } from "@/lib/api-contract";
 import { getConfigDir } from "./config";
-import { StorageError } from "./errors";
-import { atomicWrite, errorCode } from "./fs-utils";
+import { readConfigText, writeConfigText } from "./config-files";
 import { withWriteLock } from "./mutex";
 import {
   httpUrl,
@@ -25,41 +23,6 @@ export type { StoredAiSettings, StoredConnection };
 
 const settingsFile = async () => path.join(await getConfigDir(), "settings.json");
 
-/** fs errors for the config folder. mapFsError's messages name the data folder, which would mislead here. */
-function configFsError(err: unknown, file: string): unknown {
-  if (err instanceof StorageError) return err;
-  const code = errorCode(err);
-  if (code === "ENOSPC") return new StorageError("storage_unavailable", "Disk is full.");
-  if (code === "EACCES" || code === "EPERM" || code === "EROFS") {
-    return new StorageError(
-      "storage_unavailable",
-      `Cannot use ${file} (${code}). In Docker, make sure the config volume is writable by uid 1000 (e.g. \`sudo chown -R 1000:1000 ./config\`).`,
-    );
-  }
-  return code ? new StorageError("storage_unavailable", `Cannot use ${file} (${code}).`) : err;
-}
-
-/** The file's text, or null when it (or the config folder) doesn't exist yet. Never creates anything. */
-async function readText(file: string): Promise<string | null> {
-  try {
-    return await readFile(file, "utf8");
-  } catch (err) {
-    if (errorCode(err) === "ENOENT" || errorCode(err) === "ENOTDIR") return null;
-    throw configFsError(err, file);
-  }
-}
-
-/** Keys are plain text, so the folder is created owner-only and the file is always written 0600. */
-async function writeText(file: string, text: string) {
-  const mapError = (err: unknown) => configFsError(err, file);
-  try {
-    await mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
-  } catch (err) {
-    throw mapError(err);
-  }
-  await atomicWrite(file, Buffer.from(text, "utf8"), { mode: 0o600, mapError });
-}
-
 /**
  * The key a connection from the Settings form ends up with: a typed key, none when cleared, else the saved
  * one of the same id, but only while it stays on the same origin. A saved key is only ever sent where it
@@ -79,7 +42,7 @@ function keyFor(input: ConnectionInput, saved: StoredConnection | undefined): st
  */
 export async function readAiSettings(): Promise<StoredAiSettings> {
   const file = await settingsFile();
-  return parseSettingsText(await readText(file), file);
+  return parseSettingsText(await readConfigText(file), file);
 }
 
 /** Keys shorter than this (a LAN server's "1234", say) show no characters: four would give most away. */
@@ -107,7 +70,7 @@ export function toAiSettingsView(s: StoredAiSettings): AiSettings {
 export function saveAiSettings(input: SaveSettingsRequest["ai"]): Promise<AiSettings> {
   return withWriteLock(async () => {
     const file = await settingsFile();
-    const text = await readText(file);
+    const text = await readConfigText(file);
     const saved = new Map(parseSettingsText(text, file).connections.map((c) => [c.id, c]));
     const next = withDefaultConnection({
       enabled: input.enabled,
@@ -126,7 +89,7 @@ export function saveAiSettings(input: SaveSettingsRequest["ai"]): Promise<AiSett
       quickActions: input.quickActions.map(({ id, label, prompt, apply }) => ({ id, label, prompt, apply })),
     });
     const bytes = serializeSettings(next);
-    if (bytes !== text) await writeText(file, bytes);
+    if (bytes !== text) await writeConfigText(file, bytes);
     return toAiSettingsView(next);
   });
 }

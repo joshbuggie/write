@@ -35,7 +35,8 @@ npm run dev      # http://localhost:3000
   be outside the data folder.
 - **To try the AI assistant** without an account, run [Ollama](https://ollama.com) on the same machine
   (`ollama pull llama3.1:8b`), then in Settings add an Ollama connection with that model.
-- **To try sign-in**, run `WRITE_PASSWORD=x npm run dev`.
+- **Sign-in is on.** The first page load asks you to create an account, saved in `./config/account.json`.
+  Delete that file to see setup again, or run `WRITE_AUTH=off npm run dev` to skip sign-in.
 - `npm run dev` also keeps the Next.js block in `AGENTS.md` up to date. Commit that change if it
   appears.
 
@@ -113,7 +114,7 @@ src/proxy.ts: optional auth gate in front of everything except health/login/stat
 | `src/lib/api-contract.ts`, `api-client.ts` | The HTTP contract (request/response types, error codes) and the typed browser `fetch` wrapper.                                                                   |
 | `src/lib/server/storage/`                  | **The only code that touches the filesystem.** Notes, folders, trash, zip export, atomic writes, the lock.                                                       |
 | `src/lib/server/http.ts`, `validate.ts`    | `handle()` wraps every route with auth, CSRF checks and error mapping; hand-written body type guards.                                                            |
-| `src/lib/server/auth.ts`, `src/proxy.ts`   | Optional password: HMAC session cookie, Bearer token, and the request gate.                                                                                      |
+| `src/lib/server/auth.ts`, `src/proxy.ts`   | Sign-in: the account from first-run setup, HMAC session cookie, Bearer token, lockout, and the request gate.                                                     |
 | `src/lib/server/loaders.ts`                | What Server Components call to read data (`loadTree`, `loadNote`, …).                                                                                            |
 | `src/app/api/*/route.ts`                   | One route file per resource: `tree`, `folders`, `notes`, `download`, `health`, `auth`, `settings`, `ai/models`, `ai/complete`.                                   |
 | `src/lib/markdown/`                        | Framework-free Markdown engine: Tiptap extensions, escaping, front matter, fidelity check, paste.                                                                |
@@ -380,12 +381,17 @@ mode.
       "Download all" zips unzip with `ditto -x -k`; downloading right after typing includes the latest
       edit. Rename the file on disk, then click ⬇: an error toast appears and the app stays put.
 - [ ] **Front matter:** edit a note with YAML front matter, then `diff` it: the front matter is untouched.
-- [ ] **Auth** (if touched): with `WRITE_PASSWORD=x`, pages redirect to `/login`, the API returns 401, and
-      `curl -H "Authorization: Bearer x" localhost:3000/api/tree` works. After 10 wrong passwords (on
-      `/login` or as a Bearer token) the next attempt gets `429` with `Retry-After`, `/login` shows "Too
-      many sign-in attempts. Try again in 15 minutes.", and an already signed-in tab keeps working.
-      Restart the server to lift the lockout. `/login?next=%2F.%2F%2Fexample.com` must land on `/`, not
-      example.com.
+- [ ] **Auth** (if touched): with an empty `WRITE_CONFIG_DIR`, every page redirects to `/setup` and the API
+      returns 401. Setup refuses a short password and mismatched passwords, then signs you in; after that
+      `/setup` goes to `/login` and `POST /api/auth/setup` answers 409. Sign out, then sign in with the
+      username in another case. `curl -H "Authorization: Bearer <password>" localhost:3000/api/tree` works.
+      After 10 wrong passwords (on `/login` or as a Bearer token) the next attempt gets `429` with
+      `Retry-After`, `/login` shows "Too many sign-in attempts. Try again in 15 minutes.", and an already
+      signed-in tab keeps working. Restart the server to lift the lockout. Put invalid JSON in
+      `account.json`: pages show the config-folder error and the API answers 503, never `/setup`. Delete it:
+      `/setup` is back. `/login?next=%2F.%2F%2Fexample.com` must land on `/`, not example.com. In
+      Settings → Account, a wrong current password shows under that field; a right one changes the
+      password, keeps this tab signed in and signs out another browser.
 - [ ] **AI assistant** (if touched): switched off, it leaves no trace: no ✨ in the header or the phone
       toolbar, ⌘J isn't caught (the browser's own shortcut runs), the AI section of Settings shows only its
       switch, and `POST /api/ai/complete` answers `409 ai_disabled`. Switched on with a real model (Ollama

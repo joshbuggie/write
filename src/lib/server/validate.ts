@@ -1,10 +1,12 @@
 import type {
+  ChangePasswordRequest,
   ChatTurn,
   CompleteRequest,
   ConnectionInput,
   CreateFolderRequest,
   CreateNoteRequest,
   LoginRequest,
+  SetupRequest,
   RenameFolderRequest,
   SaveNoteRequest,
   SaveSettingsRequest,
@@ -61,7 +63,17 @@ export function isUpdateNoteRequest(v: unknown): v is UpdateNoteRequest {
 }
 
 export function isLoginRequest(v: unknown): v is LoginRequest {
-  return isObject(v) && isString(v.password);
+  return isObject(v) && isString(v.username) && isString(v.password);
+}
+
+/** Shape only: the password rules (src/lib/account.ts) are checked by the route. */
+export function isChangePasswordRequest(v: unknown): v is ChangePasswordRequest {
+  return isObject(v) && isString(v.currentPassword) && isString(v.newPassword);
+}
+
+/** Shape only: the username and password rules (src/lib/account.ts) are checked by the route. */
+export function isSetupRequest(v: unknown): v is SetupRequest {
+  return isObject(v) && isString(v.username) && isString(v.password);
 }
 
 // ---- AI assistant (see docs/design-decisions.md#d29) ----

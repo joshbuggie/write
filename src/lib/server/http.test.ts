@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ApiErrorBody } from "@/lib/api-contract";
 import { MAX_NOTE_BYTES } from "@/lib/constants";
 import type { Note } from "@/lib/types";
-import { createSessionToken } from "./auth";
+import { sessionCookieFor, setUpTestAccount } from "./auth-test-utils";
 import {
   errorResponse,
   handle,
@@ -14,6 +14,7 @@ import {
   requireParam,
 } from "./http";
 import { StorageError } from "./storage";
+import { withTempDataDir } from "./storage/test-utils";
 
 const URL_BASE = "http://localhost/api/test";
 const isNamed = (v: unknown): v is { name: string } =>
@@ -21,8 +22,8 @@ const isNamed = (v: unknown): v is { name: string } =>
 const ok = handle(async () => json({ ok: true }));
 const errorOf = async (res: Response) => ((await res.json()) as ApiErrorBody).error;
 
-// Auth off unless a test turns it on, even if the developer shell exports WRITE_PASSWORD.
-beforeEach(() => vi.stubEnv("WRITE_PASSWORD", ""));
+// Sign-in off unless a test turns it on, so most tests need no account.
+beforeEach(() => vi.stubEnv("WRITE_AUTH", "off"));
 afterEach(() => vi.unstubAllEnvs());
 
 describe("json / noContent", () => {
@@ -68,22 +69,33 @@ describe("errorResponse", () => {
 });
 
 describe("handle: auth", () => {
-  it("returns 401 without credentials when auth is on, unless public", async () => {
-    vi.stubEnv("WRITE_PASSWORD", "pw");
-    const res = await ok(new Request(URL_BASE), undefined);
-    expect(res.status).toBe(401);
-    expect((await errorOf(res)).code).toBe("unauthorized");
-    const open = handle(async () => json({ ok: true }), { public: true });
-    expect((await open(new Request(URL_BASE), undefined)).status).toBe(200);
-  });
+  it("returns 401 without credentials when auth is on, unless public", () =>
+    withTempDataDir(async () => {
+      vi.stubEnv("WRITE_AUTH", "");
+      await setUpTestAccount();
+      const res = await ok(new Request(URL_BASE), undefined);
+      expect(res.status).toBe(401);
+      expect((await errorOf(res)).code).toBe("unauthorized");
+      const open = handle(async () => json({ ok: true }), { public: true });
+      expect((await open(new Request(URL_BASE), undefined)).status).toBe(200);
+    }));
 
-  it("accepts a session cookie or a Bearer token", async () => {
-    vi.stubEnv("WRITE_PASSWORD", "pw");
-    const cookie = `write_session=${createSessionToken()}`;
-    expect((await ok(new Request(URL_BASE, { headers: { cookie } }), undefined)).status).toBe(200);
-    const bearer = { authorization: "Bearer pw" };
-    expect((await ok(new Request(URL_BASE, { headers: bearer }), undefined)).status).toBe(200);
-  });
+  it("returns 401 before setup, saying the account doesn't exist yet", () =>
+    withTempDataDir(async () => {
+      vi.stubEnv("WRITE_AUTH", "");
+      const res = await ok(new Request(URL_BASE), undefined);
+      expect(res.status).toBe(401);
+      expect((await errorOf(res)).message).toMatch(/create the account/);
+    }));
+
+  it("accepts a session cookie or a Bearer token", () =>
+    withTempDataDir(async () => {
+      vi.stubEnv("WRITE_AUTH", "");
+      const cookie = sessionCookieFor(await setUpTestAccount("sam", "pw"));
+      expect((await ok(new Request(URL_BASE, { headers: { cookie } }), undefined)).status).toBe(200);
+      const bearer = { authorization: "Bearer pw" };
+      expect((await ok(new Request(URL_BASE, { headers: bearer }), undefined)).status).toBe(200);
+    }));
 });
 
 describe("handle: CSRF", () => {

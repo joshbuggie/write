@@ -6,7 +6,7 @@ import { ShellProvider } from "@/components/shell/shell-context";
 import { StorageUnavailable } from "@/components/shell/storage-unavailable";
 import { ToastProvider } from "@/components/ui/toast";
 import { SIDEBAR_COOKIE } from "@/lib/constants";
-import { isAuthEnabled, loadAiSettings, loadTree } from "@/lib/server/loaders";
+import { isAuthEnabled, loadAiSettings, loadTree, loadUsername } from "@/lib/server/loaders";
 import { StorageError } from "@/lib/server/storage";
 import type { Tree } from "@/lib/types";
 
@@ -27,11 +27,12 @@ export default async function NotesLayout({ children }: { children: React.ReactN
   }
   const sidebarCollapsed = (await cookies()).get(SIDEBAR_COOKIE)?.value === "collapsed";
   const aiSettings = await loadAiSettings();
+  const username = await loadUsername();
 
   return (
     <ShellProvider initialSidebarCollapsed={sidebarCollapsed}>
       <ToastProvider>
-        <AiProvider initialSettings={aiSettings}>
+        <AiProvider initialSettings={aiSettings} username={username}>
           <AppShell tree={tree} authEnabled={isAuthEnabled()}>
             {children}
           </AppShell>

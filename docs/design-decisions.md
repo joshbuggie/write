@@ -17,7 +17,8 @@ files.
 - Storage: [D5](#d5) a note is a file · [D6](#d6) names · [D7](#d7) atomic writes and the lock ·
   [D8](#d8) versions and conditional saves · [D9](#d9) never write on open · [D10](#d10) trash ·
   [D11](#d11) empty Untitled notes
-- HTTP and auth: [D12](#d12) password · [D13](#d13) proxy · [D14](#d14) CSRF
+- HTTP and auth: [D12](#d12) password (superseded) · [D13](#d13) proxy · [D14](#d14) CSRF ·
+  [D30](#d30) the account and first-run setup
 - Editor: [D15](#d15) escaping · [D16](#d16) fidelity and source mode · [D17](#d17) front matter ·
   [D18](#d18) opening a note · [D19](#d19) autosave · [D20](#d20) conflicts · [D21](#d21) rename ·
   [D22](#d22) paste and links
@@ -63,7 +64,7 @@ files.
 ## D3. One wrapper for every route, and errors written for people
 
 - Every route exports its handlers as `handle(async (req) => …)` from `src/lib/server/http.ts`. `handle()`
-  checks auth ([D12](#d12)), then CSRF ([D14](#d14)), runs the handler, and maps any thrown error to a
+  checks auth ([D30](#d30)), then CSRF ([D14](#d14)), runs the handler, and maps any thrown error to a
   response. Handlers contain only the happy path.
 - Errors have one JSON shape, `{ error: { code, message } }` (`ApiErrorBody` in `src/lib/api-contract.ts`).
   `StorageError` and `HttpError` messages are **written to be shown to the user as-is**, so the UI never
@@ -219,6 +220,10 @@ files.
 
 ## D12. Optional single password: a signed cookie or a Bearer token, with a lockout
 
+**Superseded by [D30](#d30).** Sign-in is now on by default, with an account made at first-run setup
+instead of `WRITE_PASSWORD`. The cookie, Bearer and lockout design below carried over; D30 lists what
+changed.
+
 - Auth is off unless `WRITE_PASSWORD` is set. With it set, `/login` exchanges the password for a
   30-day `write_session` cookie (`HttpOnly`, `SameSite=Lax`, and `Secure` when the request came over
   HTTPS, including through a proxy that sends `X-Forwarded-Proto: https`). Scripts send
@@ -254,9 +259,13 @@ files.
 ## D13. The proxy is the first gate, not the only one
 
 - `src/proxy.ts` (Next 16's replacement for `middleware.ts`) gates every page and `/api/**` route
-  except static assets, `/login`, `/api/auth/login` and `/api/health`. An unauthenticated page request is
-  redirected to `/login?next=…`. An API request gets a JSON `401` (or `429` during a lockout,
-  [D12](#d12)), so the client can show "Signed out" instead of following a redirect to HTML.
+  except static assets, `/login`, `/setup`, `/api/auth/login`, `/api/auth/setup` and `/api/health`. An
+  unauthenticated page request is redirected to `/login?next=…`, or to `/setup` while there is no account
+  yet. An API request gets a JSON `401` (or `429` during a lockout, [D30](#d30)), so the client can show
+  "Signed out" instead of following a redirect to HTML.
+- **It fails closed.** When the account file can't be read (permissions, or a file that isn't valid),
+  pages are redirected to `/login`, which explains the problem, and API requests get `503
+storage_unavailable`. Nothing gets through, and nothing reopens setup.
 - `next` only ever redirects within the app: `safeNextPath` (`src/lib/routes.ts`) rejects control
   characters, whitespace and backslashes, then parses the value, requires the same origin and returns the
   re-serialized path. That path is checked again, because parsing resolves dot segments: `/.//evil.com`
@@ -627,7 +636,7 @@ In order, in `src/components/note/` and `src/components/editor/note-editor.tsx`:
 
 - There are three environment settings: `WRITE_DATA_DIR` (default `./data` relative to the working
   directory, or `/data` in Docker), `WRITE_CONFIG_DIR` (default `./config`, or `/config` in Docker) and
-  `WRITE_PASSWORD`. All are read at runtime, so they can live in `.env.local` for `npm start` /
+  `WRITE_AUTH` (`off` turns sign-in off, [D30](#d30)). All are read at runtime, so they can live in `.env.local` for `npm start` /
   `npm run dev`. How the server runs stays in the environment.
 - **One settings file.** What people change in the app, today only the AI assistant's settings
   ([D29](#d29)), is saved by the Settings dialog (`PUT /api/settings`) in `WRITE_CONFIG_DIR/settings.json`
@@ -728,12 +737,78 @@ In order, in `src/components/note/` and `src/components/editor/note-editor.tsx`:
   is stopped by the reply cap (`MAX_REPLY_CHARS`, one million characters, stop "length") instead
   (`src/lib/server/ai/idle.ts`). Stop (or Esc) aborts the fetch, the server sees the disconnect and aborts its upstream request, so
   the model stops generating, and billing. Error messages name the host, never the key.
-- **Security.** Without `WRITE_PASSWORD`, anyone who can reach write can run requests on the saved
-  connections (spending the owner's API credits) and use "Test connection" to make the server request any
-  http(s) URL, including addresses on the LAN that the outside can't reach. That is the same trust model as
-  the notes themselves, but the cost reaches beyond write, so the README says to set a password before
-  turning the assistant on anywhere shared. Cross-site pages can't trigger either request: both are JSON
-  POSTs behind the CSRF check ([D14](#d14)). Server URLs must be http(s) without credentials, and
-  redirects aren't followed, so a key never follows a redirect to another host.
+- **Security.** With sign-in off (`WRITE_AUTH=off`), anyone who can reach write can run requests on the
+  saved connections (spending the owner's API credits) and use "Test connection" to make the server
+  request any http(s) URL, including addresses on the LAN that the outside can't reach. That is the same
+  trust model as the notes themselves, but the cost reaches beyond write, so the README says to keep
+  sign-in on, or put auth in front of write, before turning the assistant on anywhere shared. Cross-site
+  pages can't trigger either request: both are JSON POSTs behind the CSRF check ([D14](#d14)). Server URLs
+  must be http(s) without credentials, and redirects aren't followed, so a key never follows a redirect to
+  another host.
 - Code: `src/lib/ai/`, `src/lib/server/ai/`, `src/lib/server/storage/settings.ts`, `src/app/api/settings/`,
   `src/app/api/ai/`, `src/components/ai/` and `src/components/settings/`.
+
+<a id="d30"></a>
+
+## D30. Sign-in is on by default: one account, made at first-run setup
+
+- **Why.** write holds private notes and, with the AI assistant, API keys and a server that fetches URLs
+  ([D29](#d29)). An app that is open by default is one forgotten environment variable away from all of
+  that being public, so sign-in is on unless `WRITE_AUTH=off` says otherwise. That switch is for servers
+  with auth in front already (a VPN, or a reverse proxy that signs people in). Any other value, including
+  a typo, leaves sign-in on.
+- **First-run setup.** Until an account exists, every page redirects to `/setup`, and the API answers
+  `401` saying so. `POST /api/auth/setup` takes `{ username, password }`, creates the account and signs
+  that browser in. The first visitor to finish setup owns the server, as with Home Assistant or Jellyfin.
+  A setup code printed to the server log was considered and rejected for now as one step too many. The
+  cost: a server that is reachable by others before its owner opens it can be claimed by someone else.
+  The setup page and the README say to finish setup right after the first start. Setup is a JSON POST
+  behind the CSRF check ([D14](#d14)), so a web page can't claim a fresh server on your LAN from a
+  browser.
+- **Once it exists, the account can't be replaced from the web.** Setup answers `409 already_set_up`, and
+  the file is created under the write lock with a no-clobber link ([D7](#d7)), so two people finishing
+  setup at once can't both win. The lock matters where hard links don't work (some network shares and
+  Docker volume drivers): there the no-clobber write falls back to check-then-rename. `/setup` then
+  forwards to `/login`.
+- **One account, in the config folder.** `WRITE_CONFIG_DIR/account.json` (0600, [D28](#d28)) holds
+  `{ version, username, passwordHash, sessionSecret }`, away from the notes, which may be synced. It is
+  read on every check, not cached, so deleting it takes effect at once: that is how a forgotten password
+  is reset (then setup runs again). **A file that exists but can't be read or parsed never counts as "no
+  account"**: that would let the next visitor create a new one. It keeps everyone out with
+  `storage_unavailable` instead ([D13](#d13)).
+- **Usernames** are trimmed, NFC-normalized, at most 64 characters, and compared without regard to case,
+  because phones capitalize the first letter of a field and a one-account server has no use for "Sam"
+  and "sam" being different. **Passwords** are 8 to 1,024 characters, spaces welcome, never trimmed. The
+  rules live in `src/lib/account.ts`, shared by the form and the server.
+- **Hashing** uses Node's built-in scrypt (N=2^15, r=8, p=1: 32 MiB, roughly 50–100 ms), so no dependency
+  ([D4](#d4)). The parameters are stored with each hash, so the cost can rise later without breaking old
+  accounts, and parameters outside sane bounds are refused so a hand-edited file can't make every
+  sign-in allocate gigabytes. A wrong username still hashes the password, so the answer takes as long
+  either way and never says which was wrong ("Wrong username or password.").
+- **Sessions** are as in [D12](#d12): a stateless, HMAC-signed expiry in a 30-day `write_session` cookie
+  (`HttpOnly`, `SameSite=Lax`, `Secure` over HTTPS). The signing key comes from the account's random
+  `sessionSecret` instead of the password, and the token format is `v2`. A new account gets a new secret,
+  so deleting the file and setting up again signs out every device.
+- **Changing the password** is in Settings, under Account (`POST /api/auth/password`,
+  `{ currentPassword, newPassword }`). It needs a session and the current password again, so a device
+  left signed in isn't enough to lock the owner out, and that check counts against the lockout below. The
+  new password gets a new session secret, so every other device is signed out, and the answer carries a
+  fresh cookie so this browser stays in. The file is only rewritten if it still holds the hash the current
+  password was checked against (`changePassword` in `src/lib/server/storage/account.ts`), so a change
+  made on another device in the meantime is never overwritten; the second change gets `403
+wrong_password`. A wrong current password is `403 wrong_password`, not `401`, which the app treats as
+  "signed out". The Account section sits outside the settings form, with its own button: a password is
+  saved at once, never held in the Settings draft. The username can't be changed yet.
+- **Scripts** send `Authorization: Bearer <password>`, the account's password. It costs one hash per
+  request, which is fine for a nightly backup.
+- **Brute-force lockout** as in [D12](#d12): 10 wrong passwords in 15 minutes, at the sign-in page or in
+  a Bearer header, refuse every password check for 15 minutes with `429` and `Retry-After`. Hashing is
+  async, so the check can't be one synchronous step any more. Instead, each check reserves a unit of the
+  budget before it starts hashing, and the check and the reservation happen in one synchronous step
+  (`attemptPassword` in `src/lib/server/password-guard.ts`). A burst of concurrent guesses gets at most
+  the budget that is left, never more. A success hands its unit back but doesn't clear earlier failures.
+  A request refused because the rest of the budget is reserved by checks still hashing gets a `429` with
+  `Retry-After` of at least one second.
+- Code: `src/lib/server/auth.ts`, `password-guard.ts`, `password-hash.ts`,
+  `src/lib/server/storage/account.ts`, `src/lib/account.ts`, `src/app/setup/`, `src/app/login/` and
+  `src/app/api/auth/`.
