@@ -8,6 +8,7 @@ import type { AiScope, ApplyMode } from "@/lib/ai/settings";
 import { useAi } from "./ai-provider";
 import type { Target } from "./ai-target";
 import { PromptWindow } from "./prompt-window";
+import { trackSourceRange, type RangeTracker } from "./source-range";
 import { captureSourceTarget, insertSourceBelow, replaceSource, replaceSourceNote } from "./source-target";
 import { useApplyFeedback } from "./use-apply-feedback";
 
@@ -31,8 +32,18 @@ export function SourceAssist({ textarea }: { textarea: RefObject<HTMLTextAreaEle
   const nextId = useRef(1);
   // The selection when the window opened, so closing it puts the caret back where it was.
   const selection = useRef<[number, number]>([0, 0]);
+  // Follows the target through edits made while the window is open, so a reply lands where it belongs.
+  const tracker = useRef<RangeTracker | null>(null);
+
+  function untrack() {
+    tracker.current?.stop();
+    tracker.current = null;
+  }
+
+  useEffect(() => () => tracker.current?.stop(), []);
 
   function close(refocus: boolean) {
+    untrack();
     setSession(null);
     const el = textarea.current;
     if (!refocus || !el) return;
@@ -52,7 +63,10 @@ export function SourceAssist({ textarea }: { textarea: RefObject<HTMLTextAreaEle
     selection.current = [el.selectionStart, el.selectionEnd];
     const id = nextId.current++;
     const note = splitFrontmatter(el.value).body;
-    setSession({ id, target: captureSourceTarget(el), scope: settings.defaultScope, note });
+    const target = captureSourceTarget(el);
+    untrack();
+    tracker.current = trackSourceRange(el, target);
+    setSession({ id, target, scope: settings.defaultScope, note });
   });
 
   useEffect(() => registerPromptTarget({ open: () => open() }), [registerPromptTarget]);
@@ -68,12 +82,14 @@ export function SourceAssist({ textarea }: { textarea: RefObject<HTMLTextAreaEle
     const el = textarea.current;
     if (!el) return;
     const wholeNote = mode === "replace" && scope === "note";
+    const range = tracker.current?.rangeIn(el) ?? null;
+    untrack();
     const ok =
       mode === "insert"
-        ? insertSourceBelow(el, target, text)
+        ? insertSourceBelow(el, target, range, text)
         : wholeNote
           ? replaceSourceNote(el, text)
-          : replaceSource(el, target, text);
+          : replaceSource(el, target, range, text);
     setSession(null);
     feedback.applied(ok, { mode, wholeNote, atCursor: target.kind === "cursor" }, () => {
       el.focus();

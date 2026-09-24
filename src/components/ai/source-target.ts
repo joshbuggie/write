@@ -1,5 +1,6 @@
 import { splitFrontmatter } from "@/lib/markdown/file-format";
 import type { Target } from "./ai-target";
+import type { SourceRange } from "./source-range";
 
 const base = { wholeBlocks: false, code: false };
 
@@ -52,17 +53,13 @@ function replaceRange(el: HTMLTextAreaElement, from: number, to: number, text: s
 }
 
 /**
- * Where the target is now. Edits made while the window was open may have moved it, so it is looked up by
- * its text; null when it can't be found (then nothing is replaced, rather than the wrong text).
+ * Where the target is now: `range` is where edits made while the window was open moved it (see
+ * trackSourceRange), and it must still hold the target's text. Null otherwise, and then nothing is
+ * replaced: an equal passage elsewhere in the note isn't the one the reply was written for.
  */
-function locate(el: HTMLTextAreaElement, target: Target): { from: number; to: number } | null {
-  const caret = Math.min(target.from, el.value.length);
-  if (target.kind === "cursor") return { from: caret, to: caret };
-  if (el.value.slice(target.from, target.to) === target.text) return { from: target.from, to: target.to };
-  const at = el.value.indexOf(target.text);
-  return at === -1 || el.value.indexOf(target.text, at + 1) !== -1
-    ? null
-    : { from: at, to: at + target.text.length };
+function locate(el: HTMLTextAreaElement, target: Target, range: SourceRange | null): SourceRange | null {
+  if (!range || el.value.slice(range.from, range.to) !== target.text) return null;
+  return range;
 }
 
 const tidy = (reply: string) => reply.replace(/^\n+|\s+$/g, "");
@@ -84,8 +81,13 @@ export function edgesOf(text: string): [string, string] {
  * Replace: the target becomes the reply, keeping a selection's edge whitespace so the next line isn't
  * joined onto it. On a blank line, the reply goes in at the caret as its own block.
  */
-export function replaceSource(el: HTMLTextAreaElement, target: Target, reply: string): boolean {
-  const at = locate(el, target);
+export function replaceSource(
+  el: HTMLTextAreaElement,
+  target: Target,
+  range: SourceRange | null,
+  reply: string,
+): boolean {
+  const at = locate(el, target, range);
   const text = tidy(reply);
   if (!at || !text) return false;
   if (target.kind === "cursor") {
@@ -98,9 +100,14 @@ export function replaceSource(el: HTMLTextAreaElement, target: Target, reply: st
 }
 
 /** Insert below: the reply as a new block after the whole block the target ends in (on a blank line, at the caret). */
-export function insertSourceBelow(el: HTMLTextAreaElement, target: Target, reply: string): boolean {
-  if (target.kind === "cursor") return replaceSource(el, target, reply);
-  const at = locate(el, target);
+export function insertSourceBelow(
+  el: HTMLTextAreaElement,
+  target: Target,
+  range: SourceRange | null,
+  reply: string,
+): boolean {
+  if (target.kind === "cursor") return replaceSource(el, target, range, reply);
+  const at = locate(el, target, range);
   const text = tidy(reply);
   if (!at || !text) return false;
   const blank = el.value.indexOf("\n\n", Math.max(at.from, at.to - 1));
