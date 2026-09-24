@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { createExtensions, createMarkdownManager } from "./extensions";
 import { looksLikeMarkdown, parsePastedMarkdown } from "./markdown-paste";
 import { serializeBody } from "./serialize";
+import { budget } from "./test-timing";
 
 describe("looksLikeMarkdown", () => {
   it.each([
@@ -40,7 +41,7 @@ describe("looksLikeMarkdown", () => {
   ])("stays fast on 100 KB+ of %s", (_, text) => {
     const start = performance.now();
     looksLikeMarkdown(text);
-    expect(performance.now() - start).toBeLessThan(100);
+    expect(performance.now() - start).toBeLessThan(budget(100));
   });
 });
 
@@ -50,7 +51,7 @@ describe("parsePastedMarkdown on large pastes", () => {
     const text = "# Log\n\n" + "- item\n".repeat(40_000); // 280 KB of short lines
     const start = performance.now();
     expect(parsePastedMarkdown(manager, text)).toBeNull();
-    expect(performance.now() - start).toBeLessThan(150);
+    expect(performance.now() - start).toBeLessThan(budget(150));
   });
 });
 

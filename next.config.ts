@@ -28,11 +28,12 @@ const securityHeaders = [
 
 const nextConfig: NextConfig = {
   // Docker sets BUILD_STANDALONE=1. Never always-on: standalone server.js chdirs into .next/standalone,
-  // so a relative ./data would land inside the build output (and be wiped by the next build).
+  // so a relative ./data or ./config would land inside the build output (and be wiped by the next build).
   output: process.env.BUILD_STANDALONE === "1" ? "standalone" : undefined,
   poweredByHeader: false,
   allowedDevOrigins: devOrigins(),
-  outputFileTracingExcludes: { "/*": ["./data/**/*"] }, // never trace user notes into the build
+  // Never trace user notes, or write's own settings (API keys), into the build.
+  outputFileTracingExcludes: { "/*": ["./data/**/*", "./config/**/*"] },
   async headers() {
     return [{ source: "/:path*", headers: securityHeaders }];
   },

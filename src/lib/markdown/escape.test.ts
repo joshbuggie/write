@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 import {
   encodeText,
   escapeBlockStarts,
@@ -11,6 +11,7 @@ import {
 } from "./escape";
 import { createMarkdownManager } from "./extensions";
 import { firstMisread } from "./nodes/read-back";
+import { budget } from "./test-timing";
 
 describe("encodeText", () => {
   it.each([
@@ -192,16 +193,22 @@ describe("linear time on hostile paragraphs (runs on every save)", () => {
     return performance.now() - start;
   };
 
+  // The first serialization pays one-time costs (marked's lexer, JIT warm-up) that took the first case past
+  // 100 ms on a shared CI runner. Warm up on small inputs of each shape, so the budget measures scaling.
+  beforeAll(() => {
+    for (const warm of ["<".repeat(2_000), "a <1 _".repeat(400), "[a ".repeat(800)]) serializeParagraph(warm);
+  });
+
   it.each([
     ["'<'", "<".repeat(100_000)],
     ["'a <1 _'", "a <1 _".repeat(20_000)],
     ["'['", "[a ".repeat(40_000)],
   ])("serializes a 100 KB+ paragraph of %s in well under 100 ms", (_, text) => {
-    expect(elapsed(() => serializeParagraph(text))).toBeLessThan(100);
+    expect(elapsed(() => serializeParagraph(text))).toBeLessThan(budget(100));
   });
 
   it("escapeTagLikeSpans handles 200 KB of '<' and delimiters without a closing '>'", () => {
-    expect(elapsed(() => escapeTagLikeSpans("x <1 _".repeat(35_000)))).toBeLessThan(100);
+    expect(elapsed(() => escapeTagLikeSpans("x <1 _".repeat(35_000)))).toBeLessThan(budget(100));
   });
 });
 

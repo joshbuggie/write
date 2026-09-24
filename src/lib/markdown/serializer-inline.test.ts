@@ -4,6 +4,7 @@ import { createExtensions, createMarkdownManager } from "./extensions";
 import { analyzeFidelity } from "./fidelity";
 import { finalizeMarkdown } from "./file-format";
 import { readsAsParagraph } from "./nodes/read-back";
+import { budget } from "./test-timing";
 
 /** Formatting inside a paragraph must re-open from the saved file as written, never as HTML or asterisks. */
 
@@ -321,7 +322,7 @@ describe("near-linear time on paragraphs full of formatting (runs on every save)
     const start = performance.now();
     save(doc);
     // About 30 ms on a laptop; this bound only catches a return of the quadratic behavior (minutes).
-    expect(performance.now() - start).toBeLessThan(750);
+    expect(performance.now() - start).toBeLessThan(budget(750));
   });
 });
 
@@ -609,7 +610,7 @@ describe("typed text that looks like syntax around addresses and links", () => {
     const doc = paragraph(...content);
     const start = performance.now();
     const markdown = save(doc);
-    expect(performance.now() - start).toBeLessThan(1000);
+    expect(performance.now() - start).toBeLessThan(budget(1000));
     expect(readBack(manager.parse(markdown)).text).toBe(readBack(doc).text.replace(/ \n$/, "\n"));
   });
 });

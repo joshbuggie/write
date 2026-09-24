@@ -2,7 +2,7 @@
 
 import type { Editor } from "@tiptap/core";
 import { useEditorState } from "@tiptap/react";
-import { KeyboardOff } from "lucide-react";
+import { KeyboardOff, Sparkles } from "lucide-react";
 import { Fragment, type KeyboardEvent, type PointerEvent } from "react";
 import { createPortal } from "react-dom";
 import { cn } from "@/lib/cn";
@@ -99,9 +99,10 @@ export function DesktopToolbar({ editor, onOpenLink }: ToolbarProps) {
 
 /**
  * Phone formatting bar (<md). Shown only while the editor has focus, docked on top of the keyboard
- * via --kb, with 44px targets and a "hide keyboard" button pinned to the right.
+ * via --kb, with 44px targets and a "hide keyboard" button pinned to the right. With the AI assistant
+ * on, "Ask AI" is pinned to the left: on a phone there is no shortcut, and the header is far away.
  */
-export function KeyboardToolbar({ editor, onOpenLink }: ToolbarProps) {
+export function KeyboardToolbar({ editor, onOpenLink, onAskAi }: ToolbarProps & { onAskAi?: () => void }) {
   const focused = useEditorState({ editor, selector: ({ editor: e }) => e.isFocused });
   const { keyboardOpen, zoomed } = useKeyboardInset();
   if (!focused || zoomed) return null;
@@ -114,6 +115,19 @@ export function KeyboardToolbar({ editor, onOpenLink }: ToolbarProps) {
       )}
     >
       <div className="flex h-11 items-center">
+        {onAskAi && (
+          <button
+            type="button"
+            aria-label="Ask AI"
+            title="Ask AI"
+            data-ai-trigger
+            onPointerDown={keepEditorFocus}
+            onClick={onAskAi}
+            className="inline-flex size-11 shrink-0 items-center justify-center border-r border-line text-accent"
+          >
+            <Sparkles aria-hidden strokeWidth={1.75} className="size-5" />
+          </button>
+        )}
         <div
           role="toolbar"
           aria-label="Formatting"

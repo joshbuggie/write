@@ -1,4 +1,4 @@
-import type { Editor } from "@tiptap/core";
+import type { Editor, JSONContent } from "@tiptap/core";
 import { patchMarkdownManager } from "./escape";
 import { finalizeMarkdown } from "./file-format";
 
@@ -10,4 +10,14 @@ import { finalizeMarkdown } from "./file-format";
 export function serializeBody(editor: Editor): string {
   patchMarkdownManager(editor.markdown);
   return finalizeMarkdown(editor.getMarkdown());
+}
+
+/**
+ * Markdown for part of a note (the AI prompt window's selection or paragraph), through the same patched
+ * manager as serializeBody, so a passage sent to a model keeps its links, code and escapes.
+ */
+export function serializeBlocks(editor: Editor, blocks: JSONContent[]): string {
+  patchMarkdownManager(editor.markdown);
+  if (!editor.markdown) return "";
+  return finalizeMarkdown(editor.markdown.serialize({ type: "doc", content: blocks }));
 }

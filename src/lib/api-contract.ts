@@ -1,3 +1,4 @@
+import type { AiSettings, ProviderId } from "./ai/settings";
 import type { FolderSummary, Note, NoteSummary, SavedNote, Tree } from "./types";
 
 export type ErrorCode =
@@ -13,6 +14,9 @@ export type ErrorCode =
   | "unsupported_media_type"
   | "rate_limited"
   | "storage_unavailable"
+  | "ai_disabled"
+  | "ai_unreachable"
+  | "ai_upstream"
   | "internal";
 
 export const ERROR_STATUS: Record<ErrorCode, number> = {
@@ -27,7 +31,13 @@ export const ERROR_STATUS: Record<ErrorCode, number> = {
   too_large: 413,
   unsupported_media_type: 415,
   rate_limited: 429,
+  /** The AI assistant is switched off in Settings, so nothing may be sent. */
+  ai_disabled: 409,
   internal: 500,
+  /** The model server couldn't be reached (down, wrong URL, DNS, timeout). */
+  ai_unreachable: 502,
+  /** The model server answered with an error (key refused, unknown model, rate limit…). */
+  ai_upstream: 502,
   storage_unavailable: 503,
 };
 
@@ -46,6 +56,9 @@ export const API = {
   download: "/api/download",
   login: "/api/auth/login",
   logout: "/api/auth/logout",
+  settings: "/api/settings",
+  aiModels: "/api/ai/models",
+  aiComplete: "/api/ai/complete",
 } as const;
 
 export type HealthResponse = { ok: true } | { ok: false; error: string };
@@ -106,3 +119,63 @@ export interface DiscardNoteResponse {
 export interface LoginRequest {
   password: string;
 }
+
+/** `GET` and `PUT /api/settings`. API keys never appear: each connection only carries `keyHint`. */
+export interface SettingsResponse {
+  ai: AiSettings;
+}
+
+/**
+ * A connection as the Settings form sends it. The saved key is kept unless `apiKey` replaces it or
+ * `clearKey` removes it; the browser never has the key to send back.
+ */
+export interface ConnectionInput {
+  id: string;
+  name: string;
+  provider: ProviderId;
+  baseUrl: string;
+  model: string;
+  apiKey?: string;
+  clearKey?: boolean;
+}
+
+/** `PUT /api/settings`: the whole AI settings object, with connections as ConnectionInput. */
+export interface SaveSettingsRequest {
+  ai: Omit<AiSettings, "connections"> & { connections: ConnectionInput[] };
+}
+
+/** `POST /api/ai/models` ("Test connection"): a connection from the form, saved or not. */
+export interface TestConnectionRequest {
+  connection: ConnectionInput;
+}
+export interface TestConnectionResponse {
+  /** Model ids the server lists, sorted; may be empty for servers without a models list. */
+  models: string[];
+}
+
+/** One turn of a prompt window conversation: the first request, then replies and follow-ups. */
+export interface ChatTurn {
+  role: "user" | "assistant";
+  content: string;
+}
+
+/**
+ * `POST /api/ai/complete`: exactly what "What gets sent" shows. The server adds the connection's URL, key
+ * and model, and what its API needs to stream (such as Anthropic's max_tokens).
+ */
+export interface CompleteRequest {
+  connectionId: string;
+  system: string;
+  /** Starts and ends with a user turn. */
+  messages: ChatTurn[];
+}
+
+/** Why a reply ended: finished, cut off by the length limit, or declined by the model. */
+export type StopReason = "end" | "length" | "refusal";
+
+/**
+ * One line of the newline-delimited JSON that `POST /api/ai/complete` streams back (content type
+ * application/x-ndjson). Failures before the stream starts are ordinary ApiErrorBody responses instead.
+ */
+export type CompleteEvent =
+  { text: string } | { done: true; stop: StopReason } | { error: { code: ErrorCode; message: string } };

@@ -54,3 +54,57 @@ describe("request errors", () => {
     expect(isApiError(err, "unauthorized") && err.retryAfterSeconds).toBeNull();
   });
 });
+
+describe("streamCompletion", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  const request = { connectionId: "home", system: "", messages: [{ role: "user" as const, content: "Hi" }] };
+
+  /** An NDJSON response whose body arrives in the given chunks, split anywhere. */
+  function ndjson(chunks: string[], status = 200) {
+    const encoder = new TextEncoder();
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        for (const chunk of chunks) controller.enqueue(encoder.encode(chunk));
+        controller.close();
+      },
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(body, { status, headers: { "Content-Type": "application/x-ndjson" } })),
+    );
+  }
+
+  it("passes each piece of text on and resolves with the stop reason, whatever the chunking", async () => {
+    ndjson(['{"text":"Hel', 'lo"}\n{"text":" wor', 'ld"}\n{"done":tr', 'ue,"stop":"length"}\n']);
+    const pieces: string[] = [];
+    await expect(api.streamCompletion(request, (t) => pieces.push(t))).resolves.toBe("length");
+    expect(pieces.join("")).toBe("Hello world");
+  });
+
+  it("throws an in-band error line as an ApiError with its code", async () => {
+    ndjson(['{"text":"Partial"}\n', '{"error":{"code":"ai_upstream","message":"Overloaded."}}\n']);
+    const err = await api.streamCompletion(request, () => {}).catch((e: unknown) => e);
+    expect(isApiError(err, "ai_upstream") && err.message).toBe("Overloaded.");
+  });
+
+  it("throws a failure before the stream like any other request", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        Response.json(
+          { error: { code: "ai_disabled", message: "The AI assistant is switched off in Settings." } },
+          { status: 409 },
+        ),
+      ),
+    );
+    const err = await api.streamCompletion(request, () => {}).catch((e: unknown) => e);
+    expect(isApiError(err, "ai_disabled")).toBe(true);
+  });
+
+  it("treats a stream that ends without a done line as a dropped connection", async () => {
+    ndjson(['{"text":"Cut"}\n']);
+    const err = await api.streamCompletion(request, () => {}).catch((e: unknown) => e);
+    expect(isApiError(err, "network")).toBe(true);
+  });
+});

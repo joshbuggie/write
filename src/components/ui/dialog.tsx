@@ -2,6 +2,7 @@
 
 import { useEffect, useId, useRef, useState } from "react";
 import type React from "react";
+import { cn } from "@/lib/cn";
 import { Button } from "./button";
 
 type DialogProps = {
@@ -11,6 +12,8 @@ type DialogProps = {
   description?: React.ReactNode;
   children?: React.ReactNode;
   footer?: React.ReactNode;
+  /** "lg" for forms with several sections (Settings); confirmations and one-field forms stay "md". */
+  size?: "md" | "lg";
 };
 
 /**
@@ -18,7 +21,9 @@ type DialogProps = {
  * browser. Closes on Esc and on a backdrop click. Below `md` it renders as a bottom sheet.
  * Content only renders while open, so forms inside start fresh every time.
  */
-export function Dialog({ open, onClose, title, description, children, footer }: DialogProps) {
+export function Dialog({ open, onClose, title, description, children, footer, size = "md" }: DialogProps) {
+  // A long form keeps its buttons in reach: they stick to the bottom edge while the fields scroll.
+  const stickyFooter = size === "lg" && Boolean(footer);
   const ref = useRef<HTMLDialogElement>(null);
   const titleId = useId();
   const descriptionId = useId();
@@ -53,12 +58,20 @@ export function Dialog({ open, onClose, title, description, children, footer }: 
       }}
       className={
         "mx-0 mt-auto mb-0 w-full max-w-none overflow-y-auto overscroll-contain rounded-t-[14px] bg-surface text-ink " +
-        "shadow-pop md:m-auto md:w-[calc(100%-2rem)] md:max-w-md md:rounded-xl md:border md:border-line"
+        "shadow-pop md:m-auto md:w-[calc(100%-2rem)] md:rounded-xl md:border md:border-line " +
+        (size === "lg" ? "max-h-[92dvh] md:max-h-[min(88dvh,52rem)] md:max-w-xl" : "md:max-w-md") +
+        // Fields scrolled into view (Tab) stop above the sticky footer instead of behind it.
+        (stickyFooter ? " scroll-pb-24" : "")
       }
     >
       {open && (
         // wrap-anywhere is inherited: a long unbroken note or folder name wraps instead of scrolling sideways.
-        <div className="px-5 pt-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] wrap-anywhere md:pb-5">
+        <div
+          className={cn(
+            "px-5 pt-5 wrap-anywhere",
+            !stickyFooter && "pb-[max(1.25rem,env(safe-area-inset-bottom))] md:pb-5",
+          )}
+        >
           <h2 id={titleId} className="text-[17px] font-semibold tracking-tight md:text-[16px]">
             {title}
           </h2>
@@ -68,7 +81,15 @@ export function Dialog({ open, onClose, title, description, children, footer }: 
             </div>
           )}
           {children && <div className="mt-4">{children}</div>}
-          {footer && <DialogFooter>{footer}</DialogFooter>}
+          {footer &&
+            (stickyFooter ? (
+              // The sticky footer carries the safe-area inset itself. Phones: two equal buttons side by side.
+              <div className="sticky bottom-0 -mx-5 mt-5 grid grid-cols-2 gap-2 border-t border-line bg-surface px-5 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] md:flex md:justify-end md:pb-4">
+                {footer}
+              </div>
+            ) : (
+              <DialogFooter>{footer}</DialogFooter>
+            ))}
         </div>
       )}
     </dialog>

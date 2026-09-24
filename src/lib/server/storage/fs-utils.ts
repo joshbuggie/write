@@ -50,16 +50,27 @@ export async function lstatOrNull(p: string): Promise<Stats | null> {
 
 export const exists = async (p: string) => (await lstatOrNull(p)) !== null;
 
+/** Options for atomicWrite; the defaults suit notes. */
+export interface AtomicWriteOptions {
+  /** Refuse to replace an existing entry (name_taken) instead of overwriting it. */
+  noClobber?: boolean;
+  /** Permissions for the file, even if it exists with others (0o600 for secrets). Default: keep them. */
+  mode?: number;
+  /** How to translate an fs error. Default: mapFsError, whose messages name the data folder. */
+  mapError?: (err: unknown) => unknown;
+}
+
 /**
  * Crash-safe write: temp file in the same directory → fsync → rename over the target, so readers and
- * sync tools never see a half-written note. Keeps the existing file's permissions. With `noClobber`, the
- * final step refuses to replace an existing entry (name_taken) instead of overwriting it.
+ * sync tools never see a half-written note. Keeps the existing file's permissions unless `mode` is given.
+ * With `noClobber`, the final step refuses to replace an existing entry (name_taken) instead of
+ * overwriting it.
  */
-export async function atomicWrite(file: string, bytes: Uint8Array, opts: { noClobber?: boolean } = {}) {
+export async function atomicWrite(file: string, bytes: Uint8Array, opts: AtomicWriteOptions = {}) {
   const tmp = path.join(path.dirname(file), `.write-${randomHex(8)}.tmp`);
   try {
-    const existing = await lstatOrNull(file);
-    const fh = await open(tmp, "wx", existing?.isFile() ? existing.mode & 0o777 : 0o644);
+    const existing = opts.mode === undefined ? await lstatOrNull(file) : null;
+    const fh = await open(tmp, "wx", opts.mode ?? (existing?.isFile() ? existing.mode & 0o777 : 0o644));
     try {
       await fh.writeFile(bytes);
       await fh.sync();
@@ -71,7 +82,7 @@ export async function atomicWrite(file: string, bytes: Uint8Array, opts: { noClo
     await syncDir(path.dirname(file));
   } catch (err) {
     await rm(tmp, { force: true });
-    throw mapFsError(err, "Folder not found.");
+    throw opts.mapError ? opts.mapError(err) : mapFsError(err, "Folder not found.");
   }
 }
 

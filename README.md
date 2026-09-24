@@ -12,6 +12,8 @@ open in vim, Obsidian, iA Writer or anything else.
 - Folders in a sidebar, and a library view on the phone. Works well as an iPhone Home Screen app.
 - Download a single note, a folder, or everything as a `.zip`, from the app or with `curl`.
 - An optional password, and light and dark mode that follow your system.
+- An optional AI assistant, off until you turn it on, that works with the model you choose: one on your
+  own network such as Ollama, or a hosted API.
 
 ---
 
@@ -23,6 +25,7 @@ open in vim, Obsidian, iA Writer or anything else.
 - [Downloading and backups](#downloading-and-backups)
 - [Security](#security)
 - [iPhone and iPad](#iphone-and-ipad)
+- [AI assistant (optional)](#ai-assistant-optional)
 - [Keyboard shortcuts](#keyboard-shortcuts)
 - [Upgrading](#upgrading)
 - [FAQ and troubleshooting](#faq-and-troubleshooting)
@@ -42,11 +45,12 @@ You need Docker with the Compose plugin.
 
 ```bash
 git clone <this-repo-url> write && cd write
-mkdir -p data                 # your notes will live here, on the host
+mkdir -p data config          # your notes, and write's own settings, live here on the host
 docker compose up -d
 ```
 
-Open <http://localhost:3000>. Your notes are in `./data` as plain files.
+Open <http://localhost:3000>. Your notes are in `./data` as plain files. `./config` holds write's own
+settings, such as the AI assistant's connections.
 
 To turn on the password, create a `.env` file next to `docker-compose.yml` and recreate the container:
 
@@ -55,18 +59,19 @@ echo 'WRITE_PASSWORD=choose-a-long-passphrase' > .env
 docker compose up -d
 ```
 
-> **Permission denied?** The container runs as uid `1000`. If `./data` belongs to another user, run
-> `sudo chown -R 1000:1000 ./data`, or uncomment `user:` in `docker-compose.yml` and set it to the owner of
-> `./data`.
+> **Permission denied?** The container runs as uid `1000`. If `./data` or `./config` belongs to another
+> user, run `sudo chown -R 1000:1000 ./data ./config`, or uncomment `user:` in `docker-compose.yml` and set
+> it to the owner of those folders.
 
 ### Option 2: `docker run`
 
 ```bash
 docker build -t write .
-mkdir -p data
+mkdir -p data config
 docker run -d --name write --init --restart unless-stopped \
   -p 3000:3000 \
   -v "$PWD/data:/data" \
+  -v "$PWD/config:/config" \
   -e WRITE_PASSWORD=choose-a-long-passphrase \
   write
 ```
@@ -87,12 +92,12 @@ WRITE_DATA_DIR="$HOME/Notes" WRITE_PASSWORD=choose-a-long-passphrase npm start
 ```
 
 - Without `WRITE_DATA_DIR`, notes go to `./data`, relative to the directory you start the server in. An
-  absolute path is safer.
+  absolute path is safer. The same goes for `WRITE_CONFIG_DIR` (write's own settings, default `./config`).
 - `npm start` listens on all interfaces at port 3000. Use `npm start -- -p 8080` for another port, or
   `npm start -- -H 127.0.0.1` to only accept connections from this machine.
-- Instead of exporting `WRITE_DATA_DIR` and `WRITE_PASSWORD`, you can copy `.env.example` to `.env.local`
-  and set them there. The port and bind address can't go in that file, because `npm start` picks them
-  before it reads it. Use the `-p` and `-H` flags above.
+- Instead of exporting `WRITE_DATA_DIR`, `WRITE_CONFIG_DIR` and `WRITE_PASSWORD`, you can copy
+  `.env.example` to `.env.local` and set them there. The port and bind address can't go in that file,
+  because `npm start` picks them before it reads it. Use the `-p` and `-H` flags above.
 
 <details>
 <summary>Run it as a systemd service</summary>
@@ -108,6 +113,7 @@ User=notes
 WorkingDirectory=/opt/write
 Environment=NODE_ENV=production
 Environment=WRITE_DATA_DIR=/home/notes/Notes
+Environment=WRITE_CONFIG_DIR=/home/notes/.config/write
 Environment=WRITE_PASSWORD=choose-a-long-passphrase
 ExecStart=/usr/bin/npm start -- -H 127.0.0.1
 Restart=on-failure
@@ -124,15 +130,17 @@ Then run `sudo systemctl enable --now write`.
 
 ## Configuration
 
-All settings are environment variables, read when the server starts.
+The server is configured with environment variables. The settings you change in the app (today only
+the AI assistant's) are saved in one file, `settings.json` in `WRITE_CONFIG_DIR`.
 
-| Variable           | Default                                                                 | What it does                                                                                                                                                      |
-| ------------------ | ----------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `WRITE_DATA_DIR`   | `./data` on bare metal (relative to the working dir), `/data` in Docker | The folder that holds your notes. It may be a symlink, for example into a synced folder. A path inside `.next/` is refused, because builds wipe it.               |
-| `WRITE_PASSWORD`   | unset: no sign-in                                                       | Turns on the sign-in page and a 30-day session cookie. Scripts can send `Authorization: Bearer <password>` instead. Changing the password signs out every device. |
-| `PORT`             | `3000`                                                                  | The port to listen on. Set it in the real environment (shell, systemd, Docker), not in `.env.local`. With `npm start`, `-p <port>` also works.                    |
-| `HOSTNAME`         | `0.0.0.0` in Docker                                                     | The address the Docker image's server binds to. `npm start` ignores it, even as a real environment variable: use `npm start -- -H <address>`.                     |
-| `BUILD_STANDALONE` | unset (the Dockerfile sets `1`)                                         | Build-time only. Produces the self-contained server that the Docker image runs. You don't need it for `npm start`.                                                |
+| Variable           | Default                                                                     | What it does                                                                                                                                                                                                                                                                                                                                      |
+| ------------------ | --------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `WRITE_DATA_DIR`   | `./data` on bare metal (relative to the working dir), `/data` in Docker     | The folder that holds your notes. It may be a symlink, for example into a synced folder. A path inside `.next/` is refused, because builds wipe it.                                                                                                                                                                                               |
+| `WRITE_CONFIG_DIR` | `./config` on bare metal (relative to the working dir), `/config` in Docker | Where write keeps its own settings, in `settings.json`: the AI assistant's, API keys included. Keep it outside the data folder, so synced notes never carry your keys: write refuses a folder it can see is inside the data folder, symlinks followed, but two Docker mounts of the same host folder look separate, so keep those apart yourself. |
+| `WRITE_PASSWORD`   | unset: no sign-in                                                           | Turns on the sign-in page and a 30-day session cookie. Scripts can send `Authorization: Bearer <password>` instead. Changing the password signs out every device.                                                                                                                                                                                 |
+| `PORT`             | `3000`                                                                      | The port to listen on. Set it in the real environment (shell, systemd, Docker), not in `.env.local`. With `npm start`, `-p <port>` also works.                                                                                                                                                                                                    |
+| `HOSTNAME`         | `0.0.0.0` in Docker                                                         | The address the Docker image's server binds to. `npm start` ignores it, even as a real environment variable: use `npm start -- -H <address>`.                                                                                                                                                                                                     |
+| `BUILD_STANDALONE` | unset (the Dockerfile sets `1`)                                             | Build-time only. Produces the self-contained server that the Docker image runs. You don't need it for `npm start`.                                                                                                                                                                                                                                |
 
 `GET /api/health` returns `200 {"ok":true}` when the data folder is usable, and `503` otherwise. It
 never needs a password, so you can point uptime monitors at it. It does a real write test of the data
@@ -162,7 +170,8 @@ data/                          ← WRITE_DATA_DIR
   (starting with `.`), symlinks and anything that isn't `.md` (lowercase) are ignored and never touched.
   The one exception: renaming or deleting a folder moves the whole directory, including those files.
 - **Nothing else is stored.** No database, no index, no sidecar files, and nothing is added to your notes.
-  Line endings (LF or CRLF) and a UTF-8 BOM are kept as they are in each file.
+  Line endings (LF or CRLF) and a UTF-8 BOM are kept as they are in each file. write's own settings live in
+  a separate folder (`WRITE_CONFIG_DIR`), never in the data folder.
 - **Names are portable.** New note and folder names can't contain `/ \ : * ? " < > |`, can't start or end
   with a dot, and can't be Windows device names like `CON`. Two names that differ only in case count as
   the same name. This keeps your folder safe to sync or unzip on macOS, Windows and Linux. Files that
@@ -267,6 +276,10 @@ For example, as a nightly cron job:
 Because your notes are plain files, you can also back up the data folder directly with restic, Time
 Machine, `rsync` or `git`. That also captures `.trash`.
 
+The config folder (`WRITE_CONFIG_DIR`) isn't in the zip. It holds the AI assistant's settings, with your
+API keys in plain text. Back it up too if you want to keep your connections, and protect it (and its
+backups) like the keys themselves: don't put it in a synced or shared folder, or in `git`.
+
 ---
 
 ## Security
@@ -301,6 +314,12 @@ Machine, `rsync` or `git`. That also captures `.trash`.
 - **Cross-site requests are blocked** even without a password. Every change has to be a same-origin JSON
   request, which the browser checks with `Sec-Fetch-Site`, so a malicious web page can't write to a write
   server on your LAN.
+- **Set a password before you turn on the AI assistant** on any server others can reach. Without
+  `WRITE_PASSWORD`, anyone who can reach write can use your saved connections (and your API credits), and
+  can use **Test connection** to make the server send requests to addresses on your network, even while
+  the assistant is off. API keys are stored on the server in plain text, in `settings.json` inside
+  `WRITE_CONFIG_DIR`, readable only by the user write runs as. They never reach the browser, which sees
+  at most a key's last four characters. See [AI assistant](#ai-assistant-optional).
 - **Sign-in** uses an HTTP-only session cookie that lasts 30 days. Changing `WRITE_PASSWORD` signs out
   every device.
 - **Wrong passwords lock sign-in for everyone, for a while.** After 10 wrong passwords within 15 minutes
@@ -340,6 +359,82 @@ write is designed for the phone as well as the desktop:
 
 ---
 
+## AI assistant (optional)
+
+write can ask a language model to rewrite, fix, shorten or continue your text, or to answer a question
+about it. It's **off until you turn it on**. While it's off there's no AI button and no shortcut, and the
+server refuses to send note text anywhere. You bring the model: one on your own network (Ollama, LM
+Studio) or a hosted API (OpenAI, Anthropic, OpenRouter, or any server that speaks OpenAI's chat
+completions API).
+
+### Turning it on
+
+1. Open **Settings** at the bottom of the sidebar (on a phone, at the end of the Notes screen) and switch
+   on **AI assistant**.
+2. Add a connection: pick a provider, then enter the server URL, the model and, for hosted APIs, an API
+   key. **Test connection** checks the URL and the key, and lists the models the server offers.
+3. Save. You can save several connections, for example a local model and a hosted one, and choose the
+   default. With more than one, the prompt window has a menu to switch between them.
+
+Settings also hold the shortcut, the **Instructions** sent with every request, and the **quick actions**
+(one-click requests such as "Fix spelling & grammar"). You can edit all of them.
+
+### Using it
+
+- Press **⌘J** (Ctrl+J on Windows and Linux), click **✨** in the note header, or on a phone tap **✨** at
+  the left of the formatting toolbar. A prompt window opens at the cursor (on a phone, above the keyboard).
+- Pick a quick action, or type a request and press Enter.
+- **What goes with it:** the selection, or the paragraph at the cursor when nothing is selected, or no
+  note text at all on an empty line. A selection that spans several paragraphs or list items grows to the
+  whole blocks. Choose **Whole note** to send the whole note with one request, or make that the default in
+  Settings.
+- The reply streams into the window. **Stop** (or Esc) ends it. Your note doesn't change until you click
+  **Replace** or **Insert below**, and one ⌘Z undoes either. Follow-ups refine the reply: they send the
+  conversation so far.
+- Replies go in like pasted Markdown. If the editor can't keep a reply's formatting, the window says so
+  and the reply goes in as plain text. In a code block a reply goes in as is, and in a table cell as one
+  line.
+- It works in Markdown source mode too. There the window sits at the bottom of the screen, the text sent
+  is the selection or the lines around the cursor up to the nearest blank lines, and replies go in as the
+  Markdown they are.
+
+### What gets sent, and where
+
+- **What gets sent**, in the prompt window, shows the exact request before anything goes out: the
+  connection, model and server it goes to, the instructions (the system prompt), the note text inside a
+  `<note>` tag, and your request. The server adds only what the API needs to run it, such as streaming
+  and, for Anthropic, the required reply length limit (`max_tokens`), never any other text.
+- Requests go from the write server to the model server, never straight from your browser. So your API
+  keys stay on the server, and a phone can use a model that runs on a computer on your network.
+- Note text leaves write only when you run a request, and only to the connection you picked. What a hosted
+  provider does with it is up to that provider's terms.
+- API keys are saved on the write server, in plain text, in `settings.json` inside `WRITE_CONFIG_DIR`. The
+  browser only ever sees a key's last four characters, or none for a key shorter than 12 characters. A
+  saved key is only sent to the server it was saved for: if you change a connection's URL, enter the key
+  again.
+
+### Connection examples
+
+- **Ollama on another computer:** `http://192.168.x.x:11434/v1`, no key. Ollama only listens on its own
+  machine by default, so start it with `OLLAMA_HOST=0.0.0.0` to let write reach it over the network. The
+  model is a name from `ollama list`, such as `llama3.1:8b`.
+- **LM Studio:** `http://192.168.x.x:1234/v1`, no key. Start its server first, and let it serve on the
+  local network if write runs on another machine.
+- **OpenAI:** `https://api.openai.com/v1` and an API key.
+- **Anthropic:** `https://api.anthropic.com` and an API key. write talks to Anthropic's Messages API.
+- **OpenRouter:** `https://openrouter.ai/api/v1` and an API key. Models are named like
+  `anthropic/claude-opus-5`.
+- **Any other OpenAI-compatible server** (llama.cpp's server, vLLM, LocalAI…): choose **Other** and enter
+  its base URL, which usually ends in `/v1`.
+
+**`localhost` means the machine write runs on**, not the device in your hand: `http://localhost:11434/v1`
+works when Ollama runs on the same computer as write. In Docker, `localhost` is the container itself. Use
+the host's LAN address, or `host.docker.internal` (built into Docker Desktop; on Linux, add
+`extra_hosts: ["host.docker.internal:host-gateway"]` to the service in `docker-compose.yml`), and make sure
+the model server listens on the network, not only on its own `localhost`.
+
+---
+
 ## Keyboard shortcuts
 
 On Windows and Linux use Ctrl instead of ⌘, and Alt instead of ⌥.
@@ -358,6 +453,7 @@ On Windows and Linux use Ctrl instead of ⌘, and Alt instead of ⌥.
 | ⌘⇧B / ⌘⌥C       | Quote / code block                      |
 | Tab / ⇧Tab      | Indent / outdent a list item            |
 | ⌘Z / ⌘⇧Z        | Undo / redo                             |
+| ⌘J              | Ask AI (when the AI assistant is on)    |
 | Esc             | Close a dialog or menu                  |
 
 Markdown shortcuts also work as you type: `# ` for a heading, `- ` for a list, `1. ` for a numbered list,
@@ -370,10 +466,25 @@ Markdown shortcuts also work as you type: `# ` for a heading, `- ` for a list, `
 
 - **Docker Compose:** `git pull && docker compose up -d --build`. With a published image, use
   `docker compose pull && docker compose up -d` instead.
+- **`docker run`:** rebuild (`git pull && docker build -t write .`) or pull the new image, then
+  `docker rm -f write` and start it again with the command from [Option 2](#option-2-docker-run).
 - **Bare metal:** `git pull && npm ci && npm run build`, then restart the server.
 
-Your notes are never part of the build, so upgrading can't touch them. Still, it's worth taking a backup
-first.
+**Upgrading from a version without the AI assistant (no `./config` folder yet)?** write now keeps its own
+settings in a config folder, mounted at `/config`. Create it, owned by the container's user, before you
+start the new version, or Docker creates it as root and saving settings fails:
+
+```bash
+mkdir -p config && sudo chown 1000:1000 config
+docker compose up -d --build
+```
+
+With `docker run`, create the folder the same way and add `-v "$PWD/config:/config"` to your command.
+Without it, the settings (API keys included) go to an anonymous volume and are lost the next time the
+container is recreated.
+
+Your notes and settings are never part of the build, so upgrading can't touch them. Still, it's worth
+taking a backup first.
 
 ---
 
@@ -401,6 +512,13 @@ with other apps at the same time is fine.
 inside it, or symlink it. write only writes the files you edit, and it never rewrites a file with identical
 content, so sync tools stay quiet. The only other write is the health check's short-lived hidden
 `.write-health-*.tmp` file, at most every 10 minutes.
+
+**The AI assistant can't reach my model server.** The write server makes the request, not your browser,
+so `localhost` means the machine write runs on (in Docker, the container). Use the model server's LAN
+address and make sure it listens on the network: see [Connection examples](#connection-examples). **Test
+connection** in Settings names the server and what went wrong. If it says the server "asks for an API
+key" right after you changed the URL, enter the key again: a saved key is only sent to the server it was
+saved for.
 
 **I forgot the password.** It's just the `WRITE_PASSWORD` environment variable. Set a new one and restart.
 

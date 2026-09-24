@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { createMarkdownManager } from "./extensions";
 import { analyzeFidelity, hasOversizedParagraph } from "./fidelity";
 import { finalizeMarkdown } from "./file-format";
+import { budget } from "./test-timing";
 
 const manager = createMarkdownManager();
 /** What serializeBody(editor) returns right after the editor loads `body`. */
@@ -119,7 +120,7 @@ describe("analyzeFidelity", () => {
     const body = "$\\a".repeat(30_000) + "\n";
     const start = performance.now();
     analyzeFidelity(body, "changed\n");
-    expect(performance.now() - start).toBeLessThan(100);
+    expect(performance.now() - start).toBeLessThan(budget(100));
   });
 });
 
@@ -178,7 +179,7 @@ describe("hasOversizedParagraph", () => {
     for (const markdown of ["> ".repeat(10_000) + "x\n", "- ".repeat(10_000) + "x\n"]) {
       const start = performance.now();
       expect(hasOversizedParagraph(markdown)).toBe(true);
-      expect(performance.now() - start).toBeLessThan(100);
+      expect(performance.now() - start).toBeLessThan(budget(100));
     }
   });
 

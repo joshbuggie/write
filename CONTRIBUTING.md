@@ -30,6 +30,11 @@ npm run dev      # http://localhost:3000
 
 - **Your notes land in `./data`**, which is gitignored. Delete it to start fresh; the next page load
   recreates `notebook/Welcome.md`. Use `WRITE_DATA_DIR=/some/dir npm run dev` to try another folder.
+- **Settings land in `./config/settings.json`** (the AI assistant's, API keys included), also gitignored and
+  kept out of Docker builds. Delete it to reset them. `WRITE_CONFIG_DIR` picks another folder, which must
+  be outside the data folder.
+- **To try the AI assistant** without an account, run [Ollama](https://ollama.com) on the same machine
+  (`ollama pull llama3.1:8b`), then in Settings add an Ollama connection with that model.
 - **To try sign-in**, run `WRITE_PASSWORD=x npm run dev`.
 - `npm run dev` also keeps the Next.js block in `AGENTS.md` up to date. Commit that change if it
   appears.
@@ -69,6 +74,7 @@ such check. The Safari Web Inspector (Safari → Develop → your iPhone) shows 
 | `npm run typecheck`               | `next typegen` (route types such as `PageProps<…>`) followed by `tsc --noEmit`          |
 | `npm run format`                  | Prettier, which also sorts Tailwind classes                                             |
 | `npm run check`                   | lint, typecheck, test and format check. **Run this before every PR.** CI runs the same. |
+| `npm run test:ai-live`            | Opt-in live AI suite with real API keys (see Testing). Never runs in CI.                |
 | `npm run build` / `npm start`     | Production build and server                                                             |
 
 To build the Docker image locally, run `docker build -t write .`. It sets `BUILD_STANDALONE=1` itself.
@@ -84,7 +90,8 @@ they work the way they do, as numbered entries (D1, D2, …) that code comments 
 ```
 Browser ──RSC render / router.refresh()──► app/notes/layout.tsx, pages ──► lib/server/loaders ──► lib/server/storage ──► fs
    ├──fetch JSON (lib/api-client)──► app/api/*/route.ts ──► lib/server/http.handle() (auth, CSRF, errors) ──► storage
-   └──fetch → blob (lib/download)──► app/api/download/route.ts ──► storage (bytes | zip)
+   ├──fetch → blob (lib/download)──► app/api/download/route.ts ──► storage (bytes | zip)
+   └──fetch → NDJSON (api.streamCompletion)──► app/api/ai/complete/route.ts ──► lib/server/ai ──► model server
 src/proxy.ts: optional auth gate in front of everything except health/login/static.
 ```
 
@@ -108,7 +115,7 @@ src/proxy.ts: optional auth gate in front of everything except health/login/stat
 | `src/lib/server/http.ts`, `validate.ts`    | `handle()` wraps every route with auth, CSRF checks and error mapping; hand-written body type guards.                                                            |
 | `src/lib/server/auth.ts`, `src/proxy.ts`   | Optional password: HMAC session cookie, Bearer token, and the request gate.                                                                                      |
 | `src/lib/server/loaders.ts`                | What Server Components call to read data (`loadTree`, `loadNote`, …).                                                                                            |
-| `src/app/api/*/route.ts`                   | One route file per resource: `tree`, `folders`, `notes`, `download`, `health`, `auth`.                                                                           |
+| `src/app/api/*/route.ts`                   | One route file per resource: `tree`, `folders`, `notes`, `download`, `health`, `auth`, `settings`, `ai/models`, `ai/complete`.                                   |
 | `src/lib/markdown/`                        | Framework-free Markdown engine: Tiptap extensions, escaping, front matter, fidelity check, paste.                                                                |
 | `src/lib/markdown/nodes/`                  | The schema's node overrides (`Write*`) and the inline serializer. See the [Markdown engine map](#markdown-engine-map).                                           |
 | `src/lib/autosave.ts`, `drafts.ts`         | Framework-free autosave state machine, plus crash-safety drafts in `localStorage`.                                                                               |
@@ -116,6 +123,11 @@ src/proxy.ts: optional auth gate in front of everything except health/login/stat
 | `src/components/editor/`                   | The visual (Tiptap) and source (textarea) editors, toolbar, link dialog, `editor.css`, and the snapshot a rename hands to the new editor (`editor-snapshot.ts`). |
 | `src/components/shell/`, `sidebar/`        | App shell, `ShellProvider` context, sidebar and phone library.                                                                                                   |
 | `src/components/ui/`                       | Small UI kit: `Button`, `IconButton`, `Dialog`, `Menu`, `Toast`, `TextField`, `DownloadLink`.                                                                    |
+| `src/lib/ai/`                              | The AI assistant's framework-free parts, shared by UI and server: settings types and defaults, provider presets, the request builder (`buildMessages`).          |
+| `src/lib/server/ai/`                       | Model adapters (`openReply`, `listModels`): streamed calls to OpenAI-compatible servers and the Anthropic Messages API over plain `fetch`.                       |
+| `src/lib/server/storage/settings.ts`       | The settings file, `WRITE_CONFIG_DIR/settings.json`, and its key rules. API keys stay here; the browser gets a view with `keyHint`.                              |
+| `src/components/ai/`                       | The prompt window: `AiProvider`, the ✨ button, the target, the streamed reply, and Replace/Insert (`apply-reply.ts`, `source-target.ts` in source mode).        |
+| `src/components/settings/`                 | The Settings dialog and its AI assistant section: connections, shortcut, instructions, quick actions.                                                            |
 | `src/app/globals.css`                      | Design tokens (colors for light and dark) exposed as Tailwind utilities.                                                                                         |
 
 ### Key ideas, in the order you'll meet them
@@ -231,7 +243,7 @@ doubt, read the docs that ship with the installed version in `node_modules/next/
   them with `decodeSegment` (see rule 2).
 - **`connection()` from `next/server`** marks a render as dynamic. Every loader calls it before touching
   the filesystem, so nothing gets frozen into the build as static HTML.
-- **`/* turbopackIgnore: true */`** is on the `path.resolve` of the data dir in
+- **`/* turbopackIgnore: true */`** is on the `path.resolve` of the data and config dirs in
   `storage/config.ts`. Without it, Turbopack's file tracing tries to include the whole project in the
   build.
 - **`next typegen`** generates the global `PageProps<"/route">`, `LayoutProps` and `RouteContext`
@@ -242,8 +254,8 @@ doubt, read the docs that ship with the installed version in `node_modules/next/
 - **`cacheComponents` stays off.** With it on, hidden routes stay mounted, and so do their editors and
   autosave timers.
 - **Standalone output only in Docker.** `output: "standalone"` is enabled only when `BUILD_STANDALONE=1`,
-  because the standalone server changes into `.next/standalone`, and a relative `./data` would then land
-  inside the build output.
+  because the standalone server changes into `.next/standalone`, and a relative `./data` or `./config`
+  would then land inside the build output.
 
 ---
 
@@ -325,8 +337,18 @@ phone toolbars both render from it.
 
 - **Vitest, Node environment only** (`vitest.config.mts`). Tests live next to the code as `*.test.ts`.
 - **Server tests** wrap each test in `withTempDataDir()` (`src/lib/server/storage/test-utils.ts`), which
-  creates a fresh temp dir, points `WRITE_DATA_DIR` at it and removes it afterwards. They never touch
-  `./data`.
+  creates fresh temp dirs, points `WRITE_DATA_DIR` and `WRITE_CONFIG_DIR` at them and removes them
+  afterwards. They never touch `./data` or `./config`.
+- **AI tests** mock `fetch` with canned model responses and streams, so they never call a real model and
+  need no key.
+- **Live AI suite (opt-in, never in CI).** `src/ai-live/*.live.ts` calls the real Anthropic, OpenAI and
+  OpenRouter APIs through the adapters, the `/api` routes and a headless editor, to catch what canned
+  answers can't: changed error wording, a public models list, a model echoing the `<note>` tag. Put keys
+  in `.env.ai-live` (gitignored; any provider left blank is skipped) and run `npm run test:ai-live`. It
+  uses cheap models by default (override with `AI_LIVE_<PROVIDER>_MODEL`), and a full run costs a few
+  cents. `npm test` never picks up `*.live.ts`, and its config (`vitest.ai-live.config.mts`) refuses to
+  run when `CI` is set. The verbose output shows every reply, which is also a quick way to judge a
+  change to the default Instructions.
 - **Markdown tests** are driven by fixtures. When you change escaping or an extension, read the fixture
   diffs carefully: they show exactly what would change in people's files.
 - **Round-trip fuzz** (`src/lib/markdown/roundtrip-fuzz.test.ts`) builds seeded documents with real
@@ -364,6 +386,13 @@ mode.
       many sign-in attempts. Try again in 15 minutes.", and an already signed-in tab keeps working.
       Restart the server to lift the lockout. `/login?next=%2F.%2F%2Fexample.com` must land on `/`, not
       example.com.
+- [ ] **AI assistant** (if touched): switched off, it leaves no trace: no ✨ in the header or the phone
+      toolbar, ⌘J isn't caught (the browser's own shortcut runs), the AI section of Settings shows only its
+      switch, and `POST /api/ai/complete` answers `409 ai_disabled`. Switched on with a real model (Ollama
+      is enough): the note doesn't change until Replace or Insert, and one ⌘Z undoes each; Stop ends the
+      reply at once and the model server stops generating (check its log); "What gets sent" matches what
+      the model server receives. On the iPhone the prompt window docks above the keyboard, the text it's
+      about scrolls up above it, and the keyboard stays up when ✨ in the toolbar opens it.
 
 ---
 
@@ -372,7 +401,7 @@ mode.
 - Keep PRs small and focused. Describe what changed for users, and include screenshots (desktop and
   phone) for UI changes.
 - `npm run check` must pass. CI also builds the app and the Docker image, and fails if anything from
-  `./data` ends up in the build output.
+  `./data` or `./config` ends up in the build output.
 - New dependencies need an issue first (rule 8).
 - **Releases:** pushing a tag like `v1.2.3` runs `.github/workflows/release.yml`. It builds the Docker
   image for `linux/amd64` and `linux/arm64` and pushes `ghcr.io/<owner>/<repo>:1.2.3` and `:latest`.
