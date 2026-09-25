@@ -4,6 +4,8 @@ import {
   folderChoices,
   foldersLabel,
   lastUsedLabel,
+  mcpUrl,
+  setupSteps,
   summarizeIntegration,
   toggleFolder,
 } from "./integration-summary";
@@ -43,5 +45,13 @@ describe("integration summary", () => {
     expect(toggleFolder(["Essays"], "Journal", true)).toEqual(["Essays", "Journal"]);
     expect(toggleFolder(["Essays", "Journal"], "essays", false)).toEqual(["Journal"]);
     expect(toggleFolder(["Essays"], "essays", true)).toEqual(["essays"]);
+  });
+
+  it("gives each harness its own setup, with the token kept out of the snippet", () => {
+    const url = mcpUrl("http://192.168.0.82:3223");
+    expect(url).toBe("http://192.168.0.82:3223/api/agent/mcp");
+    expect(setupSteps("hermes", url).snippet).toContain('Authorization: "Bearer ${WRITE_TOKEN}"');
+    expect(setupSteps("turnstone", url).snippet).toContain("transport: streamable-http");
+    expect(setupSteps("other", url).snippet).toContain("Bearer <token>");
   });
 });

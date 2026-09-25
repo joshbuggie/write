@@ -4,12 +4,13 @@ import { Copy } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/toast";
 import type { IntegrationView } from "@/lib/integrations";
-import { agentApiBase } from "./integration-summary";
+import { agentApiBase, mcpUrl, setupSteps } from "./integration-summary";
 
 type TokenRevealProps = { integration: IntegrationView; token: string; onDone: () => void };
 
 /**
- * The one time a token is shown (docs/design-decisions.md#d31), with what the harness needs to connect.
+ * The one time a token is shown (docs/design-decisions.md#d31), with how to connect this kind of harness
+ * to write's MCP endpoint.
  * The token sits in a read-only field that selects itself, because the clipboard API only works over
  * HTTPS or on localhost, and write is often reached over plain HTTP on the LAN.
  */
@@ -17,6 +18,7 @@ export function TokenReveal({ integration, token, onDone }: TokenRevealProps) {
   const toast = useToast();
   // Shown only after a click in the dialog, never rendered on the server, so window is always there.
   const origin = window.location.origin;
+  const setup = setupSteps(integration.kind, mcpUrl(origin));
 
   async function copy() {
     try {
@@ -47,14 +49,17 @@ export function TokenReveal({ integration, token, onDone }: TokenRevealProps) {
         Copy it now. write keeps only a fingerprint of it, so it can&apos;t show it again. If it&apos;s lost,
         make a new one.
       </p>
-      <div className="text-[13px] leading-relaxed text-muted">
-        <p>The harness reaches write at:</p>
-        <p className="mt-1 font-mono break-all text-ink">{agentApiBase(origin)}</p>
-        <p className="mt-1">
-          with the header <code className="font-mono text-ink">Authorization: Bearer &lt;token&gt;</code>.{" "}
-          <code className="font-mono text-ink">GET /tree</code> lists the folders it can read,{" "}
-          <code className="font-mono text-ink">GET /notes?folder=…&amp;name=…</code> reads a note, and{" "}
-          <code className="font-mono text-ink">POST /proposals</code> proposes changes for you to review.
+      <div className="flex flex-col gap-1.5 text-[13px] leading-relaxed text-muted">
+        <p>{setup.intro}</p>
+        <pre className="overflow-x-auto rounded-md border border-line bg-surface px-2.5 py-2 font-mono text-[12.5px] text-ink">
+          {setup.snippet}
+        </pre>
+        <p>
+          Harnesses without MCP can use the same token over plain HTTP at{" "}
+          <code className="font-mono break-all text-ink">{agentApiBase(origin)}</code>:{" "}
+          <code className="font-mono text-ink">GET /tree</code>,{" "}
+          <code className="font-mono text-ink">GET /notes</code> and{" "}
+          <code className="font-mono text-ink">POST /proposals</code>.
         </p>
       </div>
       <div className="flex justify-end">

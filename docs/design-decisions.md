@@ -877,11 +877,30 @@ wrong_password`. A wrong current password is `403 wrong_password`, not `401`, wh
   - **Word diffs** in the review (`src/lib/proposals/word-diff.ts`): Myers on words, with bounded work.
     Small shared words between edits fold into the edits, and a mostly rewritten passage shows as the old
     text then the new, which reads far better than alternating fragments.
-- **Planned, in this order.** An MCP endpoint at `/api/agent/mcp` over the same code, stateless and tools
-  only, whose server instructions carry the workflow so no harness needs its own skill. Then launchers
-  (Turnstone's workstream API, Hermes Agent's runs API, and a generic webhook) that start a job with a
-  write-chosen idempotency key (Turnstone's `ws_id`, Hermes's `Idempotency-Key`) and continue it on
-  later passes. Update this entry as each lands.
+- **MCP** at `/api/agent/mcp` (`src/lib/server/mcp/`), behind the same token and folders, over the same
+  code as the REST routes (`agent-actions.ts`, `proposal-service.ts`). Hand-written JSON-RPC: a stateless,
+  tools-only server is a handful of message types, so no SDK (rule 8, [D4](#d4)).
+  - **Dual-era.** A 2026-07-28 request carries its version in `_meta` and mirrors it, the method and the
+    tool name into headers; write checks they match (400 `HeaderMismatch`), answers an unknown version
+    with 400 and the supported list, an unknown method with 404, has `server/discover`, and puts
+    `resultType` and `serverInfo` on every result. A legacy client (2024-11-05 to 2025-11-25) opens with
+    `initialize`, which is answered without a session: its spec allows a server that doesn't mint one,
+    notifications get 202, and 2025-03-26 batches work. Turnstone and Hermes Agent both speak legacy today.
+  - **Tools:** `list_notes`, `read_note` (Markdown, the `#`/`##` headings, and the version),
+    `propose_changes` (sections or whole note) and `get_proposal`. Reading tools are marked
+    `readOnlyHint`, so clients that ask before write-capable tools don't ask for them, and may retry them.
+    What the model can fix (a missing note, a stale version, bad arguments) is a tool error it can read.
+  - **The workflow lives in the server's `instructions`** and the tool descriptions, so a harness needs no
+    skill or prompt written for write.
+  - A request whose `Origin` names another site gets 403, as the spec requires against DNS rebinding.
+    GET and DELETE answer 405 with a JSON-RPC body: Hermes probes the endpoint with HEAD and GET first
+    and gives up on anything that looks like a web page.
+  - **Tried live** (2026-09-24) with Turnstone 1.8.4 (four nodes and the console) and Hermes Agent 0.21.4:
+    each read a note, proposed by section with reasons, and on a second pass read the owner's decisions
+    with `get_proposal`, kept a section the owner had rewritten, and built on the note as it then was.
+- **Planned.** Launchers (Turnstone's workstream API, Hermes Agent's runs API, and a generic webhook)
+  that start a job from a note with a write-chosen idempotency key (Turnstone's `ws_id`, Hermes's
+  `Idempotency-Key`) and continue it on later passes. Update this entry when they land.
 - **Tokens.** `wrt_` plus 32 random bytes as base64url, made by the server and shown once. Only the
   SHA-256 and the last four characters are saved: with 256 random bits there is nothing to guess, so no
   slow hash and no lockout are needed. The exact shape lets auth tell a token from a password without
@@ -916,4 +935,5 @@ name, kind, folders, tokenHash, tokenHint, createdAt }] }`. Unlike `settings.jso
 - Code: `src/lib/integrations.ts`, `src/lib/server/integration-*.ts`, `src/lib/server/agent-http.ts`,
   `src/lib/server/storage/integrations*.ts`, `src/app/api/integrations/`, `src/app/api/agent/` and
   `src/components/integrations/`; for proposals, `src/lib/proposals/`, `src/lib/server/proposal-*.ts`,
-  `src/lib/server/storage/proposals*.ts`, `src/app/api/proposals/` and `src/components/proposals/`.
+  `src/lib/server/storage/proposals*.ts`, `src/app/api/proposals/` and `src/components/proposals/`; for MCP,
+  `src/lib/server/mcp/` and `src/app/api/agent/mcp/`.

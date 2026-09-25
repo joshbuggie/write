@@ -1,4 +1,4 @@
-import { kindLabel, type IntegrationView } from "@/lib/integrations";
+import { kindLabel, type IntegrationKind, type IntegrationView } from "@/lib/integrations";
 import { compareNames, nameKey } from "@/lib/names";
 
 /**
@@ -49,3 +49,31 @@ export function toggleFolder(chosen: string[], folder: string, on: boolean): str
 
 /** Where agents reach write, from the address this page was opened at. */
 export const agentApiBase = (origin: string) => `${origin}/api/agent`;
+
+/** write's MCP endpoint, from the address this page was opened at. */
+export const mcpUrl = (origin: string) => `${agentApiBase(origin)}/mcp`;
+
+/**
+ * How to connect each kind of harness to write's MCP endpoint (docs/design-decisions.md#d31): what to
+ * enter, and where. The token itself is left out of the snippet so it can be kept in the harness's own
+ * secret store.
+ */
+export function setupSteps(kind: IntegrationKind, url: string): { intro: string; snippet: string } {
+  if (kind === "turnstone") {
+    return {
+      intro: "In Turnstone's admin console, add an MCP server with these settings, then reload MCP servers:",
+      snippet: `name: write\ntransport: streamable-http\nurl: ${url}\nheader: Authorization: Bearer <token>`,
+    };
+  }
+  if (kind === "hermes") {
+    return {
+      intro:
+        "Add this to the Hermes profile's config.yaml, put WRITE_TOKEN=<token> in that profile's .env, then restart its gateway:",
+      snippet: `mcp_servers:\n  write:\n    url: "${url}"\n    headers:\n      Authorization: "Bearer \${WRITE_TOKEN}"`,
+    };
+  }
+  return {
+    intro: "Add write as a remote MCP server (Streamable HTTP) in your client:",
+    snippet: `url: ${url}\nheader: Authorization: Bearer <token>`,
+  };
+}

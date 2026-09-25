@@ -465,7 +465,26 @@ and reads only the folders you choose. **Nothing in a note changes until you acc
 3. Click **Add and show token** and copy the token into the harness. **write shows it only once.** If it's
    lost, open the integration and click **New token**: the old one stops working at once.
 
-The harness sends the token as `Authorization: Bearer <token>` to `https://<your write server>/api/agent`:
+**Connecting over MCP** (Turnstone, Hermes Agent, Claude Desktop and most agent tools): add write as a
+remote MCP server at `https://<your write server>/api/agent/mcp` (Streamable HTTP) with the header
+`Authorization: Bearer <token>`. After **Add and show token**, write shows the exact settings for the
+harness you picked. For example, Hermes Agent's `config.yaml`, with the token in the profile's `.env` as
+`WRITE_TOKEN`:
+
+```yaml
+mcp_servers:
+  write:
+    url: "https://notes.example.com/api/agent/mcp"
+    headers:
+      Authorization: "Bearer ${WRITE_TOKEN}"
+```
+
+The harness gets four tools (`list_notes`, `read_note`, `propose_changes` and `get_proposal`) and
+instructions on how to use them: read a note, propose changes by section with a reason for each, and on a
+later pass check which sections you accepted before building on the note as it is.
+
+**Without MCP**, the harness sends the token as `Authorization: Bearer <token>` to
+`https://<your write server>/api/agent`:
 
 - `GET /api/agent/tree` lists the folders it can read and their notes.
 - `GET /api/agent/notes?folder=<folder>&name=<note>` reads one note, with its text and version.
