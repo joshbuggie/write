@@ -45,5 +45,8 @@ describe("review labels", () => {
     expect(applyLabel({ a: "accept", b: "reject" })).toBe("Apply 1, reject 1");
     expect(appliedMessage(2, 1)).toBe("Applied 2 changes. 1 change still waiting.");
     expect(appliedMessage(0, 0)).toBe("Rejected the changes.");
+    expect(appliedMessage(1, 1, 1)).toBe(
+      "Applied 1 change, but write couldn't record your decisions, so 1 change you rejected will be offered again.",
+    );
   });
 });

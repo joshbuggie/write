@@ -74,8 +74,10 @@ export function useProposalReview({ noteRef, flush, reloadEditor }: ReviewDeps) 
     const changed = result.content !== result.previousContent;
     if (changed) adopt(result.content, result.note);
     else startTransition(() => router.refresh());
+    const unrecordedRejections = result.unrecorded.filter((d) => d.decision === "rejected").length;
     toast.show({
-      message: appliedMessage(accepted, result.waiting),
+      message: appliedMessage(accepted, result.waiting, unrecordedRejections),
+      tone: result.unrecorded.length > 0 ? "error" : undefined,
       action: changed ? { label: "Undo", onClick: () => void undo(result) } : undefined,
       // The editor reloaded, so ⌘Z can't reach this change: the toast is the only undo, so it stays longer.
       durationMs: changed ? 10_000 : undefined,

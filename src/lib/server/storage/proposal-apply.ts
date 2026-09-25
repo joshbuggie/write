@@ -10,7 +10,9 @@ import { readProposal, writeProposal, type StoredProposal } from "./proposals-fi
  * Applying the owner's decisions on a proposal as one step (docs/design-decisions.md#d31). The proposal's
  * status, the note's version, the save and the recorded decisions all happen under the write lock, so a
  * newer proposal can't replace this one, and nothing can close it, between the save and the record: Apply
- * either changes the note and says so, or changes nothing.
+ * either changes the note and says so, or changes nothing. If the decisions can't be written, a request
+ * that saved nothing fails; one that saved the note succeeds with `recorded: false`, so the caller can say
+ * which decisions will be asked again.
  */
 
 /** What to do, worked out from the proposal and the note as they are under the lock. */
@@ -27,7 +29,7 @@ export function applyProposal(
   id: string,
   noteVersion: string,
   plan: (proposal: StoredProposal, note: Note) => ProposalPlan,
-): Promise<{ saved: SavedNote; before: Note; plan: ProposalPlan }> {
+): Promise<{ saved: SavedNote; before: Note; plan: ProposalPlan; recorded: boolean }> {
   return withWriteLock(async () => {
     const proposal = await readProposal(id);
     if (!proposal || proposal.status !== "pending") throw closed();
@@ -52,12 +54,16 @@ export function applyProposal(
       { ...proposal, decisions: [...proposal.decisions, ...planned.decisions] },
       planned.status,
     );
+    let recorded = true;
     try {
       await writeProposal({ ...next, updatedAt: new Date().toISOString() });
     } catch (err) {
-      // The note is saved; a proposal left pending only offers what isn't in the note yet, so say it worked.
+      // Nothing else was saved: the whole request failed, and must say so.
+      if (saved === unchanged) throw err;
+      // The note is saved, so the request did something; the caller reports what wasn't recorded.
       console.error("[write] couldn't record the decisions on a proposal", err);
+      recorded = false;
     }
-    return { saved, before, plan: planned };
+    return { saved, before, plan: planned, recorded };
   });
 }

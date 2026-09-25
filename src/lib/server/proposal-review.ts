@@ -59,30 +59,44 @@ export async function resolveProposal(input: {
   accept: string[];
   reject: string[];
 }): Promise<ResolveProposalResponse> {
-  let waiting = 0;
-  const { saved, before, plan } = await applyProposal(input.id, input.noteVersion, (proposal, note) => {
-    const changes = openChanges(proposal, note.content);
-    const accepted = changes.filter((c) => input.accept.includes(c.key));
-    const rejected = changes.filter((c) => input.reject.includes(c.key) && !input.accept.includes(c.key));
-    const at = new Date().toISOString();
-    const decide = (c: ProposalChange, decision: ChangeDecision["decision"]): ChangeDecision => ({
-      key: c.key,
-      heading: c.heading,
-      kind: c.kind,
-      decision,
-      at,
-    });
-    const decisions = [
-      ...accepted.map((c) => decide(c, "accepted")),
-      ...rejected.map((c) => decide(c, "rejected")),
-    ];
-    waiting = changes.length - decisions.length;
-    const everAccepted = [...proposal.decisions, ...decisions].some((d) => d.decision === "accepted");
-    return {
-      content: applyChanges(note.content, proposal.proposed, accepted),
-      decisions,
-      status: waiting > 0 ? "pending" : everAccepted ? "applied" : "dismissed",
-    };
-  });
-  return { note: saved, content: plan.content, previousContent: before.content, waiting };
+  let open = 0;
+  let acceptedCount = 0;
+  const { saved, before, plan, recorded } = await applyProposal(
+    input.id,
+    input.noteVersion,
+    (proposal, note) => {
+      const changes = openChanges(proposal, note.content);
+      const accepted = changes.filter((c) => input.accept.includes(c.key));
+      const rejected = changes.filter((c) => input.reject.includes(c.key) && !input.accept.includes(c.key));
+      const at = new Date().toISOString();
+      const decide = (c: ProposalChange, decision: ChangeDecision["decision"]): ChangeDecision => ({
+        key: c.key,
+        heading: c.heading,
+        kind: c.kind,
+        decision,
+        at,
+      });
+      const decisions = [
+        ...accepted.map((c) => decide(c, "accepted")),
+        ...rejected.map((c) => decide(c, "rejected")),
+      ];
+      open = changes.length;
+      acceptedCount = accepted.length;
+      const waiting = changes.length - decisions.length;
+      const everAccepted = [...proposal.decisions, ...decisions].some((d) => d.decision === "accepted");
+      return {
+        content: applyChanges(note.content, proposal.proposed, accepted),
+        decisions,
+        status: waiting > 0 ? "pending" : everAccepted ? "applied" : "dismissed",
+      };
+    },
+  );
+  return {
+    note: saved,
+    content: plan.content,
+    previousContent: before.content,
+    // Unrecorded rejections are offered again; accepted changes are in the note either way.
+    waiting: recorded ? open - plan.decisions.length : open - acceptedCount,
+    unrecorded: recorded ? [] : plan.decisions,
+  };
 }

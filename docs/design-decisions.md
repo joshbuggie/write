@@ -862,6 +862,9 @@ wrong_password`. A wrong current password is `403 wrong_password`, not `401`, wh
     be pending and the note still at the version the review was worked out against (409 otherwise; the
     dialog then reloads the review), and the save and the recorded decisions happen together, so a newer
     proposal can't replace this one in between and Apply never changes the note while reporting failure.
+    Nor the other way round: when the decisions can't be written, a request that saved nothing (rejections
+    only) fails, and one that saved the note succeeds but lists the decisions it couldn't record
+    (`unrecorded`), so the toast can say the rejected ones will be offered again.
     Only accepted sections are rewritten (`src/lib/proposals/apply.ts`); every other section keeps its
     exact bytes, the last one included, and a new section brings its own blank line so the one before it
     isn't touched either. A randomized test holds it to that. A new section goes after the section before

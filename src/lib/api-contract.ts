@@ -321,6 +321,11 @@ export interface ResolveProposalResponse {
   previousContent: string;
   /** Changes still waiting after these decisions. */
   waiting: number;
+  /**
+   * Decisions write saved the note for but couldn't record (the proposals folder couldn't be written).
+   * Accepted ones are in the note all the same; rejected ones will be offered again. Usually empty.
+   */
+  unrecorded: ChangeDecision[];
 }
 
 /**

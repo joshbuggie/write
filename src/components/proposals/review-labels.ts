@@ -52,8 +52,14 @@ export function applyLabel(decisions: Record<string, Decision>): string | null {
   return null;
 }
 
-/** The toast after applying: what happened and what still waits. */
-export function appliedMessage(accepted: number, waiting: number): string {
+/**
+ * The toast after applying: what happened and what still waits. `unrecordedRejections` counts rejections
+ * write couldn't record, which will be offered again.
+ */
+export function appliedMessage(accepted: number, waiting: number, unrecordedRejections = 0): string {
   const done = accepted ? `Applied ${plural(accepted, "change")}` : "Rejected the changes";
+  if (unrecordedRejections > 0) {
+    return `${done}, but write couldn't record your decisions, so ${plural(unrecordedRejections, "change")} you rejected will be offered again.`;
+  }
   return waiting ? `${done}. ${plural(waiting, "change")} still waiting.` : `${done}.`;
 }
