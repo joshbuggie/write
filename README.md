@@ -515,7 +515,8 @@ anything):
 If the harness uses a private certificate (Caddy's local CA, for example), paste the certificate authority
 under **Private certificate?**. write then trusts what that authority signed, for that server only.
 
-Then, on a note, choose **Send to…** in the ⋯ menu, say what it should do, and optionally pick the sections
+Then, on a note, click the **Send** button (the paper plane next to ✨ at the top of the note; also **Send
+to…** in the ⋯ menu), say what it should do, and optionally pick the sections
 it may change. The note shows that the harness is working, and its changes appear as a proposal to review.
 Sending the same note again continues the same conversation, so the harness knows what you accepted last
 time; tick **Start a new conversation** to start over. API keys are kept on the write server, like the AI

@@ -4,6 +4,7 @@ import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { startTransition, useEffect, useRef, useState } from "react";
 import { AiButton } from "@/components/ai/ai-button";
+import { SendButton } from "@/components/launch/send-button";
 import { SendDialog } from "@/components/launch/send-dialog";
 import { WorkingNotice } from "@/components/launch/working-notice";
 import { ProposalBanner } from "@/components/proposals/proposal-banner";
@@ -204,6 +205,7 @@ function EditableNote(props: {
         noteRef={ref}
         resolveDownloadHref={downloadHref}
         status={<SaveStatus state={state} onRetry={() => autosaver.retry()} onShowConflict={showConflict} />}
+        send={<SendButton targets={send.targets} onClick={() => setDialog("send")} />}
         assist={<AiButton />}
         menu={
           <NoteMenu

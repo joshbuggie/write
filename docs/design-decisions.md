@@ -906,7 +906,8 @@ wrong_password`. A wrong current password is `403 wrong_password`, not `401`, wh
   - **Tried live** (2026-09-24) with Turnstone 1.8.4 (four nodes and the console) and Hermes Agent 0.21.4:
     each read a note, proposed by section with reasons, and on a second pass read the owner's decisions
     with `get_proposal`, kept a section the owner had rewritten, and built on the note as it then was.
-- **Launchers: "Send to…" on a note** (`src/lib/server/launch/`). An integration may also say how write
+- **Launchers: "Send to…" on a note** (`src/lib/server/launch/`), from a Send button in the note's header
+  (shown only when a harness can take the note) and from the ⋯ menu. An integration may also say how write
   starts a job in its harness; without that, the harness is started from its own UI and still reads and
   proposes through MCP. A launcher only starts or continues work and keeps the harness's reference; the
   results come back as proposals, so write never reads a harness's events or replies.
