@@ -504,8 +504,10 @@ anything):
 
 - **Turnstone:** its address (the console), an API token that can create workstreams, and whether to start
   a **coordinator** (several agents) or a **single workstream**. If you registered write in Turnstone under
-  another name than `write`, enter that name. Turn on auto-approve for write's MCP server in Turnstone:
-  write's tools can only read and propose, and a coordinator's agents would otherwise wait for approval.
+  another name than `write`, enter that name. A single workstream runs without prompts: write asks
+  Turnstone to auto-approve its four tools. A coordinator can't be started that way, so the first time
+  it calls write's tools Turnstone asks you to approve them; choose "always". write's tools can only read
+  and propose, so approving them is safe.
 - **Hermes Agent:** its API address including the profile, like `http://hermes.local:8642/p/writing/v1`,
   and that profile's `API_SERVER_KEY`.
 - **Anything else:** a webhook URL; write POSTs the note, your request and a ready-made brief for an agent.

@@ -39,6 +39,7 @@ export async function sendStateFor(note: Note): Promise<NoteSendState> {
     .map((j) => ({
       jobId: j.id,
       source: names.get(j.integrationId) ?? "The harness",
+      mayNeedApproval: j.ref.coordinator === true,
       createdAt: j.createdAt,
     }));
   return { targets, working };

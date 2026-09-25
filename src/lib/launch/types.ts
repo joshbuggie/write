@@ -17,6 +17,8 @@ export interface SendTarget {
 export interface WorkingJob {
   jobId: string;
   source: string;
+  /** A Turnstone coordinator, which stops at write's tools until they are approved in Turnstone. */
+  mayNeedApproval: boolean;
   /** ISO 8601. */
   createdAt: string;
 }

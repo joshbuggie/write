@@ -36,6 +36,13 @@ export function WorkingNotice({ working }: { working: WorkingJob[] }) {
         <Notice key={j.jobId}>
           {j.source} is working on this note (sent {ago(j.createdAt)}). Its changes will show up here for
           review.
+          {j.mayNeedApproval && (
+            <span className="text-muted">
+              {" "}
+              If nothing arrives, check {j.source}: a coordinator waits for you to approve write&apos;s tools
+              there (choose “always” once).
+            </span>
+          )}
         </Notice>
       ))}
     </>

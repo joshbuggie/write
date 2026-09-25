@@ -53,6 +53,7 @@ const originOf = (url: string) => {
  */
 export function LauncherFields({ kind, draft, saved, integrationId, onChange }: LauncherFieldsProps) {
   const enabledId = useId();
+  const modeHintId = useId();
   const [test, setTest] = useState<{ ok: boolean; text: string } | null>(null);
   const [testing, setTesting] = useState(false);
   const where = WHERE[kind];
@@ -108,6 +109,7 @@ export function LauncherFields({ kind, draft, saved, integrationId, onChange }: 
             <div className="grid gap-3 md:grid-cols-2">
               <SelectField
                 label="Start as"
+                aria-describedby={modeHintId}
                 value={draft.turnstoneMode}
                 options={[
                   { value: "coordinator", label: "Coordinator (several agents)" },
@@ -123,6 +125,13 @@ export function LauncherFields({ kind, draft, saved, integrationId, onChange }: 
                 onChange={(e) => onChange({ mcpServerName: e.target.value })}
               />
             </div>
+          )}
+          {kind === "turnstone" && (
+            <p id={modeHintId} className="-mt-1 text-[12.5px] leading-relaxed text-muted">
+              {draft.turnstoneMode === "coordinator"
+                ? "A coordinator runs several agents, but Turnstone asks you to approve write's tools in it (choose “always” once). A single workstream needs no approvals."
+                : "A single workstream runs one agent, with write's tools approved in advance."}
+            </p>
           )}
           <details className="text-[13px] text-muted">
             <summary className="cursor-pointer">Private certificate?</summary>
