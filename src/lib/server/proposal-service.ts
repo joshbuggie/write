@@ -46,7 +46,11 @@ export async function proposeFromAgent(
       note,
     );
   }
-  const proposed = req.sections ? proposedFromSections(base, req.sections) : toLf(req.content ?? "");
+  const built = req.sections
+    ? proposedFromSections(base, req.sections)
+    : { ok: true as const, file: toLf(req.content ?? "") };
+  if (!built.ok) throw new HttpError("bad_request", built.message);
+  const proposed = built.file;
   if (Buffer.byteLength(proposed) > MAX_NOTE_BYTES) {
     throw new StorageError("too_large", "The proposed note is larger than 5 MB, the maximum note size.");
   }

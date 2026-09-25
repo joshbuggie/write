@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { findSectionKey, joinSections, splitSections } from "./sections";
+import { joinSections, matchSection, splitSections } from "./sections";
 
 describe("splitSections", () => {
   it("cuts at # and ## headings, keeping ### inside, and joins back exactly", () => {
@@ -33,9 +33,11 @@ describe("splitSections", () => {
   it("numbers repeated headings, and matches case and spacing loosely", () => {
     const sections = splitSections("## Notes\na\n## notes\nb\n##   NOTES  \nc\n## Notes 2\n");
     expect(sections.map((s) => s.key)).toEqual(["", "2:notes", "2:notes\n2", "2:notes\n3", "2:notes 2"]);
-    expect(findSectionKey(sections, "## Notes")).toBe("2:notes");
-    expect(findSectionKey(sections, "notes 2")).toBe("2:notes 2");
-    expect(findSectionKey(sections, null)).toBe("");
-    expect(findSectionKey(sections, "Missing")).toBeNull();
+    expect(matchSection(sections, "## Notes")).toMatchObject({
+      ambiguous: ["## Notes", "## notes", "##   NOTES"],
+    });
+    expect(matchSection(sections, "notes 2")).toEqual({ key: "2:notes 2" });
+    expect(matchSection(sections, null)).toEqual({ key: "" });
+    expect(matchSection(sections, "Missing")).toEqual({ missing: true });
   });
 });

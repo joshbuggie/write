@@ -280,4 +280,19 @@ describe("proposals", () => {
       await deleteFolder("Writing");
       expect((await status(proposal.id)).status).toBe("orphaned");
     }));
+
+  it("never changes the note when Apply fails because the proposal was replaced meanwhile", () =>
+    withTempDataDir(async () => {
+      const { read, propose, reviews, decide } = await setUp();
+      const note = await read();
+      await propose({ baseVersion: note.version, content: note.content.replace("Alpha.", "A!") });
+      const [review] = await reviews();
+      const [applied] = await Promise.all([
+        decide({ id: review.id, noteVersion: review.noteVersion, accept: ["2:a"], reject: [] }),
+        propose({ baseVersion: note.version, content: note.content.replace("Beta.", "B2") }),
+      ]);
+      const content = (await readNote(ref)).content;
+      if (applied.status === 200) expect(content).toBe(NOTE.replace("Alpha.", "A!"));
+      else expect(content).toBe(NOTE); // refused: nothing may have been written
+    }));
 });

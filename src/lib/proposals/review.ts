@@ -14,11 +14,15 @@ export const bodySections = (file: string) => splitSections(splitFrontmatter(fil
 
 const byKey = (sections: Section[]) => new Map(sections.map((s) => [s.key, s]));
 
-/** The reason given for a section, matched on its heading text; the opening text is "". */
+/**
+ * The reason given for a section, matched on its heading text, and its level too when the reason's key
+ * has #s ("## Plan"); the opening text is "".
+ */
 function reasonFor(reasons: Record<string, string>, section: Section): string | null {
   for (const [heading, reason] of Object.entries(reasons)) {
-    const name = headingText(heading.replace(/^\s*#+\s*/, ""));
-    if (name === section.name) return reason;
+    const marks = /^\s*(#+)\s+/.exec(heading);
+    if (marks && !section.key.startsWith(`${marks[1].length}:`)) continue;
+    if (headingText(heading.replace(/^\s*#+\s*/, "")) === section.name) return reason;
   }
   return null;
 }

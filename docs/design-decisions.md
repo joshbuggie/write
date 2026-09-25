@@ -844,7 +844,9 @@ wrong_password`. A wrong current password is `403 wrong_password`, not `401`, wh
   section by section and only an accept writes the note ([D9](#d9)).
   - **Sections** are cut at `#` and `##` headings outside fenced code (`src/lib/proposals/sections.ts`);
     `###` and deeper stay inside their section. A section is known by its heading's level and text, case
-    and spacing ignored, numbered when repeated.
+    and spacing ignored, numbered when repeated. A harness naming a section keeps its level: "## Summary"
+    never lands on "# Summary", and a heading that fits more than one section (the same text at two
+    levels, or a repeated heading) is refused rather than guessed.
   - **Three-way comparison** (`src/lib/proposals/review.ts`): what the harness read, what it proposes and
     the note now. A section it changed that you left alone is a clean change; one you changed too is a
     conflict, and the card says accepting replaces your version; one you removed is "gone" and accepting
@@ -856,14 +858,17 @@ wrong_password`. A wrong current password is `403 wrong_password`, not `401`, wh
     refused with 409 and the note as it is now, saying to read it again. Nothing about the note is
     guessed.
   - **Front matter is never proposed.** It is split off all three versions, and the note's own is kept.
-  - **Applying** (`POST /api/proposals/resolve`) happens on the server, in one conditional save against
-    the version the review was worked out against (409 if the note changed meanwhile; the dialog then
-    reloads the review). Untouched sections keep their exact bytes (`src/lib/proposals/apply.ts`);
-    a new section goes after the section before it in the proposal. The dialog saves the note first, so
-    the review sees the latest text. Afterwards the editor reloads the saved text, recorded as this tab's
-    own save so it isn't "Updated from disk" ([D20](#d20)). Because the editor remounts, ⌘Z can't reach
-    the change, so the toast offers Undo for 10 seconds; Undo puts the old text back with a conditional
-    save, so it never overwrites a newer edit.
+  - **Applying** (`POST /api/proposals/resolve`) is one step under the write lock: the proposal must still
+    be pending and the note still at the version the review was worked out against (409 otherwise; the
+    dialog then reloads the review), and the save and the recorded decisions happen together, so a newer
+    proposal can't replace this one in between and Apply never changes the note while reporting failure.
+    Only accepted sections are rewritten (`src/lib/proposals/apply.ts`); every other section keeps its
+    exact bytes, the last one included, and a new section brings its own blank line so the one before it
+    isn't touched either. A randomized test holds it to that. A new section goes after the section before
+    it in the proposal. The dialog saves the note first, so the review sees the latest text. Afterwards the
+    editor reloads the saved text, recorded as this tab's own save so it isn't "Updated from disk"
+    ([D20](#d20)). Because the editor remounts, ⌘Z can't reach the change, so the toast offers Undo for 10
+    seconds; Undo puts the old text back with a conditional save, so it never overwrites a newer edit.
   - **Undecided changes keep waiting.** Accepted and rejected changes are recorded per section and never
     offered again; a proposal closes as "applied" or "dismissed" once nothing is left, and the harness
     reads the decisions with `GET /api/agent/proposals?id=`, so its next pass knows what was kept.

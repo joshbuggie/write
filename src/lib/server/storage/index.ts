@@ -44,6 +44,7 @@ export {
   type StoredProposal,
 } from "./proposals";
 export { isProposalId } from "./proposals-file";
+export { applyProposal, type ProposalPlan } from "./proposal-apply";
 export { latestJob, listJobs, saveJob, type JobRef, type StoredJob } from "./jobs";
 export {
   readAiSettings,

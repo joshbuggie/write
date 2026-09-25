@@ -32,7 +32,7 @@ export const sameNoteRef = (a: NoteRef, b: NoteRef) =>
  * A proposal with a new status. A closed one drops the note text it carried: all that is looked up
  * afterwards is the decisions, and the text is either in the note now or was turned down.
  */
-function withStatus(p: StoredProposal, status: StoredProposal["status"]): StoredProposal {
+export function withStatus(p: StoredProposal, status: StoredProposal["status"]): StoredProposal {
   return status === "pending" ? { ...p, status } : { ...p, status, base: "", proposed: "" };
 }
 

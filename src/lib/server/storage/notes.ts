@@ -98,67 +98,78 @@ export async function createNote(input: { folder: string; name?: string; content
  * style and BOM. A forced overwrite of a version the client didn't base its edit on first copies that version
  * into .trash.
  */
-export async function saveNote(input: {
-  ref: NoteRef;
-  content: string;
-  baseVersion: string | null;
-  force?: boolean;
-}): Promise<SavedNote> {
+export async function saveNote(input: SaveInput): Promise<SavedNote> {
+  checkSaveSize(input);
+  return withWriteLock(() => saveNoteUnlocked(input));
+}
+
+/** What saveNote takes: the note, its new full text, and the version the edit was based on. */
+export type SaveInput = { ref: NoteRef; content: string; baseVersion: string | null; force?: boolean };
+
+/**
+ * Too large as LF is too large in any style (CRLF and a BOM only add bytes), so say so before any version
+ * check: a conflict banner would only lead to the same error after "Keep mine".
+ */
+function checkSaveSize(input: SaveInput): void {
+  if (Buffer.byteLength(toLf(input.content)) > MAX_NOTE_BYTES) throw tooLarge();
+}
+
+/**
+ * saveNote for storage code that already holds the write lock, such as applying a proposal, where the
+ * save and the proposal's update must happen as one step (docs/design-decisions.md#d31).
+ */
+export async function saveNoteUnlocked(input: SaveInput): Promise<SavedNote> {
+  checkSaveSize(input);
   const { ref, baseVersion, force = false } = input;
   const text = toLf(input.content);
-  // Too large as LF is too large in any style (CRLF and a BOM only add bytes), so say so before any
-  // version check: a conflict banner would only lead to the same error after "Keep mine".
-  if (Buffer.byteLength(text) > MAX_NOTE_BYTES) throw tooLarge();
-  return withWriteLock(async () => {
-    const dataDir = getDataDir();
-    try {
-      const folder = await resolveFolder(dataDir, ref.folder);
-      const existing = await lookupNote(folder.path, ref.name);
-      if (existing && !existing.stats.isFile()) throw noteNotFound();
+  const dataDir = getDataDir();
+  try {
+    const folder = await resolveFolder(dataDir, ref.folder);
+    const existing = await lookupNote(folder.path, ref.name);
+    if (existing && !existing.stats.isFile()) throw noteNotFound();
 
-      if (!existing) {
-        if (!force) throw new StorageError("version_conflict", "This note no longer exists on disk.", null);
-        const bytes = encodeChecked(text, { eol: "lf", bom: false });
-        const file = safeJoin(folder.path, ref.name + NOTE_EXT);
-        await atomicWrite(file, bytes, { noClobber: true });
-        return { ...toSummary(folder.name, ref.name, await lstat(file)), version: versionOf(bytes) };
-      }
-
-      const current = await readFile(existing.path);
-      const decoded = decode(current);
-      const currentVersion = versionOf(current);
-      const unchanged = {
-        ...toSummary(folder.name, existing.name, existing.stats),
-        size: current.length,
-        version: currentVersion,
-      };
-      if (!force && current.length > MAX_NOTE_BYTES) {
-        throw new StorageError("read_only", "This note is too large to edit here.");
-      }
-      if (!force && !decoded.utf8Ok) {
-        throw new StorageError("read_only", "This file isn't valid UTF-8, so it can't be edited here.");
-      }
-      if (!force && baseVersion !== currentVersion) {
-        if (decoded.text === text) return unchanged;
-        const note = noteFromBytes(folder.name, existing.name, existing.stats, current);
-        throw new StorageError("version_conflict", "This note changed on disk since you opened it.", note);
-      }
-
-      const bytes = encodeChecked(text, decoded);
-      if (bytes.equals(current)) return unchanged;
-      // A forced save over a version the client never saw ("Keep mine") keeps the other version in .trash.
-      if (baseVersion !== currentVersion) {
-        await copyToTrash(dataDir, current, [folder.name, existing.name + NOTE_EXT]);
-      }
-      await atomicWrite(existing.path, bytes);
-      return {
-        ...toSummary(folder.name, existing.name, await lstat(existing.path)),
-        version: versionOf(bytes),
-      };
-    } catch (err) {
-      throw mapFsError(err, "Note not found.");
+    if (!existing) {
+      if (!force) throw new StorageError("version_conflict", "This note no longer exists on disk.", null);
+      const bytes = encodeChecked(text, { eol: "lf", bom: false });
+      const file = safeJoin(folder.path, ref.name + NOTE_EXT);
+      await atomicWrite(file, bytes, { noClobber: true });
+      return { ...toSummary(folder.name, ref.name, await lstat(file)), version: versionOf(bytes) };
     }
-  });
+
+    const current = await readFile(existing.path);
+    const decoded = decode(current);
+    const currentVersion = versionOf(current);
+    const unchanged = {
+      ...toSummary(folder.name, existing.name, existing.stats),
+      size: current.length,
+      version: currentVersion,
+    };
+    if (!force && current.length > MAX_NOTE_BYTES) {
+      throw new StorageError("read_only", "This note is too large to edit here.");
+    }
+    if (!force && !decoded.utf8Ok) {
+      throw new StorageError("read_only", "This file isn't valid UTF-8, so it can't be edited here.");
+    }
+    if (!force && baseVersion !== currentVersion) {
+      if (decoded.text === text) return unchanged;
+      const note = noteFromBytes(folder.name, existing.name, existing.stats, current);
+      throw new StorageError("version_conflict", "This note changed on disk since you opened it.", note);
+    }
+
+    const bytes = encodeChecked(text, decoded);
+    if (bytes.equals(current)) return unchanged;
+    // A forced save over a version the client never saw ("Keep mine") keeps the other version in .trash.
+    if (baseVersion !== currentVersion) {
+      await copyToTrash(dataDir, current, [folder.name, existing.name + NOTE_EXT]);
+    }
+    await atomicWrite(existing.path, bytes);
+    return {
+      ...toSummary(folder.name, existing.name, await lstat(existing.path)),
+      version: versionOf(bytes),
+    };
+  } catch (err) {
+    throw mapFsError(err, "Note not found.");
+  }
 }
 
 /**

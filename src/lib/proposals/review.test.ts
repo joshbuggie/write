@@ -82,6 +82,9 @@ describe("proposedFromSections", () => {
       { heading: "## D", content: "## D\n\nDelta." },
       { heading: null, content: "New intro.\n" },
     ]);
-    expect(proposed).toBe("New intro.\n\n## A\n\nAlpha, better.\n\n## C\n\nGamma.\n\n## D\n\nDelta.\n");
+    expect(proposed).toEqual({
+      ok: true,
+      file: "New intro.\n\n## A\n\nAlpha, better.\n\n## C\n\nGamma.\n\n## D\n\nDelta.\n",
+    });
   });
 });

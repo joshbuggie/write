@@ -58,7 +58,7 @@ export const TOOL_DEFINITIONS = [
               heading: {
                 type: ["string", "null"],
                 description:
-                  'Which section to replace, by its heading ("## Plan" or "Plan"); null for the text before the first heading.',
+                  'Which section to replace, by its heading ("## Plan" or "Plan"); include the #s when the same text is used at two levels. null for the text before the first heading.',
               },
               content: {
                 type: "string",

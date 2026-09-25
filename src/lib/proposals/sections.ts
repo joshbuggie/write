@@ -78,9 +78,23 @@ export const joinSections = (sections: readonly Pick<Section, "text">[]) =>
 /** Two versions of a section are the same when they differ only in trailing whitespace. */
 export const sameText = (a: string, b: string) => a.trimEnd() === b.trimEnd();
 
-/** The key a harness means by a heading it names ("## Plan", "Plan"), matched on its text only. */
-export function findSectionKey(sections: readonly Section[], heading: string | null): string | null {
-  if (heading === null || heading.trim() === "") return "";
+/** Which section a heading a harness names means, if exactly one. */
+export type SectionMatch = { key: string } | { missing: true } | { ambiguous: string[] };
+
+/**
+ * The section a harness means by a heading ("## Plan", "# Plan" or "Plan"). With #s, the level must match
+ * too, so "## Summary" never lands on "# Summary". A heading that fits more than one section (the same
+ * text at two levels, or a repeated heading) is ambiguous, never guessed.
+ */
+export function matchSection(sections: readonly Section[], heading: string | null): SectionMatch {
+  if (heading === null || heading.trim() === "") return { key: "" };
+  const marks = /^\s*(#+)\s+/.exec(heading);
+  const level = marks ? marks[1].length : null;
   const wanted = headingText(heading.replace(/^\s*#+\s*/, "").replace(/\s+#+\s*$/, ""));
-  return sections.find((s) => s.heading !== null && s.name === wanted)?.key ?? null;
+  const found = sections.filter(
+    (s) => s.heading !== null && s.name === wanted && (level === null || s.key.startsWith(`${level}:`)),
+  );
+  if (found.length === 1) return { key: found[0].key };
+  if (found.length === 0) return { missing: true };
+  return { ambiguous: found.map((s) => s.heading ?? "") };
 }
