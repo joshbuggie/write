@@ -99,6 +99,8 @@ export function IntegrationsDialog({ library, authEnabled, onClose }: Integratio
                 <li>
                   <IntegrationForm
                     initial={{ name: "", kind: "turnstone", folders: [] }}
+                    integrationId={null}
+                    savedLauncher={null}
                     library={library}
                     submitLabel="Add and show token"
                     onSubmit={async (input) => {

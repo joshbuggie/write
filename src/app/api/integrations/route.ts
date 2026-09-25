@@ -7,7 +7,7 @@ import {
   readIntegrations,
   updateIntegration,
 } from "@/lib/server/storage";
-import { isIntegrationRequest, isUpdateIntegrationRequest } from "@/lib/server/validate";
+import { isIntegrationRequest, isUpdateIntegrationRequest } from "@/lib/server/validate-integrations";
 
 /**
  * The Integrations dialog's API (docs/design-decisions.md#d31). Signed-in owner only: an integration token
@@ -22,17 +22,17 @@ export const GET = handle(async () => {
 
 /** Makes an integration. The answer carries its token, the only time it is ever shown. */
 export const POST = handle(async (req) => {
-  const { name, kind, folders } = await readJson(req, isIntegrationRequest);
-  const { integration, token } = await createIntegration({ name, kind, folders });
+  const { name, kind, folders, launcher } = await readJson(req, isIntegrationRequest);
+  const { integration, token } = await createIntegration({ name, kind, folders, launcher });
   const body: IntegrationTokenResponse = { integration: toIntegrationView(integration), token };
   return json(body, 201);
 });
 
-/** Changes an integration's name, kind or folders. Its token keeps working. */
+/** Changes an integration's name, kind, folders or launcher. Its token keeps working. */
 export const PATCH = handle(async (req) => {
-  const { id, name, kind, folders } = await readJson(req, isUpdateIntegrationRequest);
+  const { id, name, kind, folders, launcher } = await readJson(req, isUpdateIntegrationRequest);
   const body: IntegrationResponse = {
-    integration: toIntegrationView(await updateIntegration(id, { name, kind, folders })),
+    integration: toIntegrationView(await updateIntegration(id, { name, kind, folders, launcher })),
   };
   return json(body);
 });

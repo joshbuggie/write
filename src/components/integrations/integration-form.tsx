@@ -6,11 +6,22 @@ import { Button } from "@/components/ui/button";
 import { SelectField } from "@/components/ui/select-field";
 import { TextField } from "@/components/ui/text-field";
 import type { IntegrationRequest } from "@/lib/api-contract";
-import { checkIntegrationName, INTEGRATION_KINDS, type IntegrationKind } from "@/lib/integrations";
+import {
+  checkIntegrationName,
+  DEFAULT_LAUNCHER,
+  INTEGRATION_KINDS,
+  launcherProblem,
+  type IntegrationKind,
+  type LauncherView,
+} from "@/lib/integrations";
 import { folderChoices, toggleFolder } from "./integration-summary";
+import { LauncherFields, type LauncherDraft } from "./launcher-fields";
 
 type IntegrationFormProps = {
   initial: IntegrationRequest;
+  /** The saved integration's id and launcher, for "Test connection" with its saved key; null when new. */
+  integrationId: string | null;
+  savedLauncher: LauncherView | null;
   /** Every folder in the library, for the checkboxes. */
   library: string[];
   submitLabel: string;
@@ -25,18 +36,24 @@ type IntegrationFormProps = {
  * Name, kind and folders for one integration. The folders are the whole of what its token can read, so
  * they are ticked one by one; there is no "every folder" switch (docs/design-decisions.md#d31).
  */
-export function IntegrationForm({
-  initial,
-  library,
-  submitLabel,
-  onSubmit,
-  onCancel,
-  actions,
-}: IntegrationFormProps) {
+export function IntegrationForm(props: IntegrationFormProps) {
+  const { initial, library, submitLabel, onSubmit, onCancel, actions, integrationId, savedLauncher } = props;
   const ids = useId();
   const [name, setName] = useState(initial.name);
   const [kind, setKind] = useState<IntegrationKind>(initial.kind);
   const [folders, setFolders] = useState(initial.folders);
+  // The saved key never comes to the browser: an empty key field means "keep it" (see mergeLauncher).
+  const [launcher, setLauncher] = useState<LauncherDraft>(() =>
+    savedLauncher
+      ? {
+          url: savedLauncher.url,
+          ca: savedLauncher.ca,
+          turnstoneMode: savedLauncher.turnstoneMode,
+          mcpServerName: savedLauncher.mcpServerName,
+          enabled: true,
+        }
+      : { ...DEFAULT_LAUNCHER, enabled: false },
+  );
   const [nameError, setNameError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
@@ -46,10 +63,13 @@ export function IntegrationForm({
     e.stopPropagation();
     const checked = checkIntegrationName(name);
     if (!checked.ok) return setNameError(checked.message);
+    const { enabled, ...launcherInput } = launcher;
+    const problem = enabled ? launcherProblem(launcherInput) : null;
+    if (problem) return setError(problem);
     setPending(true);
     setError(null);
     try {
-      await onSubmit({ name: checked.name, kind, folders });
+      await onSubmit({ name: checked.name, kind, folders, launcher: enabled ? launcherInput : null });
     } catch (err) {
       setError(err instanceof Error && err.message ? err.message : "Couldn't save the integration.");
     } finally {
@@ -101,6 +121,13 @@ export function IntegrationForm({
         </ul>
         <p className="text-[12.5px] text-muted">Notes in other folders stay invisible to it.</p>
       </fieldset>
+      <LauncherFields
+        kind={kind}
+        draft={launcher}
+        saved={savedLauncher}
+        integrationId={integrationId}
+        onChange={(patch) => setLauncher((l) => ({ ...l, ...patch }))}
+      />
       {error && (
         <p role="alert" className="text-[14px] text-danger">
           {error}

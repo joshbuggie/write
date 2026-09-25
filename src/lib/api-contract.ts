@@ -1,5 +1,5 @@
 import type { AiSettings, ProviderId } from "./ai/settings";
-import type { IntegrationKind, IntegrationView } from "./integrations";
+import type { IntegrationKind, IntegrationView, LauncherInput } from "./integrations";
 import type { SectionEdit } from "./proposals/apply";
 import type { ChangeDecision, ProposalReview, ProposalStatus } from "./proposals/types";
 import type { FolderSummary, Note, NoteRef, NoteSummary, SavedNote, Tree } from "./types";
@@ -22,6 +22,8 @@ export type ErrorCode =
   | "ai_disabled"
   | "ai_unreachable"
   | "ai_upstream"
+  | "harness_unreachable"
+  | "harness_error"
   | "internal";
 
 export const ERROR_STATUS: Record<ErrorCode, number> = {
@@ -47,6 +49,10 @@ export const ERROR_STATUS: Record<ErrorCode, number> = {
   ai_unreachable: 502,
   /** The model server answered with an error (key refused, unknown model, rate limit…). */
   ai_upstream: 502,
+  /** A harness write starts jobs in (Turnstone, Hermes Agent, a webhook) couldn't be reached. */
+  harness_unreachable: 502,
+  /** The harness answered with an error (key refused, unknown workstream…). */
+  harness_error: 502,
   storage_unavailable: 503,
 };
 
@@ -75,6 +81,8 @@ export const API = {
   agentTree: "/api/agent/tree",
   agentNotes: "/api/agent/notes",
   agentProposals: "/api/agent/proposals",
+  launch: "/api/integrations/launch",
+  testLauncher: "/api/integrations/test",
   proposals: "/api/proposals",
   resolveProposal: "/api/proposals/resolve",
 } as const;
@@ -224,6 +232,8 @@ export interface IntegrationRequest {
   name: string;
   kind: IntegrationKind;
   folders: string[];
+  /** How write starts jobs in this harness; absent keeps the saved one, null removes it. */
+  launcher?: LauncherInput | null;
 }
 export interface UpdateIntegrationRequest extends IntegrationRequest {
   id: string;
@@ -311,4 +321,47 @@ export interface ResolveProposalResponse {
   previousContent: string;
   /** Changes still waiting after these decisions. */
   waiting: number;
+}
+
+/**
+ * `POST /api/integrations/launch` ("Send to…" on a note): starts a job in the harness, or continues the last
+ * one for this note unless `fresh` (docs/design-decisions.md#d31). `sections` are headings to limit it to.
+ */
+export interface LaunchRequest {
+  integrationId: string;
+  folder: string;
+  name: string;
+  instruction: string;
+  sections: string[];
+  fresh: boolean;
+}
+
+/** A job write started in a harness. */
+export interface JobView {
+  id: string;
+  integrationId: string;
+  /** The integration's name ("Turnstone"). */
+  source: string;
+  note: NoteRef;
+  /** ISO 8601. */
+  createdAt: string;
+  /** Whether it continued the harness's earlier conversation about this note. */
+  continued: boolean;
+}
+export interface LaunchResponse {
+  job: JobView;
+}
+
+/**
+ * `POST /api/integrations/test`: checks a launcher from the dialog, saved or not, without starting anything.
+ * `integrationId` lets it use the saved key when none was typed (same origin only).
+ */
+export interface TestLauncherRequest {
+  integrationId: string | null;
+  kind: IntegrationKind;
+  launcher: LauncherInput;
+}
+export interface TestLauncherResponse {
+  /** What the harness said about itself, e.g. "Signed in to Turnstone as bombo". */
+  message: string;
 }

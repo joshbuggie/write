@@ -12,6 +12,10 @@ import {
   type IntegrationResponse,
   type IntegrationsResponse,
   type IntegrationTokenResponse,
+  type LaunchRequest,
+  type LaunchResponse,
+  type TestLauncherRequest,
+  type TestLauncherResponse,
   type LoginRequest,
   type NoteResponse,
   type ProposalsResponse,
@@ -208,6 +212,9 @@ export const api = {
   deleteIntegration: (id: string) => request<void>("DELETE", API.integrations + apiQuery({ id })),
   rotateIntegrationToken: (id: string) =>
     request<IntegrationTokenResponse>("POST", API.integrationToken, { id }),
+  launch: (input: LaunchRequest) => request<LaunchResponse>("POST", API.launch, input),
+  testLauncher: (input: TestLauncherRequest) =>
+    request<TestLauncherResponse>("POST", API.testLauncher, input),
   listProposals: (ref: NoteRef) =>
     request<ProposalsResponse>("GET", API.proposals + apiQuery({ folder: ref.folder, name: ref.name })),
   resolveProposal: (input: ResolveProposalRequest) =>

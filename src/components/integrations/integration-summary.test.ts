@@ -18,6 +18,7 @@ const view = (patch: Partial<IntegrationView> = {}): IntegrationView => ({
   tokenHint: "ab12",
   createdAt: "2026-09-24T10:00:00.000Z",
   lastUsedAt: null,
+  launcher: null,
   ...patch,
 });
 

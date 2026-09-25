@@ -6,6 +6,7 @@ import { getDataDir } from "./config";
 import { StorageError } from "./errors";
 import { errorCode, exists, mapFsError, renameCaseOnly } from "./fs-utils";
 import { dropFolderScope, followFolderRename } from "./integrations";
+import { jobsFollowNote } from "./jobs";
 import { orphanProposals, proposalsFollowFolder } from "./proposals";
 import { withWriteLock } from "./mutex";
 import { isVisibleName, noteStem, readNames, resolveFolder, safeJoin } from "./paths";
@@ -111,6 +112,8 @@ export async function renameFolder(name: string, newName: string): Promise<Folde
         }
         await followFolderRename(current.name, target);
         await proposalsFollowFolder(current.name, target);
+        const from = current.name.normalize("NFC");
+        await jobsFollowNote((n) => (n.folder.normalize("NFC") === from ? { ...n, folder: target } : null));
       }
       return { name: target, notes: await listFolderNotes(dest, target) };
     } catch (err) {

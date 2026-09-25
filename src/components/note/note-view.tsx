@@ -4,6 +4,8 @@ import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { startTransition, useEffect, useRef, useState } from "react";
 import { AiButton } from "@/components/ai/ai-button";
+import { SendDialog } from "@/components/launch/send-dialog";
+import { WorkingNotice } from "@/components/launch/working-notice";
 import { ProposalBanner } from "@/components/proposals/proposal-banner";
 import { ProposalReviewDialog } from "@/components/proposals/proposal-review-dialog";
 import { useProposalReview } from "@/components/proposals/use-proposal-review";
@@ -15,6 +17,7 @@ import { useDownload } from "@/components/ui/download-link";
 import { useToast } from "@/components/ui/toast";
 import { api, isApiError } from "@/lib/api-client";
 import { moveDraft } from "@/lib/drafts";
+import type { NoteSendState } from "@/lib/launch/types";
 import type { ProposalSummary } from "@/lib/proposals/types";
 import { downloadNoteHref, LIBRARY_HREF, noteHref } from "@/lib/routes";
 import type { Note, NoteRef } from "@/lib/types";
@@ -43,7 +46,12 @@ const messageOf = (err: unknown) => (err instanceof Error ? err.message : "Somet
  * note's folder and name; `mount` also remounts the editor when a new file takes this same name from this
  * screen ("Save as new note" after the note was deleted), so it opens as a live editor on that file.
  */
-export function NoteView(props: { note: Note; folders: string[]; proposals: ProposalSummary[] }) {
+export function NoteView(props: {
+  note: Note;
+  folders: string[];
+  proposals: ProposalSummary[];
+  send: NoteSendState;
+}) {
   const { note } = props;
   const [mount, setMount] = useState(0);
   if (note.readOnly) return <ReadOnlyNote note={{ ...note, readOnly: note.readOnly }} />;
@@ -58,16 +66,17 @@ function EditableNote(props: {
   note: Note;
   folders: string[];
   proposals: ProposalSummary[];
+  send: NoteSendState;
   onReopen: () => void;
 }) {
-  const { note, folders, proposals, onReopen } = props;
+  const { note, folders, proposals, send, onReopen } = props;
   const router = useRouter();
   const toast = useToast();
   const ref: NoteRef = { folder: note.folder, name: note.name };
   const titleRef = useRef<HTMLInputElement>(null);
   const mountedRef = useRef(false);
   const [toolbarSlot, setToolbarSlot] = useState<HTMLElement | null>(null);
-  const [dialog, setDialog] = useState<"move" | "delete" | "edit-visually" | null>(null);
+  const [dialog, setDialog] = useState<"move" | "delete" | "edit-visually" | "send" | null>(null);
 
   const session = useEditorSession(note, titleRef, (fresh) => {
     // A late save of this tab's own (e.g. the keepalive from the last visit) is not news from elsewhere.
@@ -204,6 +213,7 @@ function EditableNote(props: {
             onMove={() => setDialog("move")}
             onDownload={() => void startDownload(downloadHref)}
             onToggleMode={toggleMode}
+            onSend={send.targets.length > 0 ? () => setDialog("send") : undefined}
             onDelete={() => setDialog("delete")}
           />
         }
@@ -220,6 +230,7 @@ function EditableNote(props: {
           onReopen={onReopen}
         />
         <ProposalBanner proposals={proposals} onReview={(id) => void review.open(id)} />
+        <WorkingNotice working={send.working} />
         {sourceReason && (
           <SourceModeNotice reason={sourceReason} onEditVisually={() => setDialog("edit-visually")} />
         )}
@@ -248,6 +259,19 @@ function EditableNote(props: {
           proposalId={review.reviewing}
           onClose={review.close}
           onApplied={review.applied}
+        />
+      )}
+      {dialog === "send" && (
+        <SendDialog
+          noteRef={ref}
+          content={sync.getContent() ?? note.content}
+          targets={send.targets}
+          flush={() => autosaver.flush()}
+          onSent={(job) => {
+            toast.show({ message: `Sent to ${job.source}. Its changes will show up here for review.` });
+            startTransition(() => router.refresh());
+          }}
+          onClose={() => setDialog(null)}
         />
       )}
       {dialog === "move" && (

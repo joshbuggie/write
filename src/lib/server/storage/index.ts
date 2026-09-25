@@ -24,6 +24,7 @@ export { readAccount, createAccount, changePassword, type StoredAccount } from "
 export {
   readIntegrations,
   findIntegrationByToken,
+  mergeLauncher,
   createIntegration,
   updateIntegration,
   rotateIntegrationToken,
@@ -31,6 +32,7 @@ export {
   canReadFolder,
   type IntegrationInput,
   type StoredIntegration,
+  type StoredLauncher,
 } from "./integrations";
 export {
   addProposal,
@@ -42,6 +44,7 @@ export {
   type StoredProposal,
 } from "./proposals";
 export { isProposalId } from "./proposals-file";
+export { latestJob, listJobs, saveJob, type JobRef, type StoredJob } from "./jobs";
 export {
   readAiSettings,
   saveAiSettings,

@@ -496,6 +496,29 @@ later pass check which sections you accepted before building on the note as it i
 - `GET /api/agent/proposals?id=<id>` tells the harness which sections you accepted or rejected, so its
   next pass starts from what you kept.
 
+### Sending a note to a harness
+
+To start work from write instead of from the harness, open the integration, switch on **Start jobs from
+write**, and enter the harness's address and API key (**Test connection** checks them without starting
+anything):
+
+- **Turnstone:** its address (the console), an API token that can create workstreams, and whether to start
+  a **coordinator** (several agents) or a **single workstream**. If you registered write in Turnstone under
+  another name than `write`, enter that name. Turn on auto-approve for write's MCP server in Turnstone:
+  write's tools can only read and propose, and a coordinator's agents would otherwise wait for approval.
+- **Hermes Agent:** its API address including the profile, like `http://hermes.local:8642/p/writing/v1`,
+  and that profile's `API_SERVER_KEY`.
+- **Anything else:** a webhook URL; write POSTs the note, your request and a ready-made brief for an agent.
+
+If the harness uses a private certificate (Caddy's local CA, for example), paste the certificate authority
+under **Private certificate?**. write then trusts what that authority signed, for that server only.
+
+Then, on a note, choose **Send to…** in the ⋯ menu, say what it should do, and optionally pick the sections
+it may change. The note shows that the harness is working, and its changes appear as a proposal to review.
+Sending the same note again continues the same conversation, so the harness knows what you accepted last
+time; tick **Start a new conversation** to start over. API keys are kept on the write server, like the AI
+assistant's, and only sent to the address they were saved for.
+
 ### Reviewing proposed changes
 
 When a harness has proposed changes, the note shows a banner with **Review changes**. The review lists

@@ -9,6 +9,7 @@ import { StorageError } from "./errors";
 import { atomicWrite, mapFsError, renameCaseOnly, renameNoClobber } from "./fs-utils";
 import { listTree, toSummary } from "./folders";
 import { withWriteLock } from "./mutex";
+import { jobsFollowNote } from "./jobs";
 import { orphanProposals, proposalsFollowNote, sameNoteRef } from "./proposals";
 import {
   lookupNote,
@@ -186,7 +187,10 @@ export async function updateNote(input: {
       const dest = safeJoin(target.path, name + NOTE_EXT);
       if (sameFolder && nameKey(name) === nameKey(note.name)) await renameCaseOnly(note.path, dest);
       else await renameNoClobber(note.path, dest);
-      await proposalsFollowNote({ folder: folder.name, name: note.name }, { folder: target.name, name });
+      const from = { folder: folder.name, name: note.name };
+      const to = { folder: target.name, name };
+      await proposalsFollowNote(from, to);
+      await jobsFollowNote((n) => (sameNoteRef(n, from) ? to : null));
       return toSummary(target.name, name, await lstat(dest));
     } catch (err) {
       throw mapFsError(err, "Note not found.");

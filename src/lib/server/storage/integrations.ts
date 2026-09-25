@@ -1,10 +1,21 @@
-import { checkIntegrationName, INTEGRATION_LIMITS, type IntegrationKind } from "@/lib/integrations";
+import {
+  checkIntegrationName,
+  INTEGRATION_LIMITS,
+  launcherProblem,
+  type IntegrationKind,
+  type LauncherInput,
+} from "@/lib/integrations";
 import { nameKey } from "@/lib/names";
 import { hashToken, newToken, sameHash, tokenHint } from "../integration-tokens";
 import { getDataDir } from "./config";
 import { StorageError } from "./errors";
 import { mapFsError, randomHex } from "./fs-utils";
-import { readIntegrationsFile, writeIntegrationsFile, type StoredIntegration } from "./integrations-file";
+import {
+  readIntegrationsFile,
+  writeIntegrationsFile,
+  type StoredIntegration,
+  type StoredLauncher,
+} from "./integrations-file";
 import { withWriteLock } from "./mutex";
 import { resolveFolder } from "./paths";
 
@@ -13,13 +24,42 @@ import { resolveFolder } from "./paths";
  * and deletes (docs/design-decisions.md#d31). Every change runs under the write lock, like the notes.
  */
 
-export type { StoredIntegration };
+export type { StoredIntegration, StoredLauncher };
 
 /** What the Integrations dialog sends when it makes or changes an integration. */
 export interface IntegrationInput {
   name: string;
   kind: IntegrationKind;
   folders: string[];
+  /** Absent keeps the saved launcher; null removes it. */
+  launcher?: LauncherInput | null;
+}
+
+const originOf = (url: string) => {
+  try {
+    return new URL(url.trim()).origin;
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * The launcher to save: the typed key, none when cleared, or the saved key only when the address is on the
+ * same origin, so a key is never sent to another server by a typo (docs/design-decisions.md#d29, #d31).
+ */
+export function mergeLauncher(input: LauncherInput, saved: StoredLauncher | null): StoredLauncher {
+  const problem = launcherProblem(input);
+  if (problem) throw new StorageError("bad_request", problem);
+  const typed = input.key?.trim();
+  const sameOrigin = saved !== null && originOf(saved.url) === originOf(input.url);
+  const key = typed || (input.clearKey || !sameOrigin ? null : saved.key);
+  return {
+    url: input.url.trim(),
+    key,
+    ca: input.ca.trim(),
+    turnstoneMode: input.turnstoneMode,
+    mcpServerName: input.mcpServerName,
+  };
 }
 
 /** Same folder as saved: exact on-disk names, compared in NFC like resolveFolder's fallback. */
@@ -49,7 +89,13 @@ async function checkedInput(input: IntegrationInput): Promise<IntegrationInput> 
     }
     if (!folders.some((f) => nameKey(f) === nameKey(onDisk))) folders.push(onDisk);
   }
-  return { name: name.name, kind: input.kind, folders };
+  return { name: name.name, kind: input.kind, folders, launcher: input.launcher };
+}
+
+/** The launcher an integration ends up with: kept when not sent, removed with null, else merged. */
+function nextLauncher(input: IntegrationInput, saved: StoredLauncher | null): StoredLauncher | null {
+  if (input.launcher === undefined) return saved;
+  return input.launcher === null ? null : mergeLauncher(input.launcher, saved);
 }
 
 /** Every saved integration, in the order they were made. */
@@ -80,10 +126,13 @@ export function createIntegration(
     const token = newToken();
     const integration: StoredIntegration = {
       id: randomHex(8),
-      ...checked,
+      name: checked.name,
+      kind: checked.kind,
+      folders: checked.folders,
       tokenHash: hashToken(token),
       tokenHint: tokenHint(token),
       createdAt: new Date().toISOString(),
+      launcher: nextLauncher(checked, null),
     };
     await writeIntegrationsFile([...all, integration]);
     return { integration, token };
@@ -97,7 +146,13 @@ export function updateIntegration(id: string, input: IntegrationInput): Promise<
     const all = await readIntegrationsFile();
     const current = all.find((i) => i.id === id);
     if (!current) throw notFound();
-    const updated = { ...current, ...checked };
+    const updated: StoredIntegration = {
+      ...current,
+      name: checked.name,
+      kind: checked.kind,
+      folders: checked.folders,
+      launcher: nextLauncher(checked, current.launcher),
+    };
     await writeIntegrationsFile(all.map((i) => (i.id === id ? updated : i)));
     return updated;
   });

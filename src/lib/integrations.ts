@@ -47,6 +47,8 @@ export interface IntegrationView {
   createdAt: string;
   /** ISO 8601 of the last request with this token since the server started, or null. */
   lastUsedAt: string | null;
+  /** How write starts jobs in this harness, or null when it doesn't. */
+  launcher: LauncherView | null;
 }
 
 /** The trimmed name, or a message saying what's wrong with it. */
@@ -59,4 +61,65 @@ export function checkIntegrationName(
     return { ok: false, message: `Use at most ${INTEGRATION_LIMITS.maxNameChars} characters for the name.` };
   if (/\p{Cc}/u.test(name)) return { ok: false, message: "The name can't contain control characters." };
   return { ok: true, name };
+}
+
+/**
+ * How write starts a job in the harness (docs/design-decisions.md#d31): Turnstone's API, Hermes Agent's
+ * runs API, or, for any other harness, a webhook. Optional: without it the harness is started from its own
+ * UI and still reads and proposes through write's MCP endpoint.
+ */
+export interface LauncherView {
+  /** Turnstone's console, Hermes's API base (…/v1), or the webhook to call. */
+  url: string;
+  /** The saved key's last four characters ("••••" for a short one), or null without a key. */
+  keyHint: string | null;
+  /** A certificate authority to trust for this server (PEM), for private certificates; "" for none. */
+  ca: string;
+  /** Turnstone only: start a coordinator (several agents) or a single workstream. */
+  turnstoneMode: TurnstoneMode;
+  /** Turnstone only: the name write's MCP server has in Turnstone, which prefixes its tool names. */
+  mcpServerName: string;
+}
+
+export type TurnstoneMode = "coordinator" | "workstream";
+
+/** A launcher as the dialog sends it. The saved key is kept unless `key` replaces it or `clearKey` removes it. */
+export interface LauncherInput {
+  url: string;
+  key?: string;
+  clearKey?: boolean;
+  ca: string;
+  turnstoneMode: TurnstoneMode;
+  mcpServerName: string;
+}
+
+export const DEFAULT_LAUNCHER: LauncherInput = {
+  url: "",
+  ca: "",
+  turnstoneMode: "coordinator",
+  mcpServerName: "write",
+};
+
+/** What's wrong with a launcher from the dialog, or null. Shared so the form can say it before sending. */
+export function launcherProblem(l: LauncherInput): string | null {
+  let url: URL;
+  try {
+    url = new URL(l.url.trim());
+  } catch {
+    return "Enter the server's address, starting with http:// or https://.";
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:")
+    return "The address must start with http:// or https://.";
+  if (url.username || url.password) return "Put the key in its own field, not in the address.";
+  if (l.key && !/^[\x21-\x7e]+$/.test(l.key.trim())) {
+    return "This key has a character keys never contain (such as a curly quote). Paste it again from where you got it.";
+  }
+  if (l.ca.trim() && !l.ca.includes("-----BEGIN CERTIFICATE-----")) {
+    return "The certificate must be PEM text, starting with -----BEGIN CERTIFICATE-----.";
+  }
+  if (l.ca.length > 64 * 1024) return "The certificate is too long.";
+  if (!/^[A-Za-z0-9_-]{1,64}$/.test(l.mcpServerName)) {
+    return "The MCP server name can only use letters, digits, - and _.";
+  }
+  return null;
 }

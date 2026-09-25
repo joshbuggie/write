@@ -835,7 +835,7 @@ wrong_password`. A wrong current password is `403 wrong_password`, not `401`, wh
   let a harness read notes directly, so the note stays the one source of truth across both.
 - **Three layers, and only the last is per harness.** (1) What write exposes, the same for every
   harness: the agent API under `/api/agent`. (2) Identity: one integration per harness, each with its
-  own token and folder list. (3) Launchers that start a job in a harness (planned). A harness that can
+  own token and folder list. (3) Launchers that start a job in a harness. A harness that can
   only read, or only be started from its own UI, still works with layers 1 and 2.
 - **Proposals: harnesses suggest, the owner decides.** A harness never writes a note. It reads one
   (`GET /api/agent/notes`, which returns the version), then sends `POST /api/agent/proposals` with that
@@ -898,9 +898,36 @@ wrong_password`. A wrong current password is `403 wrong_password`, not `401`, wh
   - **Tried live** (2026-09-24) with Turnstone 1.8.4 (four nodes and the console) and Hermes Agent 0.21.4:
     each read a note, proposed by section with reasons, and on a second pass read the owner's decisions
     with `get_proposal`, kept a section the owner had rewritten, and built on the note as it then was.
-- **Planned.** Launchers (Turnstone's workstream API, Hermes Agent's runs API, and a generic webhook)
-  that start a job from a note with a write-chosen idempotency key (Turnstone's `ws_id`, Hermes's
-  `Idempotency-Key`) and continue it on later passes. Update this entry when they land.
+- **Launchers: "Send to…" on a note** (`src/lib/server/launch/`). An integration may also say how write
+  starts a job in its harness; without that, the harness is started from its own UI and still reads and
+  proposes through MCP. A launcher only starts or continues work and keeps the harness's reference; the
+  results come back as proposals, so write never reads a harness's events or replies.
+  - **Turnstone:** a coordinator (the console's `/v1/api/workstreams/new`, continued with its `/send`)
+    or a single workstream (`/v1/api/route/workstreams/new` with write's job id as `ws_id`, so a retry
+    can't start a second one, and write's four MCP tools in `auto_approve_tools`). **Hermes Agent:**
+    `POST /v1/runs` with the job id as `Idempotency-Key` and a `session_id` that later passes reuse.
+    **Anything else:** a webhook, one POST with the note, the instruction, the sections and the brief.
+  - **Continue by default.** "Send to…" continues the harness's last conversation about this note (the
+    newest job for it), so the harness remembers what it proposed and can ask `get_proposal` what was
+    kept; "Start a new conversation" is one checkbox away. A conversation that no longer exists (404)
+    starts a new one. Jobs are JSON files in `.proposals/jobs/`, follow their note through renames, and
+    are removed after 30 days.
+  - **One brief for every harness** (`src/lib/launch/brief.ts`): the note, the owner's words as written,
+    the sections it may change, and the job id to use as `requestId`. How to use the tools is in the MCP
+    instructions, not repeated here.
+  - **Knowing it's working.** The note says "Turnstone is working on this note" until a proposal with the
+    job's `requestId` (or any newer one from that integration) arrives, checking every 15 seconds while
+    the page is visible; after an hour it stops counting a job as working, so a harness that never answers
+    doesn't leave the note waiting.
+  - **Keys like the AI keys** ([D29](#d29)): kept in `integrations.json`, write-only (the dialog shows the
+    last four characters), and only sent to the origin they were saved for. The owner's session starts
+    jobs; an integration token can't. "Test connection" checks the address and key without starting
+    anything (Turnstone's `whoami`, naming missing permissions; Hermes's models list).
+  - **Private certificates.** Self-hosted harnesses often sit behind a private authority (Caddy's local
+    CA, whose certificates are issued for an address inside Docker). An integration can hold that
+    authority's PEM; write then trusts what it signed, for that server only, and skips the host name
+    check. That needs Node's `https` rather than `fetch` (which can't take a CA without a dependency), so
+    launchers use `node:http`/`node:https` with no redirects, a 1 MB answer cap and a timeout.
 - **Tokens.** `wrt_` plus 32 random bytes as base64url, made by the server and shown once. Only the
   SHA-256 and the last four characters are saved: with 256 random bits there is nothing to guess, so no
   slow hash and no lockout are needed. The exact shape lets auth tell a token from a password without
@@ -936,4 +963,6 @@ name, kind, folders, tokenHash, tokenHint, createdAt }] }`. Unlike `settings.jso
   `src/lib/server/storage/integrations*.ts`, `src/app/api/integrations/`, `src/app/api/agent/` and
   `src/components/integrations/`; for proposals, `src/lib/proposals/`, `src/lib/server/proposal-*.ts`,
   `src/lib/server/storage/proposals*.ts`, `src/app/api/proposals/` and `src/components/proposals/`; for MCP,
-  `src/lib/server/mcp/` and `src/app/api/agent/mcp/`.
+  `src/lib/server/mcp/` and `src/app/api/agent/mcp/`; for launchers, `src/lib/launch/`,
+  `src/lib/server/launch/`, `src/lib/server/storage/jobs.ts`, `src/app/api/integrations/launch/` and
+  `src/components/launch/`.

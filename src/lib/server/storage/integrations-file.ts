@@ -1,4 +1,4 @@
-import { isIntegrationKind, type IntegrationKind } from "@/lib/integrations";
+import { isIntegrationKind, type IntegrationKind, type TurnstoneMode } from "@/lib/integrations";
 import { configFile } from "./config";
 import { readConfigText, writeConfigText } from "./config-files";
 import { StorageError } from "./errors";
@@ -10,6 +10,15 @@ import { StorageError } from "./errors";
  */
 
 const FILE_VERSION = 1;
+
+/** How write starts jobs in the harness. The key is kept in plain text, like the AI keys (0600 file). */
+export interface StoredLauncher {
+  url: string;
+  key: string | null;
+  ca: string;
+  turnstoneMode: TurnstoneMode;
+  mcpServerName: string;
+}
 
 /** One integration as saved. Only the token's hash is kept, never the token. */
 export interface StoredIntegration {
@@ -23,11 +32,24 @@ export interface StoredIntegration {
   tokenHint: string;
   /** ISO 8601. */
   createdAt: string;
+  launcher: StoredLauncher | null;
 }
 
 const integrationsFile = () => configFile("integrations.json");
 
 const isString = (v: unknown): v is string => typeof v === "string";
+
+function isLauncher(v: unknown): v is StoredLauncher {
+  if (typeof v !== "object" || v === null) return false;
+  const l = v as Record<string, unknown>;
+  return (
+    isString(l.url) &&
+    (l.key === null || isString(l.key)) &&
+    isString(l.ca) &&
+    (l.turnstoneMode === "coordinator" || l.turnstoneMode === "workstream") &&
+    isString(l.mcpServerName)
+  );
+}
 
 function isStoredIntegration(v: unknown): v is StoredIntegration {
   if (typeof v !== "object" || v === null) return false;
@@ -42,7 +64,9 @@ function isStoredIntegration(v: unknown): v is StoredIntegration {
     isString(i.tokenHash) &&
     /^[0-9a-f]{64}$/.test(i.tokenHash) &&
     isString(i.tokenHint) &&
-    isString(i.createdAt)
+    isString(i.createdAt) &&
+    // Files from before launchers have none: missing reads as null.
+    (i.launcher === undefined || i.launcher === null || isLauncher(i.launcher))
   );
 }
 
@@ -64,7 +88,7 @@ function parse(text: string, file: string): StoredIntegration[] {
       `${file} isn't a valid write integrations file. Restore it from a backup, or delete it and make the integrations again (their tokens stop working).`,
     );
   }
-  return v.integrations.map(({ id, name, kind, folders, tokenHash, tokenHint, createdAt }) => ({
+  return v.integrations.map(({ id, name, kind, folders, tokenHash, tokenHint, createdAt, launcher }) => ({
     id,
     name,
     kind,
@@ -72,6 +96,7 @@ function parse(text: string, file: string): StoredIntegration[] {
     tokenHash,
     tokenHint,
     createdAt,
+    launcher: launcher ?? null,
   }));
 }
 

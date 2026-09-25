@@ -2,7 +2,7 @@ import type { IntegrationTokenResponse } from "@/lib/api-contract";
 import { handle, json, readJson } from "@/lib/server/http";
 import { forgetLastUsed, toIntegrationView } from "@/lib/server/integration-auth";
 import { rotateIntegrationToken } from "@/lib/server/storage";
-import { isRotateTokenRequest } from "@/lib/server/validate";
+import { isRotateTokenRequest } from "@/lib/server/validate-integrations";
 
 /**
  * Replaces an integration's token, for a token that leaked or was lost (docs/design-decisions.md#d31). The

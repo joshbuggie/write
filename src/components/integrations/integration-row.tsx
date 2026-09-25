@@ -57,6 +57,8 @@ export function IntegrationRow(props: IntegrationRowProps) {
       <li>
         <IntegrationForm
           initial={{ name: i.name, kind: i.kind, folders: i.folders }}
+          integrationId={i.id}
+          savedLauncher={i.launcher}
           library={library}
           submitLabel="Save"
           onSubmit={async (input) => {

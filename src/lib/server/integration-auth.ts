@@ -32,7 +32,10 @@ export async function authenticateIntegration(req: Request): Promise<StoredInteg
   return integration;
 }
 
-/** The browser's view: no hash, and "last used" from memory. */
+/** A key's last four characters, or "••••" for a short one whose last four would give most of it away. */
+const keyHint = (key: string) => (key.length < 12 ? "••••" : key.slice(-4));
+
+/** The browser's view: no hash, no launcher key, and "last used" from memory. */
 export function toIntegrationView(i: StoredIntegration): IntegrationView {
   return {
     id: i.id,
@@ -42,6 +45,13 @@ export function toIntegrationView(i: StoredIntegration): IntegrationView {
     tokenHint: i.tokenHint,
     createdAt: i.createdAt,
     lastUsedAt: lastUsed.get(i.id) ?? null,
+    launcher: i.launcher && {
+      url: i.launcher.url,
+      keyHint: i.launcher.key ? keyHint(i.launcher.key) : null,
+      ca: i.launcher.ca,
+      turnstoneMode: i.launcher.turnstoneMode,
+      mcpServerName: i.launcher.mcpServerName,
+    },
   };
 }
 

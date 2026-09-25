@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { NoteView } from "@/components/note/note-view";
 import { noteRefFromParams } from "@/lib/routes";
-import { loadNote, loadNoteProposals, loadTree } from "@/lib/server/loaders";
+import { loadNote, loadNoteProposals, loadSendState, loadTree } from "@/lib/server/loaders";
 
 type NotePageProps = { params: Promise<{ folder: string; note: string }> };
 
@@ -25,7 +25,15 @@ export default async function NotePage({ params }: NotePageProps) {
       () => [],
     ),
   ]);
-  const proposals = await loadNoteProposals(note);
+  const [proposals, send] = await Promise.all([loadNoteProposals(note), loadSendState(note)]);
   // Keyed by the on-disk name: a rename or move is a fresh editor with a fresh autosaver.
-  return <NoteView key={`${note.folder}/${note.name}`} note={note} folders={folders} proposals={proposals} />;
+  return (
+    <NoteView
+      key={`${note.folder}/${note.name}`}
+      note={note}
+      folders={folders}
+      proposals={proposals}
+      send={send}
+    />
+  );
 }

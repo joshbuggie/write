@@ -5,9 +5,11 @@ import { cache } from "react";
 import { type AiSettings, DEFAULT_AI_SETTINGS } from "@/lib/ai/settings";
 import { SESSION_COOKIE } from "@/lib/constants";
 import { loginHref, SETUP_HREF } from "@/lib/routes";
+import type { NoteSendState } from "@/lib/launch/types";
 import type { ProposalSummary } from "@/lib/proposals/types";
 import type { Note, NoteRef, Tree } from "@/lib/types";
 import { isAuthEnabled, readAuthState, verifySessionToken } from "./auth";
+import { sendStateFor } from "./launch/targets";
 import { summariesFor } from "./proposal-review";
 import {
   ensureBootstrap,
@@ -111,5 +113,20 @@ export async function loadNoteProposals(note: Note): Promise<ProposalSummary[]> 
   } catch (err) {
     console.error("[write] Couldn't read the note's proposals:", err);
     return [];
+  }
+}
+
+/**
+ * Where this note can be sent, and which jobs are still working on it (docs/design-decisions.md#d31). Like
+ * the proposals, a problem here must never keep the note from opening.
+ */
+export async function loadSendState(note: Note): Promise<NoteSendState> {
+  await connection();
+  await requirePageAuth();
+  try {
+    return await sendStateFor(note);
+  } catch (err) {
+    console.error("[write] Couldn't read where the note can be sent:", err);
+    return { targets: [], working: [] };
   }
 }
