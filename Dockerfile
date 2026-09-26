@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1.7
 # Multi-stage build: install deps, build the standalone server, then copy only what it needs into a
 # small runtime image that runs as the unprivileged "node" user (uid 1000). Notes live in the /data volume,
-# and write's own settings (the AI assistant's, API keys included) in the /config volume.
+# and write's account and settings (the AI assistant's and integrations', API keys included) in /config.
 ARG NODE_IMAGE=node:24-alpine
 
 FROM ${NODE_IMAGE} AS deps

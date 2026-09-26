@@ -4,8 +4,9 @@ import { StorageError } from "./errors";
 import { atomicWrite, errorCode } from "./fs-utils";
 
 /**
- * Reading and writing the small files in the config folder (settings.json, account.json). They hold
- * secrets, so the folder is created owner-only and every file is written 0600 (docs/design-decisions.md#d28).
+ * Reading and writing the small files in the config folder (account.json, settings.json,
+ * integrations.json). They hold secrets, so the folder is created owner-only and every file is written 0600
+ * (docs/design-decisions.md#d28).
  */
 
 /** fs errors for the config folder. mapFsError's messages name the data folder, which would mislead here. */
