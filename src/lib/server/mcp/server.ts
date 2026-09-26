@@ -1,7 +1,7 @@
 import type { StoredIntegration } from "../storage";
 import { SERVER_INSTRUCTIONS } from "./instructions";
 import { failure, isNotification, result, RPC, type JsonRpcMessage, type Reply } from "./jsonrpc";
-import { isToolName, TOOL_DEFINITIONS } from "./tool-definitions";
+import { isToolName, toolsFor } from "./tool-definitions";
 import { callTool } from "./tools";
 import { classify, SUPPORTED_VERSIONS } from "./versions";
 
@@ -42,7 +42,7 @@ async function dispatch(
     case "ping":
       return {};
     case "tools/list":
-      return { tools: TOOL_DEFINITIONS };
+      return { tools: toolsFor(integration) };
     case "tools/call": {
       if (!isToolName(params.name))
         return failure(m.id, RPC.invalidParams, `Unknown tool: ${String(params.name)}`);

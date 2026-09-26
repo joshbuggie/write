@@ -1,4 +1,8 @@
-import type { AgentProposalRequest, ResolveProposalRequest } from "@/lib/api-contract";
+import type {
+  AgentCreateNoteRequest,
+  AgentProposalRequest,
+  ResolveProposalRequest,
+} from "@/lib/api-contract";
 
 /**
  * Type guards for proposal request bodies (docs/design-decisions.md#d31), apart from validate.ts to keep
@@ -48,6 +52,17 @@ export function isAgentProposalRequest(v: unknown): v is AgentProposalRequest {
         v.sections.every(isSectionEdit))) &&
     (v.summary === undefined || shortString(LIMITS.summary)(v.summary)) &&
     (v.reasons === undefined || isReasons(v.reasons)) &&
+    (v.requestId === undefined || (isString(v.requestId) && REQUEST_ID.test(v.requestId)))
+  );
+}
+
+/** A new note from an integration: where, what, and optionally its request id. */
+export function isAgentCreateNoteRequest(v: unknown): v is AgentCreateNoteRequest {
+  return (
+    isObject(v) &&
+    isString(v.folder) &&
+    isString(v.name) &&
+    isString(v.content) &&
     (v.requestId === undefined || (isString(v.requestId) && REQUEST_ID.test(v.requestId)))
   );
 }

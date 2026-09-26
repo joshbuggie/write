@@ -7,6 +7,7 @@ import { AiButton } from "@/components/ai/ai-button";
 import { SendButton } from "@/components/launch/send-button";
 import { SendDialog } from "@/components/launch/send-dialog";
 import { WorkingNotice } from "@/components/launch/working-notice";
+import { CreatedNotice } from "@/components/proposals/created-notice";
 import { ProposalBanner } from "@/components/proposals/proposal-banner";
 import { ProposalReviewDialog } from "@/components/proposals/proposal-review-dialog";
 import { useProposalReview } from "@/components/proposals/use-proposal-review";
@@ -19,7 +20,7 @@ import { useToast } from "@/components/ui/toast";
 import { api, isApiError } from "@/lib/api-client";
 import { moveDraft } from "@/lib/drafts";
 import type { NoteSendState } from "@/lib/launch/types";
-import type { ProposalSummary } from "@/lib/proposals/types";
+import type { CreatedBy, ProposalSummary } from "@/lib/proposals/types";
 import { downloadNoteHref, LIBRARY_HREF, noteHref } from "@/lib/routes";
 import type { Note, NoteRef } from "@/lib/types";
 import { CONFLICT_BANNER_ID, ConflictBanner } from "./conflict-banner";
@@ -52,6 +53,7 @@ export function NoteView(props: {
   folders: string[];
   proposals: ProposalSummary[];
   send: NoteSendState;
+  createdBy: CreatedBy | null;
 }) {
   const { note } = props;
   const [mount, setMount] = useState(0);
@@ -68,9 +70,10 @@ function EditableNote(props: {
   folders: string[];
   proposals: ProposalSummary[];
   send: NoteSendState;
+  createdBy: CreatedBy | null;
   onReopen: () => void;
 }) {
-  const { note, folders, proposals, send, onReopen } = props;
+  const { note, folders, proposals, send, createdBy, onReopen } = props;
   const router = useRouter();
   const toast = useToast();
   const ref: NoteRef = { folder: note.folder, name: note.name };
@@ -231,6 +234,7 @@ function EditableNote(props: {
           onReload={session.reloadEditor}
           onReopen={onReopen}
         />
+        <CreatedNotice createdBy={createdBy} />
         <ProposalBanner proposals={proposals} onReview={(id) => void review.open(id)} />
         <WorkingNotice working={send.working} />
         {sourceReason && (

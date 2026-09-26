@@ -6,6 +6,7 @@ import { getDataDir } from "./config";
 import { StorageError } from "./errors";
 import { errorCode, exists, mapFsError, renameCaseOnly } from "./fs-utils";
 import { dropFolderScope, followFolderRename } from "./integrations";
+import { createdFollowNote } from "./created-notes";
 import { jobsFollowNote } from "./jobs";
 import { orphanProposals, proposalsFollowFolder } from "./proposals";
 import { withWriteLock } from "./mutex";
@@ -114,6 +115,9 @@ export async function renameFolder(name: string, newName: string): Promise<Folde
         await proposalsFollowFolder(current.name, target);
         const from = current.name.normalize("NFC");
         await jobsFollowNote((n) => (n.folder.normalize("NFC") === from ? { ...n, folder: target } : null));
+        await createdFollowNote((n) =>
+          n.folder.normalize("NFC") === from ? { ...n, folder: target } : null,
+        );
       }
       return { name: target, notes: await listFolderNotes(dest, target) };
     } catch (err) {
@@ -134,6 +138,9 @@ export async function deleteFolder(name: string): Promise<void> {
       await moveToTrash(dataDir, folder.path, [folder.name]);
       await dropFolderScope(folder.name);
       await orphanProposals((p) => p.folder.normalize("NFC") === folder.name.normalize("NFC"));
+      await createdFollowNote((n) =>
+        n.folder.normalize("NFC") === folder.name.normalize("NFC") ? "drop" : null,
+      );
     } catch (err) {
       throw mapFsError(err, "Folder not found.");
     }

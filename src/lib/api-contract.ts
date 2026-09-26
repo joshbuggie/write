@@ -85,6 +85,7 @@ export const API = {
   testLauncher: "/api/integrations/test",
   proposals: "/api/proposals",
   resolveProposal: "/api/proposals/resolve",
+  createdNotes: "/api/proposals/created",
 } as const;
 
 export type HealthResponse = { ok: true } | { ok: false; error: string };
@@ -232,6 +233,8 @@ export interface IntegrationRequest {
   name: string;
   kind: IntegrationKind;
   folders: string[];
+  /** Whether it may create notes in those folders; absent keeps the saved choice (off when new). */
+  canCreate?: boolean;
   /** How write starts jobs in this harness; absent keeps the saved one, null removes it. */
   launcher?: LauncherInput | null;
 }
@@ -273,6 +276,24 @@ export interface AgentProposalRequest {
   reasons?: Record<string, string>;
   /** The harness's own id for this request: sending it again returns the first proposal instead of a new one. */
   requestId?: string;
+}
+
+/**
+ * `POST /api/agent/notes`: a new note, for an integration allowed to create them, in a folder it can read
+ * (docs/design-decisions.md#d31). The note is written at once under exactly `name`; a taken name is 409
+ * name_taken, never a suffixed copy.
+ */
+export interface AgentCreateNoteRequest {
+  folder: string;
+  name: string;
+  content: string;
+  /** The harness's own id for this request: sending it again returns the note it made the first time. */
+  requestId?: string;
+}
+
+/** Answer to creating a note (201) or to a retry of that request (200). */
+export interface AgentCreateNoteResponse {
+  note: { folder: string; name: string; version: string };
 }
 
 /** A proposal as its harness sees it. */

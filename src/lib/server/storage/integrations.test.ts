@@ -108,6 +108,35 @@ describe("integrations storage", () => {
       expect((await stat(configPath())).mtimeMs).toBe(before);
     }));
 
+  it("lets an integration create notes only when asked, and keeps that choice when it isn't sent", () =>
+    withTempDataDir(async () => {
+      await createFolder("Essays");
+      const { integration } = await createIntegration({
+        name: "Hermes",
+        kind: "hermes",
+        folders: ["Essays"],
+      });
+      expect(integration.canCreate).toBe(false);
+      const allowed = await updateIntegration(integration.id, {
+        name: "Hermes",
+        kind: "hermes",
+        folders: ["Essays"],
+        canCreate: true,
+      });
+      expect(allowed.canCreate).toBe(true);
+      const renamed = await updateIntegration(integration.id, {
+        name: "Hermes 2",
+        kind: "hermes",
+        folders: ["Essays"],
+      });
+      expect(renamed.canCreate).toBe(true);
+
+      // A file from before note creation has no flag, and reads as not allowed.
+      const text = (await readFile(configPath(), "utf8")).replace('"canCreate": true,', "");
+      await writeTestConfigFile("integrations.json", text);
+      expect((await readIntegrations())[0].canCreate).toBe(false);
+    }));
+
   it("refuses a file that isn't valid instead of reading it as no integrations", () =>
     withTempDataDir(async () => {
       await writeTestConfigFile("integrations.json", '{"version":1,"integrations":[{"id":"x"}]}');

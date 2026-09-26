@@ -34,7 +34,8 @@ type IntegrationFormProps = {
 
 /**
  * Name, kind and folders for one integration. The folders are the whole of what its token can read, so
- * they are ticked one by one; there is no "every folder" switch (docs/design-decisions.md#d31).
+ * they are ticked one by one; there is no "every folder" switch (docs/design-decisions.md#d31). Creating
+ * notes is a separate choice, limited to the same folders.
  */
 export function IntegrationForm(props: IntegrationFormProps) {
   const { initial, library, submitLabel, onSubmit, onCancel, actions, integrationId, savedLauncher } = props;
@@ -42,6 +43,7 @@ export function IntegrationForm(props: IntegrationFormProps) {
   const [name, setName] = useState(initial.name);
   const [kind, setKind] = useState<IntegrationKind>(initial.kind);
   const [folders, setFolders] = useState(initial.folders);
+  const [canCreate, setCanCreate] = useState(initial.canCreate ?? false);
   // The saved key never comes to the browser: an empty key field means "keep it" (see mergeLauncher).
   const [launcher, setLauncher] = useState<LauncherDraft>(() =>
     savedLauncher
@@ -69,7 +71,13 @@ export function IntegrationForm(props: IntegrationFormProps) {
     setPending(true);
     setError(null);
     try {
-      await onSubmit({ name: checked.name, kind, folders, launcher: enabled ? launcherInput : null });
+      await onSubmit({
+        name: checked.name,
+        kind,
+        folders,
+        canCreate,
+        launcher: enabled ? launcherInput : null,
+      });
     } catch (err) {
       setError(err instanceof Error && err.message ? err.message : "Couldn't save the integration.");
     } finally {
@@ -120,6 +128,22 @@ export function IntegrationForm(props: IntegrationFormProps) {
           })}
         </ul>
         <p className="text-[12.5px] text-muted">Notes in other folders stay invisible to it.</p>
+        <div className="mt-1 flex items-center gap-2.5">
+          <input
+            id={`${ids}-create`}
+            type="checkbox"
+            className="size-4 shrink-0 accent-accent"
+            checked={canCreate}
+            onChange={(e) => setCanCreate(e.target.checked)}
+          />
+          <label htmlFor={`${ids}-create`} className="text-[14px] text-ink">
+            Can create new notes in these folders
+          </label>
+        </div>
+        <p className="text-[12.5px] text-muted">
+          New notes appear right away. It can never overwrite a note, and changes to existing notes still wait
+          for your review.
+        </p>
       </fieldset>
       <LauncherFields
         kind={kind}

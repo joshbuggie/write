@@ -837,7 +837,7 @@ wrong_password`. A wrong current password is `403 wrong_password`, not `401`, wh
   harness: the agent API under `/api/agent`. (2) Identity: one integration per harness, each with its
   own token and folder list. (3) Launchers that start a job in a harness. A harness that can
   only read, or only be started from its own UI, still works with layers 1 and 2.
-- **Proposals: harnesses suggest, the owner decides.** A harness never writes a note. It reads one
+- **Proposals: harnesses suggest, the owner decides.** A harness never changes an existing note. It reads one
   (`GET /api/agent/notes`, which returns the version), then sends `POST /api/agent/proposals` with that
   `baseVersion` and either the whole revised note or only the sections it changed (`sections`, by
   heading, so agents that each write one section needn't send the note back). The owner reviews it
@@ -882,6 +882,16 @@ wrong_password`. A wrong current password is `403 wrong_password`, not `401`, wh
     A `requestId` makes a retried request return the first proposal. At most 20 wait per integration.
     A closed proposal drops the note text it carried (only its decisions are looked up
     later) and is removed after 30 days.
+  - **Creating notes is a separate permission** (`canCreate` on the integration, off by default and
+    for files from before it). Changes to existing notes stay proposals; a new note is written at once
+    (`POST /api/agent/notes`, MCP `create_note`), because it can't overwrite anything and a review of a
+    whole new note would be one more step for no safety. The owner asked for this over "propose a new
+    note" (2026-09-25). It is limited to the folders the integration can read, never replaces a note (a
+    taken name is 409 `name_taken`, not "Draft 2", so the harness knows what it made), and a
+    `requestId` makes a retry return the same note. `create_note` is listed only to integrations that
+    have the permission. Who made it is kept in `.proposals/created.json`, following the note through
+    renames and dropped with it on delete, so the note says "Hermes Agent created this note" until the
+    owner dismisses that.
   - **Word diffs** in the review (`src/lib/proposals/word-diff.ts`): Myers on words, with bounded work.
     Small shared words between edits fold into the edits, and a mostly rewritten passage shows as the old
     text then the new, which reads far better than alternating fragments.
@@ -895,7 +905,8 @@ wrong_password`. A wrong current password is `403 wrong_password`, not `401`, wh
     `initialize`, which is answered without a session: its spec allows a server that doesn't mint one,
     notifications get 202, and 2025-03-26 batches work. Turnstone and Hermes Agent both speak legacy today.
   - **Tools:** `list_notes`, `read_note` (Markdown, the `#`/`##` headings, and the version),
-    `propose_changes` (sections or whole note) and `get_proposal`. Reading tools are marked
+    `propose_changes` (sections or whole note), `get_proposal`, and `create_note` for integrations
+    allowed to create notes. Reading tools are marked
     `readOnlyHint`, so clients that ask before write-capable tools don't ask for them, and may retry them.
     What the model can fix (a missing note, a stale version, bad arguments) is a tool error it can read.
   - **The workflow lives in the server's `instructions`** and the tool descriptions, so a harness needs no

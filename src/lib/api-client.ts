@@ -219,4 +219,5 @@ export const api = {
     request<ProposalsResponse>("GET", API.proposals + apiQuery({ folder: ref.folder, name: ref.name })),
   resolveProposal: (input: ResolveProposalRequest) =>
     request<ResolveProposalResponse>("POST", API.resolveProposal, input),
+  dismissCreatedNote: (id: string) => request<void>("DELETE", API.createdNotes + apiQuery({ id })),
 };

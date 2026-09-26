@@ -136,7 +136,7 @@ src/proxy.ts: optional auth gate in front of everything except health/login/stat
 | `src/lib/proposals/`                       | Proposals' framework-free core: sections (`#`/`##`), the three-way review, applying decisions, and the word diff.                                                |
 | `src/lib/server/proposal-*.ts`             | Proposals on the server: making one from what an agent sends, remembered base versions, reviewing and resolving.                                                 |
 | `src/components/proposals/`                | The banner above a note with changes waiting, the review dialog with one card per section, and Undo after Apply.                                                 |
-| `src/lib/server/mcp/`                      | The MCP server behind `/api/agent/mcp`: JSON-RPC, the two protocol eras, the four tools and their instructions for the model.                                    |
+| `src/lib/server/mcp/`                      | The MCP server behind `/api/agent/mcp`: JSON-RPC, the two protocol eras, the tools and their instructions for the model.                                         |
 | `src/lib/server/launch/`                   | "Send to…": the HTTP client for harnesses (private CAs), the Turnstone, Hermes and webhook launchers, and jobs.                                                  |
 | `src/components/launch/`                   | The Send dialog and the notice while a harness works on a note.                                                                                                  |
 | `src/app/globals.css`                      | Design tokens (colors for light and dark) exposed as Tailwind utilities.                                                                                         |
@@ -424,7 +424,7 @@ mode.
       kept, front matter untouched. Undo in the toast restores the exact bytes (`shasum` before and after).
       Leave a change undecided: the banner stays with what is left. Rename the note: the banner follows.
 - [ ] **MCP** (if touched): point an MCP client (or `curl`) at `/api/agent/mcp` with an integration token.
-      A legacy `initialize` answers without an `Mcp-Session-Id`; `tools/list` shows four tools; `read_note` on
+      A legacy `initialize` answers without an `Mcp-Session-Id`; `tools/list` shows four tools (five with "Can create new notes", then `create_note` makes the note at once and refuses a taken name); `read_note` on
       a folder the integration can't read is a tool error "Note not found."; a modern request whose
       `Mcp-Method` header doesn't match the body gets 400 with code -32020. GET answers a JSON 405.
 - [ ] **Send to…** (if touched): give an integration a webhook launcher pointing at a local listener, then

@@ -45,6 +45,7 @@ export {
 } from "./proposals";
 export { isProposalId } from "./proposals-file";
 export { applyProposal, type ProposalPlan } from "./proposal-apply";
+export { createNoteFor, createdRecordFor, dismissCreatedRecord, type CreatedRecord } from "./created-notes";
 export { latestJob, listJobs, saveJob, type JobRef, type StoredJob } from "./jobs";
 export {
   readAiSettings,

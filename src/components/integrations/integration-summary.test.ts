@@ -15,6 +15,7 @@ const view = (patch: Partial<IntegrationView> = {}): IntegrationView => ({
   name: "Turnstone",
   kind: "turnstone",
   folders: ["Essays"],
+  canCreate: false,
   tokenHint: "ab12",
   createdAt: "2026-09-24T10:00:00.000Z",
   lastUsedAt: null,
@@ -25,6 +26,9 @@ const view = (patch: Partial<IntegrationView> = {}): IntegrationView => ({
 describe("integration summary", () => {
   it("names the kind, the folders and the token's hint", () => {
     expect(summarizeIntegration(view())).toBe("Turnstone · Essays · token ••ab12");
+    expect(summarizeIntegration(view({ canCreate: true }))).toBe(
+      "Turnstone · Essays · can create notes · token ••ab12",
+    );
     expect(foldersLabel([])).toBe("no folders yet");
     expect(foldersLabel(["A", "B", "C", "D", "E"])).toBe("A, B and 3 more");
   });

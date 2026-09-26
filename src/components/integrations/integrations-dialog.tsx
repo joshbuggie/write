@@ -98,7 +98,7 @@ export function IntegrationsDialog({ library, authEnabled, onClose }: Integratio
               {editing === "new" && (
                 <li>
                   <IntegrationForm
-                    initial={{ name: "", kind: "turnstone", folders: [] }}
+                    initial={{ name: "", kind: "turnstone", folders: [], canCreate: false }}
                     integrationId={null}
                     savedLauncher={null}
                     library={library}

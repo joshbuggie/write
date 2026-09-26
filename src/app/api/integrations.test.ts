@@ -116,6 +116,31 @@ describe("/api/integrations", () => {
       expect((await call(agentTree.GET, "GET", "/api/agent/tree", bearer(rotated.token))).status).toBe(401);
     }));
 
+  it("saves whether the integration may create notes, from both making and changing it", () =>
+    withTempDataDir(async () => {
+      const { cookie, made } = await setUp();
+      expect(made.integration.canCreate).toBe(false);
+      const body = { name: "Hermes", kind: "hermes", folders: ["Essays"], canCreate: true };
+      const res = await call(integrations.POST, "POST", "/api/integrations", { cookie }, body);
+      expect(((await res.json()) as IntegrationTokenResponse).integration.canCreate).toBe(true);
+      const patch = await call(
+        integrations.PATCH,
+        "PATCH",
+        "/api/integrations",
+        { cookie },
+        {
+          id: made.integration.id,
+          name: "Turnstone",
+          kind: "turnstone",
+          folders: ["Essays"],
+          canCreate: true,
+        },
+      );
+      expect(((await patch.json()) as { integration: { canCreate: boolean } }).integration.canCreate).toBe(
+        true,
+      );
+    }));
+
   it("refuses a folder that doesn't exist", () =>
     withTempDataDir(async () => {
       const { cookie } = await setUp();

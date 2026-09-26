@@ -483,6 +483,11 @@ The harness gets four tools (`list_notes`, `read_note`, `propose_changes` and `g
 instructions on how to use them: read a note, propose changes by section with a reason for each, and on a
 later pass check which sections you accepted before building on the note as it is.
 
+To let a harness **create notes** too, tick **Can create new notes in these folders** on its integration.
+It then also gets `create_note`. New notes appear right away, only in the folders it can read, and never
+replace one of yours: a name that is taken is an error. The note says which harness created it until you
+dismiss that. Changes to existing notes still wait for your review.
+
 **Without MCP**, the harness sends the token as `Authorization: Bearer <token>` to
 `https://<your write server>/api/agent`:
 
@@ -495,6 +500,9 @@ later pass check which sections you accepted before building on the note as it i
   `reasons` object by heading, and a `requestId` that makes a retried request harmless.
 - `GET /api/agent/proposals?id=<id>` tells the harness which sections you accepted or rejected, so its
   next pass starts from what you kept.
+- `POST /api/agent/notes` creates a note, if its integration may: `folder`, `name`, `content` and an
+  optional `requestId`. 201 when made, 200 for a retry of the same request, 403 without the permission, 409
+  when the name is taken.
 
 ### Sending a note to a harness
 

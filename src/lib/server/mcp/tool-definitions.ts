@@ -1,5 +1,5 @@
 /**
- * The four tools write offers over MCP (docs/design-decisions.md#d31), as `tools/list` returns them. The
+ * The tools write offers over MCP (docs/design-decisions.md#d31), as `tools/list` returns them. The
  * descriptions are written for the model: each says when to use the tool and what comes back. Reading
  * tools are marked read-only, so clients that ask before write-capable tools (Hermes Agent's "untrusted"
  * servers) don't ask for them, and may retry them safely.
@@ -88,6 +88,27 @@ export const TOOL_DEFINITIONS = [
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   },
   {
+    name: "create_note",
+    title: "Create a note",
+    description:
+      "Creates a new note in a folder list_notes shows. It is written at once, under exactly this name. If a note already has that name nothing is written and you get an error: choose another name, or read that note and propose changes to it. To change the new note later, use propose_changes as for any note.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        ...noteRef,
+        content: { type: "string", description: "The note's complete Markdown." },
+        requestId: {
+          type: "string",
+          description:
+            "Unique to this attempt (letters, digits, _ . : -); sending it again returns the note it made instead of failing.",
+        },
+      },
+      required: ["folder", "name", "content"],
+      additionalProperties: false,
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  },
+  {
     name: "get_proposal",
     title: "Check a proposal",
     description:
@@ -105,3 +126,7 @@ export const TOOL_DEFINITIONS = [
 export type ToolName = (typeof TOOL_DEFINITIONS)[number]["name"];
 
 export const isToolName = (name: unknown): name is ToolName => TOOL_DEFINITIONS.some((t) => t.name === name);
+
+/** The tools this integration is offered: create_note only when the owner let it create notes. */
+export const toolsFor = (integration: { canCreate: boolean }) =>
+  TOOL_DEFINITIONS.filter((t) => t.name !== "create_note" || integration.canCreate);

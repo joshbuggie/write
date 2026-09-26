@@ -56,7 +56,7 @@ export function IntegrationRow(props: IntegrationRowProps) {
     return (
       <li>
         <IntegrationForm
-          initial={{ name: i.name, kind: i.kind, folders: i.folders }}
+          initial={{ name: i.name, kind: i.kind, folders: i.folders, canCreate: i.canCreate }}
           integrationId={i.id}
           savedLauncher={i.launcher}
           library={library}

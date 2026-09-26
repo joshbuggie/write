@@ -30,13 +30,14 @@ export function isLauncherInput(v: unknown): v is LauncherInput {
   );
 }
 
-/** An integration from the dialog: a name, its kind, folder names and, optionally, a launcher. */
+/** An integration from the dialog: a name, its kind, folder names and, optionally, creation and a launcher. */
 export function isIntegrationRequest(v: unknown): v is IntegrationRequest {
   return (
     isObject(v) &&
     isString(v.name) &&
     isIntegrationKind(v.kind) &&
     isStringList(v.folders, 1000) &&
+    (v.canCreate === undefined || typeof v.canCreate === "boolean") &&
     (v.launcher === undefined || v.launcher === null || isLauncherInput(v.launcher))
   );
 }

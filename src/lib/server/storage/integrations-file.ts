@@ -27,6 +27,8 @@ export interface StoredIntegration {
   kind: IntegrationKind;
   /** On-disk folder names the token can read. */
   folders: string[];
+  /** Whether it may also create notes in those folders; it never overwrites one. */
+  canCreate: boolean;
   /** Hex SHA-256 of the token. */
   tokenHash: string;
   tokenHint: string;
@@ -61,6 +63,8 @@ function isStoredIntegration(v: unknown): v is StoredIntegration {
     isIntegrationKind(i.kind) &&
     Array.isArray(i.folders) &&
     i.folders.every(isString) &&
+    // Files from before note creation have no flag: missing reads as false.
+    (i.canCreate === undefined || typeof i.canCreate === "boolean") &&
     isString(i.tokenHash) &&
     /^[0-9a-f]{64}$/.test(i.tokenHash) &&
     isString(i.tokenHint) &&
@@ -88,15 +92,16 @@ function parse(text: string, file: string): StoredIntegration[] {
       `${file} isn't a valid write integrations file. Restore it from a backup, or delete it and make the integrations again (their tokens stop working).`,
     );
   }
-  return v.integrations.map(({ id, name, kind, folders, tokenHash, tokenHint, createdAt, launcher }) => ({
-    id,
-    name,
-    kind,
-    folders,
-    tokenHash,
-    tokenHint,
-    createdAt,
-    launcher: launcher ?? null,
+  return v.integrations.map((i) => ({
+    id: i.id,
+    name: i.name,
+    kind: i.kind,
+    folders: i.folders,
+    canCreate: i.canCreate === true,
+    tokenHash: i.tokenHash,
+    tokenHint: i.tokenHint,
+    createdAt: i.createdAt,
+    launcher: i.launcher ?? null,
   }));
 }
 

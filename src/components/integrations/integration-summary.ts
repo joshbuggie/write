@@ -13,9 +13,11 @@ export function foldersLabel(folders: string[]): string {
   return `${folders.slice(0, 2).join(", ")} and ${folders.length - 2} more`;
 }
 
-/** "Turnstone · Essays, Journal · token ••ab12": one line to recognize an integration by. */
+/** "Turnstone · Essays, Journal · can create notes · token ••ab12": one line to recognize it by. */
 export function summarizeIntegration(i: IntegrationView): string {
-  return [kindLabel(i.kind), foldersLabel(i.folders), `token ••${i.tokenHint}`].join(" · ");
+  const parts = [kindLabel(i.kind), foldersLabel(i.folders)];
+  if (i.canCreate) parts.push("can create notes");
+  return [...parts, `token ••${i.tokenHint}`].join(" · ");
 }
 
 /** "Last used Sep 24, 3:46 PM", or that it hasn't been used since the server started. */

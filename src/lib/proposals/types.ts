@@ -54,6 +54,14 @@ export interface ProposalSummary {
   conflicts: number;
 }
 
+/** Which integration created a note, for the line above it until the owner dismisses it. */
+export interface CreatedBy {
+  id: string;
+  source: string;
+  /** ISO 8601. */
+  createdAt: string;
+}
+
 /** Where a proposal stands, for the harness that sent it. */
 export type ProposalStatus = "pending" | "applied" | "dismissed" | "replaced" | "orphaned";
 

@@ -58,8 +58,13 @@ export function TokenReveal({ integration, token, onDone }: TokenRevealProps) {
           Harnesses without MCP can use the same token over plain HTTP at{" "}
           <code className="font-mono break-all text-ink">{agentApiBase(origin)}</code>:{" "}
           <code className="font-mono text-ink">GET /tree</code>,{" "}
-          <code className="font-mono text-ink">GET /notes</code> and{" "}
-          <code className="font-mono text-ink">POST /proposals</code>.
+          <code className="font-mono text-ink">GET /notes</code>
+          {integration.canCreate ? (
+            <>
+              , <code className="font-mono text-ink">POST /notes</code> (new notes)
+            </>
+          ) : null}{" "}
+          and <code className="font-mono text-ink">POST /proposals</code>.
         </p>
       </div>
       <div className="flex justify-end">

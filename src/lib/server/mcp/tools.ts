@@ -1,10 +1,10 @@
 import type { AgentProposal } from "@/lib/api-contract";
 import { bodySections } from "@/lib/proposals/review";
-import { agentReadNote, agentTree } from "../agent-actions";
+import { agentCreateNote, agentReadNote, agentTree } from "../agent-actions";
 import { HttpError } from "../http";
 import { agentProposal, proposeFromAgent } from "../proposal-service";
 import { StorageError, type StoredIntegration } from "../storage";
-import { isAgentProposalRequest } from "../validate-proposals";
+import { isAgentCreateNoteRequest, isAgentProposalRequest } from "../validate-proposals";
 import type { ToolName } from "./tool-definitions";
 
 /**
@@ -83,6 +83,17 @@ async function run(
     const { proposal, created } = await proposeFromAgent(integration, args);
     const note = created ? "" : " (you sent this before; this is the first proposal)";
     return ok(describeProposal(proposal) + note, proposal);
+  }
+  if (name === "create_note") {
+    if (!isAgentCreateNoteRequest(args))
+      return toolError("Give the folder, the name and the note's content.");
+    const { note, created } = await agentCreateNote(integration, args);
+    const again = created ? "Created" : "You sent this before; this is the note it made:";
+    return ok(`${again} ${note.folder}/${note.name}, version ${note.version}.`, {
+      folder: note.folder,
+      name: note.name,
+      version: note.version,
+    });
   }
   if (!str(args.id)) return toolError("Give the id propose_changes returned.");
   const proposal = await agentProposal(integration, args.id);

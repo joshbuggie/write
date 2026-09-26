@@ -42,6 +42,7 @@ export function toIntegrationView(i: StoredIntegration): IntegrationView {
     name: i.name,
     kind: i.kind,
     folders: i.folders,
+    canCreate: i.canCreate,
     tokenHint: i.tokenHint,
     createdAt: i.createdAt,
     lastUsedAt: lastUsed.get(i.id) ?? null,

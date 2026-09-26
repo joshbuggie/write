@@ -41,6 +41,8 @@ export interface IntegrationView {
   kind: IntegrationKind;
   /** Folder names the token can read, as they are on disk. Empty means nothing is readable yet. */
   folders: string[];
+  /** Whether it may also create notes in those folders (docs/design-decisions.md#d31). */
+  canCreate: boolean;
   /** The token's last four characters, to tell tokens apart. */
   tokenHint: string;
   /** ISO 8601. */

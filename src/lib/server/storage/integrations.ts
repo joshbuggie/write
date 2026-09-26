@@ -31,6 +31,8 @@ export interface IntegrationInput {
   name: string;
   kind: IntegrationKind;
   folders: string[];
+  /** May it create notes in its folders? Absent keeps the saved choice (off for a new integration). */
+  canCreate?: boolean;
   /** Absent keeps the saved launcher; null removes it. */
   launcher?: LauncherInput | null;
 }
@@ -89,7 +91,7 @@ async function checkedInput(input: IntegrationInput): Promise<IntegrationInput> 
     }
     if (!folders.some((f) => nameKey(f) === nameKey(onDisk))) folders.push(onDisk);
   }
-  return { name: name.name, kind: input.kind, folders, launcher: input.launcher };
+  return { name: name.name, kind: input.kind, folders, canCreate: input.canCreate, launcher: input.launcher };
 }
 
 /** The launcher an integration ends up with: kept when not sent, removed with null, else merged. */
@@ -129,6 +131,7 @@ export function createIntegration(
       name: checked.name,
       kind: checked.kind,
       folders: checked.folders,
+      canCreate: checked.canCreate ?? false,
       tokenHash: hashToken(token),
       tokenHint: tokenHint(token),
       createdAt: new Date().toISOString(),
@@ -151,6 +154,7 @@ export function updateIntegration(id: string, input: IntegrationInput): Promise<
       name: checked.name,
       kind: checked.kind,
       folders: checked.folders,
+      canCreate: checked.canCreate ?? current.canCreate,
       launcher: nextLauncher(checked, current.launcher),
     };
     await writeIntegrationsFile(all.map((i) => (i.id === id ? updated : i)));

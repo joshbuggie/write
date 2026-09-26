@@ -9,6 +9,7 @@ import { StorageError } from "./errors";
 import { atomicWrite, mapFsError, renameCaseOnly, renameNoClobber } from "./fs-utils";
 import { listTree, toSummary } from "./folders";
 import { withWriteLock } from "./mutex";
+import { createdFollowNote } from "./created-notes";
 import { jobsFollowNote } from "./jobs";
 import { orphanProposals, proposalsFollowNote, sameNoteRef } from "./proposals";
 import {
@@ -75,21 +76,36 @@ export async function readNote(ref: NoteRef): Promise<Note> {
   }
 }
 
+type CreateInput = {
+  folder: string;
+  name?: string;
+  content?: string;
+  /** Fail with name_taken instead of adding " 2": an integration names the note it means. */
+  exact?: boolean;
+};
+
 /** Creates a note, auto-suffixing a taken name ("Untitled 2") so "New note" never fails on a collision. */
-export async function createNote(input: { folder: string; name?: string; content?: string }): Promise<Note> {
+export function createNote(input: CreateInput): Promise<Note> {
+  return withWriteLock(() => createNoteUnlocked(input));
+}
+
+/** createNote for storage code that already holds the write lock (see created-notes.ts). */
+export async function createNoteUnlocked(input: CreateInput): Promise<Note> {
   const name = input.name === undefined ? UNTITLED : checkedNoteName(input.name);
   const bytes = encodeChecked(toLf(input.content ?? ""), { eol: "lf", bom: false });
-  return withWriteLock(async () => {
-    try {
-      const folder = await resolveFolder(getDataDir(), input.folder);
-      const finalName = uniqueName(name, await takenNoteNames(folder.path));
-      const file = safeJoin(folder.path, finalName + NOTE_EXT);
-      await atomicWrite(file, bytes, { noClobber: true });
-      return noteFromBytes(folder.name, finalName, await lstat(file), bytes);
-    } catch (err) {
-      throw mapFsError(err, "Folder not found.");
+  try {
+    const folder = await resolveFolder(getDataDir(), input.folder);
+    const taken = await takenNoteNames(folder.path);
+    const finalName = uniqueName(name, taken);
+    if (input.exact && finalName !== name) {
+      throw new StorageError("name_taken", `A note named "${name}" already exists in ${folder.name}.`);
     }
-  });
+    const file = safeJoin(folder.path, finalName + NOTE_EXT);
+    await atomicWrite(file, bytes, { noClobber: true });
+    return noteFromBytes(folder.name, finalName, await lstat(file), bytes);
+  } catch (err) {
+    throw mapFsError(err, "Folder not found.");
+  }
 }
 
 /**
@@ -202,6 +218,7 @@ export async function updateNote(input: {
       const to = { folder: target.name, name };
       await proposalsFollowNote(from, to);
       await jobsFollowNote((n) => (sameNoteRef(n, from) ? to : null));
+      await createdFollowNote((n) => (sameNoteRef(n, from) ? to : null));
       return toSummary(target.name, name, await lstat(dest));
     } catch (err) {
       throw mapFsError(err, "Note not found.");
@@ -220,6 +237,9 @@ export async function deleteNote(ref: NoteRef): Promise<void> {
       const { folder, note } = await resolveNote(dataDir, ref);
       await moveToTrash(dataDir, note.path, [folder.name, note.name + NOTE_EXT]);
       await orphanProposals((p) => sameNoteRef(p, { folder: folder.name, name: note.name }));
+      await createdFollowNote((n) =>
+        sameNoteRef(n, { folder: folder.name, name: note.name }) ? "drop" : null,
+      );
     } catch (err) {
       throw mapFsError(err, "Note not found.");
     }
@@ -239,6 +259,9 @@ export async function discardIfEmpty(ref: NoteRef): Promise<boolean> {
       if (!utf8Ok || text.trim() !== "") return false;
       await unlink(note.path);
       await orphanProposals((p) => sameNoteRef(p, { folder: folder.name, name: note.name }));
+      await createdFollowNote((n) =>
+        sameNoteRef(n, { folder: folder.name, name: note.name }) ? "drop" : null,
+      );
       return true;
     } catch (err) {
       const mapped = mapFsError(err, "Note not found.");
