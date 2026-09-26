@@ -503,7 +503,7 @@ write**, and enter the harness's address and API key (**Test connection** checks
 anything):
 
 - **Turnstone:** its address (the console), an API token that can create workstreams, and whether to start
-  a **coordinator** (several agents) or a **single workstream**. If you registered write in Turnstone under
+  a **single workstream** (the default) or a **coordinator** (several agents). If you registered write in Turnstone under
   another name than `write`, enter that name. A single workstream runs without prompts: write asks
   Turnstone to auto-approve its four tools. A coordinator can't be started that way, so the first time
   it calls write's tools Turnstone asks you to approve them; choose "always". write's tools can only read

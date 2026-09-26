@@ -112,8 +112,8 @@ export function LauncherFields({ kind, draft, saved, integrationId, onChange }: 
                 aria-describedby={modeHintId}
                 value={draft.turnstoneMode}
                 options={[
-                  { value: "coordinator", label: "Coordinator (several agents)" },
                   { value: "workstream", label: "Single workstream" },
+                  { value: "coordinator", label: "Coordinator (several agents)" },
                 ]}
                 onChange={(e) =>
                   onChange({ turnstoneMode: e.target.value as LauncherDraft["turnstoneMode"] })

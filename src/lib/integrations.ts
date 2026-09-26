@@ -96,7 +96,8 @@ export interface LauncherInput {
 export const DEFAULT_LAUNCHER: LauncherInput = {
   url: "",
   ca: "",
-  turnstoneMode: "coordinator",
+  // A coordinator stops for approval at write's tools (docs/design-decisions.md#d31); a workstream doesn't.
+  turnstoneMode: "workstream",
   mcpServerName: "write",
 };
 

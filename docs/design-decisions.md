@@ -919,7 +919,8 @@ wrong_password`. A wrong current password is `403 wrong_password`, not `401`, wh
     Tried live (2026-09-25): a single workstream ran without prompts; a coordinator stopped at
     `read_note` and `propose_changes` for approval, because Turnstone applies neither per-server
     auto-approve nor creation-time `auto_approve_tools` to coordinators. The dialog and the note's
-    "working" notice say so for coordinator jobs.
+    "working" notice say so for coordinator jobs. So a new Turnstone launcher starts single workstreams
+    unless the owner picks a coordinator.
   - **Continue by default.** "Send to…" continues the harness's last conversation about this note (the
     newest job for it), so the harness remembers what it proposed and can ask `get_proposal` what was
     kept; "Start a new conversation" is one checkbox away. A conversation that no longer exists (404)
