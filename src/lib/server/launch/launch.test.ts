@@ -59,7 +59,11 @@ const launcher = (patch: Partial<LauncherInput> = {}): LauncherInput => ({
   ...patch,
 });
 
-async function setUp(kind: "turnstone" | "hermes" | "other", patch: Partial<LauncherInput> = {}) {
+async function setUp(
+  kind: "turnstone" | "hermes" | "other",
+  patch: Partial<LauncherInput> = {},
+  canCreate = false,
+) {
   await createFolder("Essays");
   await createFolder("Journal");
   await createNote({ folder: "Essays", name: "Tides", content: "## A\n\nAlpha.\n" });
@@ -68,6 +72,7 @@ async function setUp(kind: "turnstone" | "hermes" | "other", patch: Partial<Laun
     name: "Harness",
     kind,
     folders: ["Essays"],
+    canCreate,
     launcher: launcher(patch),
   });
   const send = (fresh = false, name = "Tides") =>
@@ -94,7 +99,12 @@ describe("launching jobs", () => {
       expect(seen[0]).toMatchObject({ method: "POST", path: "/v1/api/route/workstreams/new" });
       expect(seen[0].headers.authorization).toBe("Bearer ts_secret_key_123456");
       expect(seen[0].body).toMatchObject({ ws_id: first.id, name: "write: Tides" });
-      expect(seen[0].body.auto_approve_tools).toContain("mcp__write__propose_changes");
+      expect(seen[0].body.auto_approve_tools).toEqual([
+        "mcp__write__list_notes",
+        "mcp__write__read_note",
+        "mcp__write__propose_changes",
+        "mcp__write__get_proposal",
+      ]);
       expect(seen[0].body.initial_message).toContain(`requestId "${first.id}"`);
       expect(seen[0].body.initial_message).toContain('Change only these sections: "A"');
 
@@ -102,6 +112,20 @@ describe("launching jobs", () => {
       expect(second.continued).toBe(true);
       expect(seen[1].path).toBe(`/v1/api/route/workstreams/${first.id}/send`);
       expect(seen[1].body.message).toContain("get_proposal");
+    }));
+
+  it("auto-approves create_note too when the integration may create notes", () =>
+    withTempDataDir(async () => {
+      reply = (s) => ({ status: 200, body: { ws_id: s.body.ws_id } });
+      const { send } = await setUp("turnstone", { mcpServerName: "notes" }, true);
+      await send();
+      expect(seen[0].body.auto_approve_tools).toEqual([
+        "mcp__notes__list_notes",
+        "mcp__notes__read_note",
+        "mcp__notes__propose_changes",
+        "mcp__notes__get_proposal",
+        "mcp__notes__create_note",
+      ]);
     }));
 
   it("starts a coordinator, and starts over when the old one is gone", () =>

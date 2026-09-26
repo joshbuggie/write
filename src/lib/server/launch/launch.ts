@@ -69,6 +69,7 @@ export async function launch(req: LaunchRequest): Promise<JobView> {
       jobId: id,
       continuing,
     }),
+    canCreate: integration.canCreate,
   });
   const runner = launcherFor(integration.kind);
   const continued = prev ? await runner.continue(launcher, prev, job(true)) : null;
