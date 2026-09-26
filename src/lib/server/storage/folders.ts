@@ -1,7 +1,7 @@
 import type { Stats } from "node:fs";
 import { lstat, mkdir, readdir, rename } from "node:fs/promises";
 import { compareNames, nameKey, validateName } from "@/lib/names";
-import type { FolderSummary, NoteSummary, Tree } from "@/lib/types";
+import type { FolderSummary, NoteRef, NoteSummary, Tree } from "@/lib/types";
 import { getDataDir } from "./config";
 import { StorageError } from "./errors";
 import { errorCode, exists, mapFsError, renameCaseOnly } from "./fs-utils";
@@ -138,9 +138,9 @@ export async function deleteFolder(name: string): Promise<void> {
       await moveToTrash(dataDir, folder.path, [folder.name]);
       await dropFolderScope(folder.name);
       await orphanProposals((p) => p.folder.normalize("NFC") === folder.name.normalize("NFC"));
-      await createdFollowNote((n) =>
-        n.folder.normalize("NFC") === folder.name.normalize("NFC") ? "drop" : null,
-      );
+      const inFolder = (n: NoteRef) => n.folder.normalize("NFC") === folder.name.normalize("NFC");
+      await jobsFollowNote((n) => (inFolder(n) ? "drop" : null));
+      await createdFollowNote((n) => (inFolder(n) ? "drop" : null));
     } catch (err) {
       throw mapFsError(err, "Folder not found.");
     }

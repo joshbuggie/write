@@ -90,6 +90,17 @@ export async function pendingProposalsFor(ref: NoteRef): Promise<StoredProposal[
   return (await listProposals()).filter((p) => p.status === "pending" && sameNoteRef(p.note, ref));
 }
 
+/** This integration's proposal for a request it sent before, or null. Retries never need the note. */
+export async function proposalForRequest(
+  integrationId: string,
+  requestId: string,
+): Promise<StoredProposal | null> {
+  return (
+    (await listProposals()).find((p) => p.integrationId === integrationId && p.requestId === requestId) ??
+    null
+  );
+}
+
 /** One proposal by id, or null. */
 export const getProposal = (id: string) => readProposal(id);
 

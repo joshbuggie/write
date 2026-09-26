@@ -6,8 +6,11 @@ import {
   createFolder,
   createIntegration,
   createNote,
+  dismissCreatedRecord,
   listTree,
   readNote,
+  saveNote,
+  updateNote,
 } from "@/lib/server/storage";
 import { withTempDataDir } from "@/lib/server/storage/test-utils";
 import * as mcp from "./agent/mcp/route";
@@ -122,5 +125,44 @@ describe("creating notes as an integration", () => {
       expect(second.status).toBe(200);
       expect(((await second.json()) as AgentCreateNoteResponse).note.version).toBe(note.version);
       expect((await rest({ ...body, requestId: "job-3" })).status).toBe(409);
+    }));
+});
+
+describe("retrying a create", () => {
+  const args = { folder: "Essays", name: "Rock pools", content: "Cold.\n", requestId: "create-1" };
+  const note = { folder: "Essays", name: "Rock pools" };
+
+  it("tells nothing about a note the owner moved out of reach, and creates nothing", () =>
+    withTempDataDir(async () => {
+      const { call, rest } = await setUp(true);
+      await call("create_note", args);
+      await updateNote({ ref: note, newFolder: "Journal" });
+      const moved = { folder: "Journal", name: "Rock pools" };
+      const current = await readNote(moved);
+      await saveNote({ ref: moved, content: "Owner's private text.\n", baseVersion: current.version });
+
+      const viaMcp = await call("create_note", args);
+      expect(viaMcp.isError).toBe(true);
+      expect(JSON.stringify(viaMcp)).not.toMatch(/private|Journal/i);
+      const viaRest = await rest(args);
+      expect(viaRest.status).toBe(404);
+      expect(await viaRest.text()).not.toMatch(/private|Journal/i);
+      // Naming another folder it can read doesn't get around it either.
+      expect((await rest({ ...args, folder: "Essays", name: "Other" })).status).toBe(404);
+      expect(await essayNames()).toEqual(["Draft"]);
+    }));
+
+  it("still returns the note after the owner dismissed who made it, even renamed", () =>
+    withTempDataDir(async () => {
+      const { call, rest } = await setUp(true);
+      await call("create_note", args);
+      await dismissCreatedRecord((await createdRecordFor(note))!.id);
+      expect((await rest(args)).status).toBe(200);
+      expect(await createdRecordFor(note)).toBeNull(); // the line stays hidden
+
+      await updateNote({ ref: note, newName: "Tide pools" });
+      const again = await call("create_note", args);
+      expect(again.content[0].text).toContain("Essays/Tide pools");
+      expect(await essayNames()).toEqual(["Draft", "Tide pools"]);
     }));
 });

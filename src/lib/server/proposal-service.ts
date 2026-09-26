@@ -1,7 +1,7 @@
 import type { AgentProposal, AgentProposalRequest } from "@/lib/api-contract";
 import { MAX_NOTE_BYTES } from "@/lib/constants";
 import { proposedFromSections } from "@/lib/proposals/apply";
-import { buildChanges } from "@/lib/proposals/review";
+import { buildChanges, reordersSections } from "@/lib/proposals/review";
 import { HttpError } from "./http";
 import { baseFor } from "./proposal-bases";
 import { openChanges } from "./proposal-review";
@@ -9,6 +9,7 @@ import {
   addProposal,
   canReadFolder,
   getProposal,
+  proposalForRequest,
   readNote,
   StorageError,
   type StoredIntegration,
@@ -33,6 +34,13 @@ export async function proposeFromAgent(
   req: AgentProposalRequest,
 ): Promise<{ proposal: AgentProposal; created: boolean }> {
   if (!canReadFolder(integration, req.folder)) throw hidden();
+  // A retry answers from what was saved, before anything that needs the version it read: after a restart
+  // and an owner edit that version is gone, and the proposal it sent is already there.
+  const earlier = req.requestId ? await proposalForRequest(integration.id, req.requestId) : null;
+  if (earlier) {
+    if (!canReadFolder(integration, earlier.note.folder)) throw hidden();
+    return { proposal: await toAgentProposal(earlier, integration), created: false };
+  }
   const note = await readNote({ folder: req.folder, name: req.name });
   if (!canReadFolder(integration, note.folder)) throw hidden();
   if (note.readOnly) {
@@ -53,6 +61,12 @@ export async function proposeFromAgent(
   const proposed = built.file;
   if (Buffer.byteLength(proposed) > MAX_NOTE_BYTES) {
     throw new StorageError("too_large", "The proposed note is larger than 5 MB, the maximum note size.");
+  }
+  if (reordersSections(base, proposed)) {
+    throw new HttpError(
+      "bad_request",
+      "This proposal moves sections, and write can't apply a move: keep the note's sections in their order and change only their text. Say in your summary if you suggest a different order.",
+    );
   }
   if (buildChanges(base, proposed, base).length === 0) {
     throw new HttpError(

@@ -879,7 +879,9 @@ wrong_password`. A wrong current password is `403 wrong_password`, not `401`, wh
     never listed or exported), next to the notes they are about. They follow their note through renames
     and moves, and close as "orphaned" when it is deleted, so a new note with the same name doesn't
     inherit them. A newer proposal from the same integration for the same note replaces the older one.
-    A `requestId` makes a retried request return the first proposal. At most 20 wait per integration.
+    A `requestId` makes a retried request return the first proposal, checked before anything else: after
+    a restart and an owner edit the version it read is gone, but the proposal it sent is on disk. A retry
+    never shows a note the integration can no longer read. At most 20 wait per integration.
     A closed proposal drops the note text it carried (only its decisions are looked up
     later) and is removed after 30 days.
   - **Creating notes is a separate permission** (`canCreate` on the integration, off by default and
@@ -888,10 +890,14 @@ wrong_password`. A wrong current password is `403 wrong_password`, not `401`, wh
     whole new note would be one more step for no safety. The owner asked for this over "propose a new
     note" (2026-09-25). It is limited to the folders the integration can read, never replaces a note (a
     taken name is 409 `name_taken`, not "Draft 2", so the harness knows what it made), and a
-    `requestId` makes a retry return the same note. `create_note` is listed only to integrations that
-    have the permission. Who made it is kept in `.proposals/created.json`, following the note through
-    renames and dropped with it on delete, so the note says "Hermes Agent created this note" until the
-    owner dismisses that.
+    `requestId` makes a retry return the same note, while its folder is still one the integration can
+    read (else 404 and nothing is created). `create_note` is listed only to integrations that have the
+    permission. Who made it is kept in `.proposals/created.json`, following the note through renames and
+    dropped with it on delete, so the note says "Hermes Agent created this note" until the owner
+    dismisses that. Dismissing only hides the line; the record still answers retries.
+  - **Sections keep their order.** A whole-note proposal that moves sections is refused (400) when it
+    arrives: each change replaces its section where it is, so an accepted move would silently keep the
+    old order. Reviewing and applying moves (with their own conflicts) could come later.
   - **Word diffs** in the review (`src/lib/proposals/word-diff.ts`): Myers on words, with bounded work.
     Small shared words between edits fold into the edits, and a mostly rewritten passage shows as the old
     text then the new, which reads far better than alternating fragments.
@@ -935,8 +941,9 @@ wrong_password`. A wrong current password is `403 wrong_password`, not `401`, wh
   - **Continue by default.** "Send to…" continues the harness's last conversation about this note (the
     newest job for it), so the harness remembers what it proposed and can ask `get_proposal` what was
     kept; "Start a new conversation" is one checkbox away. A conversation that no longer exists (404)
-    starts a new one. Jobs are JSON files in `.proposals/jobs/`, follow their note through renames, and
-    are removed after 30 days.
+    starts a new one. Jobs are JSON files in `.proposals/jobs/`, follow their note through renames, go
+    with it when it (or its folder) is deleted, so a new note with that name starts its own conversation,
+    and are removed after 30 days.
   - **One brief for every harness** (`src/lib/launch/brief.ts`): the note, the owner's words as written,
     the sections it may change, and the job id to use as `requestId`. How to use the tools is in the MCP
     instructions, not repeated here.

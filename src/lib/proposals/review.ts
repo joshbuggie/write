@@ -96,3 +96,19 @@ export function buildChanges(
   }
   return changes;
 }
+
+/**
+ * Whether `proposed` puts sections it shares with `base` in another order. A review can't show or apply
+ * a move (each change replaces its section where it is), so such a proposal is refused up front instead
+ * of being applied in the old order while saying it was applied.
+ */
+export function reordersSections(base: string, proposed: string): boolean {
+  const baseKeys = bodySections(base).map((s) => s.key);
+  const inBase = new Set(baseKeys);
+  const kept = bodySections(proposed)
+    .map((s) => s.key)
+    .filter((k) => inBase.has(k));
+  const inBoth = new Set(kept);
+  const baseOrder = baseKeys.filter((k) => inBoth.has(k));
+  return kept.some((k, i) => k !== baseOrder[i]);
+}

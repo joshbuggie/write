@@ -13,6 +13,7 @@ const make = (name: string) =>
     requestId: null,
     ref: { folder: "Essays", name },
     content: "Hi.\n",
+    canRead: () => true,
   });
 
 describe("created-note records", () => {

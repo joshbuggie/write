@@ -84,6 +84,15 @@ type CreateInput = {
   exact?: boolean;
 };
 
+/**
+ * A deleted note's jobs and "created by" record go with it, so a new note under the same name starts its
+ * own conversation and isn't labelled as made by a harness. Inside the write lock only.
+ */
+async function dropNoteRecords(ref: NoteRef): Promise<void> {
+  await jobsFollowNote((n) => (sameNoteRef(n, ref) ? "drop" : null));
+  await createdFollowNote((n) => (sameNoteRef(n, ref) ? "drop" : null));
+}
+
 /** Creates a note, auto-suffixing a taken name ("Untitled 2") so "New note" never fails on a collision. */
 export function createNote(input: CreateInput): Promise<Note> {
   return withWriteLock(() => createNoteUnlocked(input));
@@ -237,9 +246,7 @@ export async function deleteNote(ref: NoteRef): Promise<void> {
       const { folder, note } = await resolveNote(dataDir, ref);
       await moveToTrash(dataDir, note.path, [folder.name, note.name + NOTE_EXT]);
       await orphanProposals((p) => sameNoteRef(p, { folder: folder.name, name: note.name }));
-      await createdFollowNote((n) =>
-        sameNoteRef(n, { folder: folder.name, name: note.name }) ? "drop" : null,
-      );
+      await dropNoteRecords({ folder: folder.name, name: note.name });
     } catch (err) {
       throw mapFsError(err, "Note not found.");
     }
@@ -259,9 +266,7 @@ export async function discardIfEmpty(ref: NoteRef): Promise<boolean> {
       if (!utf8Ok || text.trim() !== "") return false;
       await unlink(note.path);
       await orphanProposals((p) => sameNoteRef(p, { folder: folder.name, name: note.name }));
-      await createdFollowNote((n) =>
-        sameNoteRef(n, { folder: folder.name, name: note.name }) ? "drop" : null,
-      );
+      await dropNoteRecords({ folder: folder.name, name: note.name });
       return true;
     } catch (err) {
       const mapped = mapFsError(err, "Note not found.");

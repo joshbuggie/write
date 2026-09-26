@@ -38,6 +38,7 @@ export {
   addProposal,
   getProposal,
   pendingProposalsFor,
+  proposalForRequest,
   updateProposal,
   MAX_PENDING_PER_INTEGRATION,
   type NewProposal,

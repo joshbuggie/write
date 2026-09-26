@@ -107,14 +107,16 @@ export function saveJob(job: StoredJob): Promise<void> {
 }
 
 /**
- * Jobs follow their note through renames and moves, so "Send to…" still continues the same conversation.
- * Called inside note and folder operations, which hold the write lock. Failures are logged, not thrown.
+ * Jobs follow their note through renames and moves, so "Send to…" still continues the same conversation,
+ * and go with it when it is deleted ("drop"), so a new note with the same name starts its own. Called
+ * inside note and folder operations, which hold the write lock. Failures are logged, not thrown.
  */
-export async function jobsFollowNote(match: (note: NoteRef) => NoteRef | null): Promise<void> {
+export async function jobsFollowNote(match: (note: NoteRef) => NoteRef | "drop" | null): Promise<void> {
   try {
     for (const job of await listJobs()) {
       const to = match(job.note);
-      if (to) await writeJob({ ...job, note: to });
+      if (to === "drop") await unlink(path.join(dir(), `${job.id}.json`)).catch(() => {});
+      else if (to) await writeJob({ ...job, note: to });
     }
   } catch (err) {
     console.error("[write] couldn't update the jobs for a note", err);

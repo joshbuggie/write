@@ -59,6 +59,7 @@ export async function agentCreateNote(
     requestId: input.requestId ?? null,
     ref: { folder: input.folder, name: input.name },
     content: input.content,
+    canRead: (folder) => canReadFolder(integration, folder),
   });
   rememberBase(result.note.version, result.note.content);
   return result;

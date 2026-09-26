@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { applyChanges, proposedFromSections } from "./apply";
-import { buildChanges } from "./review";
+import { buildChanges, reordersSections } from "./review";
 
 const base = "Intro.\n\n## A\n\nAlpha.\n\n## B\n\nBeta.\n\n## C\n\nGamma.\n";
 
@@ -86,5 +86,19 @@ describe("proposedFromSections", () => {
       ok: true,
       file: "New intro.\n\n## A\n\nAlpha, better.\n\n## C\n\nGamma.\n\n## D\n\nDelta.\n",
     });
+  });
+});
+
+describe("reordersSections", () => {
+  const base = "Intro.\n\n## A\n\nAlpha.\n\n## B\n\nBeta.\n\n## A\n\nAgain.\n";
+  it("sees shared sections in another order, not additions, removals or edits", () => {
+    expect(reordersSections(base, "Intro.\n\n## B\n\nBeta.\n\n## A\n\nAlpha.\n\n## A\n\nAgain.\n")).toBe(
+      true,
+    );
+    expect(reordersSections(base, "Intro.\n\n## A\n\nAlpha.\n\n## A\n\nAgain.\n\n## B\n\nBeta.\n")).toBe(
+      true,
+    );
+    expect(reordersSections(base, "Intro.\n\n## A\n\nNew.\n\n## C\n\nC.\n\n## A\n\nAgain.\n")).toBe(false);
+    expect(reordersSections(base, "---\nx: 1\n---\nIntro 2.\n\n## B\n\nBeta.\n")).toBe(false);
   });
 });
