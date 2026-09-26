@@ -14,6 +14,8 @@ open in vim, Obsidian, iA Writer or anything else.
 - Password-protected access by default, and light and dark mode that follow your system.
 - An optional AI assistant, off until you turn it on, that works with the model you choose: one on your
   own network such as Ollama, or a hosted API.
+- Optional integrations for agent harnesses such as Turnstone and Hermes Agent: they read the folders you
+  share with them and propose changes that you accept or reject section by section.
 
 ---
 
@@ -125,7 +127,7 @@ Then run `sudo systemctl enable --now write`.
 ### First run
 
 The first time you open write, it asks you to create an account: a username and a password of at
-least 8 characters. That account is the only way in, on every device. To change the password later, open
+least 8 characters. That account is how you sign in, on every device. To change the password later, open
 **Settings** → **Account** → **Change password**; your other devices are signed out. Scripts can use its password too
 (see [Scripted backups](#scripted-backups)).
 
@@ -140,18 +142,18 @@ write's own sign-in off with `WRITE_AUTH=off`.
 
 ## Configuration
 
-The server is configured with environment variables. Your account is saved in `account.json`, and the
-settings you change in the app (today only the AI assistant's) in `settings.json`, both in
-`WRITE_CONFIG_DIR`.
+The server is configured with environment variables. Everything you set up in the app is saved in
+`WRITE_CONFIG_DIR`: your account in `account.json`, the AI assistant's settings in `settings.json`, and
+your [integrations](#integrations-optional) in `integrations.json`.
 
-| Variable           | Default                                                                     | What it does                                                                                                                                                                                                                                                                                                                                                                      |
-| ------------------ | --------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `WRITE_DATA_DIR`   | `./data` on bare metal (relative to the working dir), `/data` in Docker     | The folder that holds your notes. It may be a symlink, for example into a synced folder. A path inside `.next/` is refused, because builds wipe it.                                                                                                                                                                                                                               |
-| `WRITE_CONFIG_DIR` | `./config` on bare metal (relative to the working dir), `/config` in Docker | Where write keeps your account (`account.json`) and its own settings (`settings.json`): the AI assistant's, API keys included. Keep it outside the data folder, so synced notes never carry your keys: write refuses a folder it can see is inside the data folder, symlinks followed, but two Docker mounts of the same host folder look separate, so keep those apart yourself. |
-| `WRITE_AUTH`       | on                                                                          | Set to `off` to turn sign-in off, only when something in front of write already signs people in (a VPN, or a reverse proxy with its own sign-in). Any other value leaves sign-in on.                                                                                                                                                                                              |
-| `PORT`             | `3000`                                                                      | The port to listen on. Set it in the real environment (shell, systemd, Docker), not in `.env.local`. With `npm start`, `-p <port>` also works.                                                                                                                                                                                                                                    |
-| `HOSTNAME`         | `0.0.0.0` in Docker                                                         | The address the Docker image's server binds to. `npm start` ignores it, even as a real environment variable: use `npm start -- -H <address>`.                                                                                                                                                                                                                                     |
-| `BUILD_STANDALONE` | unset (the Dockerfile sets `1`)                                             | Build-time only. Produces the self-contained server that the Docker image runs. You don't need it for `npm start`.                                                                                                                                                                                                                                                                |
+| Variable           | Default                                                                     | What it does                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| ------------------ | --------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `WRITE_DATA_DIR`   | `./data` on bare metal (relative to the working dir), `/data` in Docker     | The folder that holds your notes. It may be a symlink, for example into a synced folder. A path inside `.next/` is refused, because builds wipe it.                                                                                                                                                                                                                                                                                                                   |
+| `WRITE_CONFIG_DIR` | `./config` on bare metal (relative to the working dir), `/config` in Docker | Where write keeps your account (`account.json`) and its own settings: the AI assistant's (`settings.json`) and your integrations' (`integrations.json`), API keys included. Keep it outside the data folder, so synced notes never carry your keys: write refuses the data folder itself, a folder it can see is inside it (symlinks followed) and a path inside `.next/`, but two Docker mounts of the same host folder look separate, so keep those apart yourself. |
+| `WRITE_AUTH`       | on                                                                          | Set to `off` to turn sign-in off, only when something in front of write already signs people in (a VPN, or a reverse proxy with its own sign-in). Any other value leaves sign-in on.                                                                                                                                                                                                                                                                                  |
+| `PORT`             | `3000`                                                                      | The port to listen on. Set it in the real environment (shell, systemd, Docker), not in `.env.local`. With `npm start`, `-p <port>` also works.                                                                                                                                                                                                                                                                                                                        |
+| `HOSTNAME`         | `0.0.0.0` in Docker                                                         | The address the Docker image's server binds to. `npm start` ignores it, even as a real environment variable: use `npm start -- -H <address>`.                                                                                                                                                                                                                                                                                                                         |
+| `BUILD_STANDALONE` | unset (the Dockerfile sets `1`)                                             | Build-time only. Produces the self-contained server that the Docker image runs. You don't need it for `npm start`.                                                                                                                                                                                                                                                                                                                                                    |
 
 `GET /api/health` returns `200 {"ok":true}` when the data folder is usable, and `503` otherwise. It
 never needs a password, so you can point uptime monitors at it. It does a real write test of the data
@@ -173,6 +175,7 @@ data/                          ← WRITE_DATA_DIR
   Work/
     Q3 plan.md
   .trash/                      ← deleted notes and folders (hidden, never listed)
+  .proposals/                  ← only if you use integrations (hidden, never listed)
 ```
 
 - **The filename is the title.** Renaming a note in write renames the file, and renaming the file outside
@@ -180,10 +183,15 @@ data/                          ← WRITE_DATA_DIR
 - **One level of folders.** Files at the top of the data folder, nested folders, hidden files
   (starting with `.`), symlinks and anything that isn't `.md` (lowercase) are ignored and never touched.
   The one exception: renaming or deleting a folder moves the whole directory, including those files.
-- **Nothing else is stored.** No database, no index, no sidecar files, and nothing is added to your notes.
-  A UTF-8 BOM and the line-ending style (LF or CRLF, based on the first line break) are preserved when
-  saving. Mixed line endings normalize to that style. write's own settings live in
-  a separate folder (`WRITE_CONFIG_DIR`), never in the data folder.
+- **Nothing is added to your notes.** No database, no index, and no sidecar files next to your notes. A
+  UTF-8 BOM and the line-ending style (LF or CRLF, based on the first line break) are preserved when
+  saving. Mixed line endings normalize to that style. write's account and settings live in a separate
+  folder (`WRITE_CONFIG_DIR`), never in the data folder.
+- **Integrations keep their work in `.proposals`.** If you use [integrations](#integrations-optional),
+  write creates a hidden `.proposals` folder for the changes harnesses propose (with a copy of the note
+  text while a proposal waits for review), the requests you send them, and which notes they created. It
+  holds no keys or tokens. Proposals you've dealt with, sent requests and created-note records are removed
+  after 30 days, the next time a new one is saved.
 - **Names are portable.** New note and folder names can't contain `/ \ : * ? " < > |`, can't start or end
   with a dot, and can't be Windows device names like `CON`. Two names that differ only in case count as
   the same name. This keeps your folder safe to sync or unzip on macOS, Windows and Linux. Files that
@@ -196,8 +204,9 @@ data/                          ← WRITE_DATA_DIR
 - **Interrupted renames come back.** Changing only the case of a name (`plan` → `Plan`) takes two steps.
   If the server stops between them, the note or folder reappears as "Recovered note" or "Recovered folder"
   the next time write loads, so you can rename it back.
-- **Empty new notes don't pile up.** An "Untitled" note that you create and then leave for another page in
-  write without typing anything is removed for good, since it held nothing. Reloading the page keeps it.
+- **Empty new notes don't pile up.** An "Untitled" note (or "Untitled 2"…) that is still empty when you
+  leave it for another page in write is removed for good, since it held nothing. Reloading the page keeps
+  it.
 - **Delete the last folder** and write recreates an empty `notebook`, so there's always somewhere to
   write.
 
@@ -240,7 +249,7 @@ saves, the editor writes standard Markdown, which can differ slightly from what 
 | `#` headings, **bold**/_italic_/~~strike~~/`code`, links (with titles), blockquotes, `---`, nested and numbered lists (including the start number), nested task lists, fenced code with a language, images, and text like `&`, `<`, `snake_case`, `[[wiki links]]`, `[^1]`                                                                                                    | **Supported.** Formatting and text are kept; Markdown spelling can normalize as described below.                                                                    |
 | Tables (column padding), `_em_` → `*em*`, `* item` → `- item`, underlined (setext) headings → `#` headings, closing `##` on headings dropped, `~~~` and indented code → ` ``` ` fences, a `\` line break → two trailing spaces, a lone `~` → `\~`, bare URLs and `<autolinks>` → `[url](url)`, reference links → inline links, loose lists → tight lists, runs of blank lines | **Normalized** to the equivalent standard form. This only happens the first time you edit that note.                                                                |
 | YAML (`---`) or TOML (`+++`) front matter at the top of the file                                                                                                                                                                                                                                                                                                              | **Kept byte for byte.** It's shown read-only as "Properties" above the note, and can be edited in Markdown mode.                                                    |
-| Raw HTML, HTML comments, footnote definitions, math (`$…$`, `$$…$$`), link definitions nothing links to (bookmark lists, `[//]: #` comments), backslash escapes other apps rely on (`\#tag`, `\[\[x]]`, `\$5`)                                                                                                                                                                | The visual editor can't keep these, so the note **opens as Markdown source** instead, with a banner. Choose "Edit visually anyway" only if you're fine losing them. |
+| Raw HTML, HTML comments, footnote definitions, math (`$…$`, `$$…$$`), link definitions nothing links to (bookmark lists, `[//]: #` comments), backslash escapes other apps rely on (`\#tag`, `\[\[x]]`, `\$5`, `\%%`, `\==`)                                                                                                                                                  | The visual editor can't keep these, so the note **opens as Markdown source** instead, with a banner. Choose "Edit visually anyway" only if you're fine losing them. |
 
 A few more rules:
 
@@ -256,7 +265,8 @@ A few more rules:
   relative paths don't display.
 - **Tabs inside list items** become spaces once the note is saved and reopened (the Markdown parser
   expands them there). Tabs in ordinary paragraphs, quotes and code are kept.
-- You can switch any note between the visual editor and Markdown source from its **⋯** menu.
+- You can switch a note between the visual editor and Markdown source from its **⋯** menu. Large notes
+  (above) stay in source mode.
 
 ---
 
@@ -288,10 +298,12 @@ For example, as a nightly cron job:
 ```
 
 Because your notes are plain files, you can also back up the data folder directly with restic, Time
-Machine, `rsync` or `git`. That also captures `.trash`.
+Machine, `rsync` or `git`. That also captures `.trash` and `.proposals`, which the zip leaves out.
 
-The config folder (`WRITE_CONFIG_DIR`) isn't in the zip. It holds your account (the password is hashed)
-and the AI assistant's settings, with your API keys in plain text. Back it up too if you want to keep your connections, and protect it (and its
+The config folder (`WRITE_CONFIG_DIR`) isn't in the zip. It holds your account (the password is hashed),
+the AI assistant's settings and your integrations. Integration tokens are stored only as fingerprints, but
+the API keys for AI connections and for starting jobs in a harness are stored in plain text. Back it up
+too if you want to keep your account, connections and integration tokens, and protect it (and its
 backups) like the keys themselves: don't put it in a synced or shared folder, or in `git`.
 
 ---
@@ -317,7 +329,7 @@ backups) like the keys themselves: don't put it in a synced or shared folder, or
   ```nginx
   location / {
       proxy_pass http://127.0.0.1:3000;
-      client_max_body_size 8m;
+      client_max_body_size 10m;
       proxy_set_header Host $host;
       proxy_set_header X-Forwarded-Proto $scheme;
   }
@@ -332,14 +344,21 @@ backups) like the keys themselves: don't put it in a synced or shared folder, or
 - **Keep sign-in on before you turn on the AI assistant** on any server others can reach. With
   `WRITE_AUTH=off`, anyone who can reach write can use your saved connections (and your API credits), and
   can use **Test connection** to make the server send requests to addresses on your network, even while
-  the assistant is off. API keys are stored on the server in plain text, in `settings.json` inside
+  the assistant is off. The same goes for integrations: their **Test connection** and **Send** make the
+  server contact whatever address is entered. API keys (the AI assistant's in `settings.json`, those for
+  starting jobs in a harness in `integrations.json`) are stored on the server in plain text inside
   `WRITE_CONFIG_DIR`, readable only by the user write runs as. They never reach the browser, which sees
-  at most a key's last four characters. See [AI assistant](#ai-assistant-optional).
+  at most a key's last four characters. See [AI assistant](#ai-assistant-optional) and
+  [Integrations](#integrations-optional).
+- **Integration tokens** only open `/api/agent`, and only for the folders you chose. That API always
+  needs a token, even with `WRITE_AUTH=off`. Tokens are long and random, so wrong tokens are simply
+  refused and don't count toward the sign-in lockout below.
 - **Sign-in** uses an HTTP-only session cookie that lasts 30 days. Your password is stored as a salted
-  scrypt hash in `account.json`, never in plain text. Resetting the account (below) signs out every
-  device.
+  scrypt hash in `account.json`, never in plain text. Changing the password signs out your other devices,
+  and resetting the account ([I forgot the password](#faq-and-troubleshooting)) signs out every device.
 - **Wrong passwords lock sign-in for everyone, for a while.** After 10 wrong passwords within 15 minutes
-  (at the sign-in page or in an `Authorization: Bearer` header), every password check is refused for
+  (at the sign-in page, in an `Authorization: Bearer` header, or as the current password in **Change
+  password**), every password check is refused for
   15 minutes with `429 Too Many Requests` and a `Retry-After` header, even the right password. The sign-in
   page says "Too many sign-in attempts. Try again in N minutes." What that means for you:
   - **Devices that are already signed in keep working** during a lockout: a session cookie isn't a
@@ -370,7 +389,8 @@ write is designed for the phone as well as the desktop:
   an app. If you use a password, sign in once inside the Home Screen app; it keeps its own cookies.
 - On a phone, **Notes** is the library screen. Tap a note to open it and use **‹ Notes** (or swipe back)
   to return.
-- While you type, the formatting toolbar sits right above the keyboard. The ⌄ button hides the keyboard.
+- While you type in the visual editor, the formatting toolbar sits right above the keyboard. The button at
+  its right end (a keyboard with a slash) hides the keyboard.
 - Downloads use Safari's download prompt, and the file lands in the Files app.
 
 ---
@@ -496,13 +516,21 @@ dismiss that. Changes to existing notes still wait for your review.
 - `POST /api/agent/proposals` proposes changes to a note it read: the `folder`, `name` and the
   `baseVersion` it read, then either the whole revised note as `content`, or only the changed sections as
   `sections: [{ "heading": "Plan", "content": "## Plan\n\nNew text\n" }]` (an empty `content` removes the
-  section; a heading the note doesn't have adds one at the end). Optional: a one-line `summary`, a
-  `reasons` object by heading, and a `requestId` that makes a retried request harmless.
+  section; a heading the note doesn't have adds one at the end; `"heading": null` is the text before the
+  first heading). A whole-note `content` must keep the note's sections in their order: a proposal that
+  moves sections is refused. Optional: a one-line `summary`, a `reasons` object by heading, and a
+  `requestId` that makes a retried request harmless. 201 when saved, 200 for a retry, 409 with the current
+  note when the version it read is gone, 400 when the proposal changes nothing or moves sections. A newer
+  proposal from the same integration for the same note replaces the older one, and at most 20 can wait
+  per integration.
 - `GET /api/agent/proposals?id=<id>` tells the harness which sections you accepted or rejected, so its
   next pass starts from what you kept.
 - `POST /api/agent/notes` creates a note, if its integration may: `folder`, `name`, `content` and an
-  optional `requestId`. 201 when made, 200 for a retry of the same request, 403 without the permission, 409
-  when the name is taken.
+  optional `requestId`. 201 when made, 200 for a retry of the same request, 403 without the permission,
+  404 for a folder it can't read (or a retry whose note you have since moved out of its folders), 409 when
+  the name is taken.
+
+The API answers 404 for any folder the integration can't read, as if it didn't exist.
 
 ### Sending a note to a harness
 
@@ -511,25 +539,33 @@ write**, and enter the harness's address and API key (**Test connection** checks
 anything):
 
 - **Turnstone:** its address (the console), an API token that can create workstreams, and whether to start
-  a **single workstream** (the default) or a **coordinator** (several agents). If you registered write in Turnstone under
-  another name than `write`, enter that name. A single workstream runs without prompts: write asks
-  Turnstone to auto-approve its four tools, and `create_note` too if the integration can create notes. A
-  coordinator can't be started that way, so the first time it calls write's tools Turnstone asks you to
-  approve them; choose "always". write's tools can only read, propose and create new notes, never change
-  one of yours without your review, so approving them is safe.
+  a **single workstream** (the default) or a **coordinator** (several agents; its token also needs the
+  `admin.coordinator` permission). If you registered write in Turnstone under another name than `write`,
+  enter that name. A single workstream runs without prompts: write asks Turnstone to auto-approve its
+  four read and propose tools, and `create_note` too if the integration can create notes. A coordinator
+  can't be started that way, so the first time it calls write's tools Turnstone asks you to approve them;
+  choose "always". write's tools can only read, propose and create new notes, never change one of yours
+  without your review, so approving them is safe.
 - **Hermes Agent:** its API address including the profile, like `http://hermes.local:8642/p/writing/v1`,
   and that profile's `API_SERVER_KEY`.
-- **Anything else:** a webhook URL; write POSTs the note, your request and a ready-made brief for an agent.
+- **Anything else:** a webhook URL and an optional secret, sent as a Bearer token. write POSTs a JSON
+  `write.send` event with the note's folder and name (not its text: the harness reads it over MCP or the
+  API above), your request, the sections you picked, and a ready-made brief for an agent. There's
+  nothing to test for a webhook until you send a note.
 
 If the harness uses a private certificate (Caddy's local CA, for example), paste the certificate authority
-under **Private certificate?**. write then trusts what that authority signed, for that server only.
+under **Private certificate?**. write then trusts what that authority signed, for that server only, and
+doesn't check the host name.
 
 Then, on a note, click the **Send** button (the paper plane next to ✨ at the top of the note; also **Send
-to…** in the ⋯ menu), say what it should do, and optionally pick the sections
-it may change. The note shows that the harness is working, and its changes appear as a proposal to review.
-Sending the same note again continues the same conversation, so the harness knows what you accepted last
-time; tick **Start a new conversation** to start over. API keys are kept on the write server, like the AI
-assistant's, and only sent to the address they were saved for.
+to…** in the ⋯ menu), say what it should do, and optionally pick the sections it should change. The
+harness is asked to keep to those, and anything else it changes still shows up in the review. The Send
+button only appears on notes in a folder that an integration with **Start jobs from write** can read. The
+note shows that the harness is working, and its changes appear as a proposal to review. Sending the same
+note again within 30 days continues the same conversation, so the harness knows what you accepted last
+time; tick **Start a new conversation** to start over. Deleting the note ends its conversation. API keys
+are kept on the write server in plain text in `integrations.json`, like the AI assistant's, and only sent
+to the address (scheme, host and port) they were saved for.
 
 ### Reviewing proposed changes
 
@@ -551,10 +587,12 @@ A few things to know:
 - **Keep sign-in on.** Integration tokens only open `/api/agent`, and the rest of the API never accepts
   them. With `WRITE_AUTH=off`, though, everything else is open to anyone who can reach write, so folder
   limits mean little.
-- Renaming a folder in write keeps it readable under its new name. Deleting a folder removes it from every
+- Renaming a folder in write keeps it readable under its new name. Renaming it outside write (in Finder,
+  say) takes it out of the integration, so tick it again. Deleting a folder removes it from every
   integration, so a new folder with the same name isn't shared by accident.
 - Tokens are saved as fingerprints (SHA-256) in `integrations.json` inside `WRITE_CONFIG_DIR`, never in
-  plain text. **Last used** shows when a token last reached write since the server started.
+  plain text. The API keys for **Start jobs from write** are in the same file in plain text. **Last used**
+  shows when a token last reached write since the server started.
 
 ---
 
@@ -562,22 +600,26 @@ A few things to know:
 
 On Windows and Linux use Ctrl instead of ⌘, and Alt instead of ⌥.
 
-| Keys            | Action                                  |
-| --------------- | --------------------------------------- |
-| ⌘S              | Save now (autosave is always on)        |
-| ⌘⌥N             | New note in the current folder          |
-| ⌘\\             | Show or hide the sidebar                |
-| ⌘K              | Add or edit a link                      |
-| ⌘-click         | Open a link                             |
-| ⌘B / ⌘I         | Bold / italic                           |
-| ⌘⇧S / ⌘E        | Strikethrough / inline code             |
-| ⌘⌥1 … ⌘⌥6       | Heading 1–6                             |
-| ⌘⇧8 / ⌘⇧7 / ⌘⇧9 | Bullet list / numbered list / task list |
-| ⌘⇧B / ⌘⌥C       | Quote / code block                      |
-| Tab / ⇧Tab      | Indent / outdent a list item            |
-| ⌘Z / ⌘⇧Z        | Undo / redo                             |
-| ⌘J              | Ask AI (when the AI assistant is on)    |
-| Esc             | Close a dialog or menu                  |
+| Keys            | Action                                                              |
+| --------------- | ------------------------------------------------------------------- |
+| ⌘S              | Save now (autosave is always on)                                    |
+| ⌘⌥N             | New note in the current folder                                      |
+| ⌘\\             | Show or hide the sidebar                                            |
+| ⌘K              | Add or edit a link                                                  |
+| ⌘-click         | Open a link                                                         |
+| ⌘B / ⌘I         | Bold / italic                                                       |
+| ⌘⇧S / ⌘E        | Strikethrough / inline code                                         |
+| ⌘⌥1 … ⌘⌥6 / ⌘⌥0 | Heading 1–6 / plain text                                            |
+| ⌘⇧8 / ⌘⇧7 / ⌘⇧9 | Bullet list / numbered list / task list                             |
+| ⌘⇧B / ⌘⌥C       | Quote / code block                                                  |
+| ⇧Enter          | Line break within a paragraph                                       |
+| Tab / ⇧Tab      | Indent / outdent a list item or code; next / previous table cell    |
+| ⌘Z / ⌘⇧Z        | Undo / redo                                                         |
+| ⌘J              | Ask AI (when the AI assistant is on; you can change it in Settings) |
+| Esc             | Close a dialog or menu                                              |
+
+The formatting shortcuts work in the visual editor. In Markdown source mode, ⌘S, ⌘⌥N, ⌘\\ and ⌘J still
+work.
 
 Markdown shortcuts also work as you type: `# ` for a heading, `- ` for a list, `1. ` for a numbered list,
 `[ ] ` for a task, `> ` for a quote, ` ``` ` for a code block, `---` for a divider, and `**bold**`,
@@ -603,8 +645,13 @@ docker compose up -d --build
 ```
 
 With `docker run`, create the folder the same way and add `-v "$PWD/config:/config"` to your command.
-Without it, the settings (API keys included) go to an anonymous volume and are lost the next time the
-container is recreated.
+Without it, everything in `/config` (your account, settings, API keys and integrations) goes to an
+anonymous volume and is lost the next time the container is recreated. write then asks for a new account,
+and anyone who can reach it could create one.
+
+**Upgrading from a version without sign-in?** Sign-in is now on by default. The first time you open the new
+version, it asks you to create an account: do that right away, as in [First run](#first-run), or set
+`WRITE_AUTH=off` if something in front of write already signs people in.
 
 The default `./data` and `./config` folders are excluded from the build. Keep custom data and config
 folders outside the checkout so they cannot enter a Docker build context. Back up both folders before
@@ -624,7 +671,7 @@ decode UTF-8 names correctly. Double-click the zip in Finder, or run `ditto -x -
 Run `sudo chown -R 1000:1000 ./data`, or set `user:` in `docker-compose.yml` to the owner of the folder.
 
 **Why did a note open in Markdown source mode?** It contains something the visual editor can't keep (raw
-HTML, footnotes, math, unused link definitions), or it's over 256 KB, has a paragraph over 16 KB, or nests quotes or lists more than 32 deep. See [How your Markdown is kept](#how-your-markdown-is-kept).
+HTML, footnotes, math, unused link definitions, backslash escapes), or it's over 256 KB, has a paragraph over 16 KB, or nests quotes or lists more than 32 deep. See [How your Markdown is kept](#how-your-markdown-is-kept).
 
 **Why is a note read-only?** It's over 5 MB or not valid UTF-8. write won't risk changing it; download it
 or edit it with another app.
@@ -634,7 +681,8 @@ with other apps at the same time is fine.
 
 **Can I use my iCloud Drive or Dropbox folder?** Yes, on bare metal: set `WRITE_DATA_DIR` to a folder
 inside it, or symlink it. write only writes the files you edit, and it never rewrites a file with identical
-content, so sync tools stay quiet. The health check also writes a short-lived hidden `.write-health-*.tmp`
+content, so sync tools stay quiet. If you use integrations, it also writes the notes you let harnesses
+create, the proposals you apply, and its hidden `.proposals` folder. The health check also writes a short-lived hidden `.write-health-*.tmp`
 file, normally at most every 10 minutes per server process; failed checks retry without that delay.
 
 **The AI assistant can't reach my model server.** The write server makes the request, not your browser,
