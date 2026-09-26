@@ -93,7 +93,8 @@ Browser ──RSC render / router.refresh()──► app/notes/layout.tsx, pages
    ├──fetch JSON (lib/api-client)──► app/api/*/route.ts ──► lib/server/http.handle() (auth, CSRF, errors) ──► storage
    ├──fetch → blob (lib/download)──► app/api/download/route.ts ──► storage (bytes | zip)
    └──fetch → NDJSON (api.streamCompletion)──► app/api/ai/complete/route.ts ──► lib/server/ai ──► model server
-src/proxy.ts: optional auth gate in front of everything except health/login/static.
+Agent harness ──Bearer wrt_… token──► app/api/agent/*/route.ts ──► lib/server/agent-http.handleAgent() ──► storage
+src/proxy.ts: optional auth gate in front of everything except health/login/static; /api/agent needs a token.
 ```
 
 - **Reads** happen in Server Components. Pages call loaders, which call storage. After a change, the
@@ -116,7 +117,7 @@ src/proxy.ts: optional auth gate in front of everything except health/login/stat
 | `src/lib/server/http.ts`, `validate.ts`    | `handle()` wraps every route with auth, CSRF checks and error mapping; hand-written body type guards.                                                            |
 | `src/lib/server/auth.ts`, `src/proxy.ts`   | Sign-in: the account from first-run setup, HMAC session cookie, Bearer token, lockout, and the request gate.                                                     |
 | `src/lib/server/loaders.ts`                | What Server Components call to read data (`loadTree`, `loadNote`, …).                                                                                            |
-| `src/app/api/*/route.ts`                   | One route file per resource: `tree`, `folders`, `notes`, `download`, `health`, `auth`, `settings`, `ai/models`, `ai/complete`.                                   |
+| `src/app/api/*/route.ts`                   | One route file per resource: `tree`, `folders`, `notes`, `download`, `health`, `auth`, `settings`, `ai/models`, `ai/complete`, `integrations`, `agent/*`.        |
 | `src/lib/markdown/`                        | Framework-free Markdown engine: Tiptap extensions, escaping, front matter, fidelity check, paste.                                                                |
 | `src/lib/markdown/nodes/`                  | The schema's node overrides (`Write*`) and the inline serializer. See the [Markdown engine map](#markdown-engine-map).                                           |
 | `src/lib/autosave.ts`, `drafts.ts`         | Framework-free autosave state machine, plus crash-safety drafts in `localStorage`.                                                                               |
@@ -129,6 +130,15 @@ src/proxy.ts: optional auth gate in front of everything except health/login/stat
 | `src/lib/server/storage/settings.ts`       | The settings file, `WRITE_CONFIG_DIR/settings.json`, and its key rules. API keys stay here; the browser gets a view with `keyHint`.                              |
 | `src/components/ai/`                       | The prompt window: `AiProvider`, the ✨ button, the target, the streamed reply, and Replace/Insert (`apply-reply.ts`, `source-target.ts` in source mode).        |
 | `src/components/settings/`                 | The Settings dialog and its AI assistant section: connections, shortcut, instructions, quick actions.                                                            |
+| `src/lib/integrations.ts`                  | Integrations (agent harnesses): the view type, kinds, name rules and the token's shape. Shared by the dialog and the server.                                     |
+| `src/lib/server/integration-*.ts`          | Integration tokens (made, hashed, compared) and who is calling `/api/agent`; `agent-http.ts` has `handleAgent()`, the agent routes' `handle()`.                  |
+| `src/components/integrations/`             | The Integrations dialog: the list, the add/edit form with folder checkboxes, and the one-time token view.                                                        |
+| `src/lib/proposals/`                       | Proposals' framework-free core: sections (`#`/`##`), the three-way review, applying decisions, and the word diff.                                                |
+| `src/lib/server/proposal-*.ts`             | Proposals on the server: making one from what an agent sends, remembered base versions, reviewing and resolving.                                                 |
+| `src/components/proposals/`                | The banner above a note with changes waiting, the review dialog with one card per section, and Undo after Apply.                                                 |
+| `src/lib/server/mcp/`                      | The MCP server behind `/api/agent/mcp`: JSON-RPC, the two protocol eras, the tools and their instructions for the model.                                         |
+| `src/lib/server/launch/`                   | "Send to…": the HTTP client for harnesses (private CAs), the Turnstone, Hermes and webhook launchers, and jobs.                                                  |
+| `src/components/launch/`                   | The Send dialog and the notice while a harness works on a note.                                                                                                  |
 | `src/app/globals.css`                      | Design tokens (colors for light and dark) exposed as Tailwind utilities.                                                                                         |
 
 ### Key ideas, in the order you'll meet them
@@ -214,7 +224,8 @@ These keep the app safe with other people's files. Most are enforced by lint or 
    JSON body.
 3. **Mutations go through `/api`, wrapped in `handle()`.** That gives you auth, CSRF protection
    (`Sec-Fetch-Site` plus JSON-only bodies) and consistent `ApiErrorBody` errors for free. No Server
-   Actions. The browser calls them through `api` in `src/lib/api-client.ts`; downloads use `useDownload()`
+   Actions. Routes under `/api/agent` use `handleAgent()` instead, which takes an integration token and
+   hands the handler the integration, so it can keep to its folders (docs/design-decisions.md#d31). The browser calls them through `api` in `src/lib/api-client.ts`; downloads use `useDownload()`
    (`src/components/ui/download-link.tsx`), which calls `downloadFile` in `src/lib/download.ts`.
 4. **Read Markdown with `serializeBody(editor)`, never `editor.getMarkdown()`.** Only `serializeBody`
    applies our escaping and final newline rules.
@@ -399,6 +410,27 @@ mode.
       reply at once and the model server stops generating (check its log); "What gets sent" matches what
       the model server receives. On the iPhone the prompt window docks above the keyboard, the text it's
       about scrolls up above it, and the keyboard stays up when ✨ in the toolbar opens it.
+
+- [ ] **Integrations** (if touched): add one with a folder ticked, copy the token, then
+      `curl -H "Authorization: Bearer <token>" localhost:3000/api/agent/tree` lists only that folder, and a
+      note in another folder answers 404 like a missing one. The same token on `/api/tree` gets 401 and,
+      even after 15 tries, the account password still works as a Bearer (no lockout). Rename the folder in
+      write: the token still reads it under the new name. New token: the old one gets 401 at once.
+      `integrations.json` in the config folder is 0600 and doesn't contain the token.
+- [ ] **Proposals** (if touched): read a note with an integration token, edit one section in the app, then
+      `POST /api/agent/proposals` changes to that section and another against the version read. The
+      banner appears; the review shows one clean change and one conflict with its warning. Accept one,
+      reject the other, Apply: `diff` the file, which has only the accepted section changed and your edit
+      kept, front matter untouched. Undo in the toast restores the exact bytes (`shasum` before and after).
+      Leave a change undecided: the banner stays with what is left. Rename the note: the banner follows.
+- [ ] **MCP** (if touched): point an MCP client (or `curl`) at `/api/agent/mcp` with an integration token.
+      A legacy `initialize` answers without an `Mcp-Session-Id`; `tools/list` shows four tools (five with "Can create new notes", then `create_note` makes the note at once and refuses a taken name); `read_note` on
+      a folder the integration can't read is a tool error "Note not found."; a modern request whose
+      `Mcp-Method` header doesn't match the body gets 400 with code -32020. GET answers a JSON 405.
+- [ ] **Send to…** (if touched): give an integration a webhook launcher pointing at a local listener, then
+      Send a note with one section ticked: the listener gets the note, the instruction, that section and a
+      brief with the job id; the note says the harness is working. Propose with that id as `requestId`:
+      the notice gives way to the review banner. Send again: `previousJobId` is set (a continuation).
 
 ---
 

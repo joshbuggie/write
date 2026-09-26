@@ -8,8 +8,19 @@ import {
   type DiscardNoteResponse,
   type ErrorCode,
   type FolderResponse,
+  type IntegrationRequest,
+  type IntegrationResponse,
+  type IntegrationsResponse,
+  type IntegrationTokenResponse,
+  type LaunchRequest,
+  type LaunchResponse,
+  type TestLauncherRequest,
+  type TestLauncherResponse,
   type LoginRequest,
   type NoteResponse,
+  type ProposalsResponse,
+  type ResolveProposalRequest,
+  type ResolveProposalResponse,
   type SaveNoteRequest,
   type SaveNoteResponse,
   type SaveSettingsRequest,
@@ -19,6 +30,7 @@ import {
   type TestConnectionRequest,
   type TestConnectionResponse,
   type TreeResponse,
+  type UpdateIntegrationRequest,
   type UpdateNoteRequest,
   type UpdateNoteResponse,
 } from "./api-contract";
@@ -192,4 +204,20 @@ export const api = {
   testConnection: (input: TestConnectionRequest, opts?: RequestOptions) =>
     request<TestConnectionResponse>("POST", API.aiModels, input, opts),
   streamCompletion,
+  listIntegrations: () => request<IntegrationsResponse>("GET", API.integrations),
+  createIntegration: (input: IntegrationRequest) =>
+    request<IntegrationTokenResponse>("POST", API.integrations, input),
+  updateIntegration: (input: UpdateIntegrationRequest) =>
+    request<IntegrationResponse>("PATCH", API.integrations, input),
+  deleteIntegration: (id: string) => request<void>("DELETE", API.integrations + apiQuery({ id })),
+  rotateIntegrationToken: (id: string) =>
+    request<IntegrationTokenResponse>("POST", API.integrationToken, { id }),
+  launch: (input: LaunchRequest) => request<LaunchResponse>("POST", API.launch, input),
+  testLauncher: (input: TestLauncherRequest) =>
+    request<TestLauncherResponse>("POST", API.testLauncher, input),
+  listProposals: (ref: NoteRef) =>
+    request<ProposalsResponse>("GET", API.proposals + apiQuery({ folder: ref.folder, name: ref.name })),
+  resolveProposal: (input: ResolveProposalRequest) =>
+    request<ResolveProposalResponse>("POST", API.resolveProposal, input),
+  dismissCreatedNote: (id: string) => request<void>("DELETE", API.createdNotes + apiQuery({ id })),
 };

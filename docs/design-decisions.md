@@ -25,7 +25,7 @@ files.
 - Files in and out: [D23](#d23) downloads · [D24](#d24) import
 - UI: [D25](#d25) responsive layout · [D26](#d26) tokens and theme
 - Self-hosting: [D27](#d27) build output and health · [D28](#d28) configuration
-- Optional features: [D29](#d29) the AI assistant
+- Optional features: [D29](#d29) the AI assistant · [D31](#d31) integrations and proposals from agent harnesses
 
 ---
 
@@ -824,3 +824,177 @@ wrong_password`. A wrong current password is `403 wrong_password`, not `401`, wh
 - Code: `src/lib/server/auth.ts`, `password-guard.ts`, `password-hash.ts`,
   `src/lib/server/storage/account.ts`, `src/lib/account.ts`, `src/app/setup/`, `src/app/login/` and
   `src/app/api/auth/`.
+
+<a id="d31"></a>
+
+## D31. Integrations: agent harnesses read chosen folders and propose changes
+
+- **Why.** People draft with agent harnesses (Turnstone, Hermes Agent, or any client that speaks MCP or
+  HTTP) and bring the result into write by copy and paste. The assistant in [D29](#d29) is for a
+  sentence or a paragraph; a harness runs several agents for minutes over a whole note. Integrations
+  let a harness read notes directly, so the note stays the one source of truth across both.
+- **Three layers, and only the last is per harness.** (1) What write exposes, the same for every
+  harness: the agent API under `/api/agent`. (2) Identity: one integration per harness, each with its
+  own token and folder list. (3) Launchers that start a job in a harness. A harness that can
+  only read, or only be started from its own UI, still works with layers 1 and 2.
+- **Proposals: harnesses suggest, the owner decides.** A harness never changes an existing note. It reads one
+  (`GET /api/agent/notes`, which returns the version), then sends `POST /api/agent/proposals` with that
+  `baseVersion` and either the whole revised note or only the sections it changed (`sections`, by
+  heading, so agents that each write one section needn't send the note back). The owner reviews it
+  section by section and only an accept writes the note ([D9](#d9)).
+  - **Sections** are cut at `#` and `##` headings outside fenced code (`src/lib/proposals/sections.ts`);
+    `###` and deeper stay inside their section. A section is known by its heading's level and text, case
+    and spacing ignored, numbered when repeated. A harness naming a section keeps its level: "## Summary"
+    never lands on "# Summary", and a heading that fits more than one section (the same text at two
+    levels, or a repeated heading) is refused rather than guessed.
+  - **Three-way comparison** (`src/lib/proposals/review.ts`): what the harness read, what it proposes and
+    the note now. A section it changed that you left alone is a clean change; one you changed too is a
+    conflict, and the card says accepting replaces your version; one you removed is "gone" and accepting
+    brings it back. Changes already in the note are left out, and trailing whitespace doesn't count. The
+    owner can keep writing during a long run: edits outside the changed sections are never at risk.
+  - **The version it read.** When the note hasn't changed, it is the base. Otherwise the text read by an
+    agent is remembered in memory by version (`src/lib/server/proposal-bases.ts`, bounded), so the
+    harness only echoes the version. After a restart with the note also changed, the proposal is
+    refused with 409 and the note as it is now, saying to read it again. Nothing about the note is
+    guessed.
+  - **Front matter is never proposed.** It is split off all three versions, and the note's own is kept.
+  - **Applying** (`POST /api/proposals/resolve`) is one step under the write lock: the proposal must still
+    be pending and the note still at the version the review was worked out against (409 otherwise; the
+    dialog then reloads the review), and the save and the recorded decisions happen together, so a newer
+    proposal can't replace this one in between and Apply never changes the note while reporting failure.
+    Nor the other way round: when the decisions can't be written, a request that saved nothing (rejections
+    only) fails, and one that saved the note succeeds but lists the decisions it couldn't record
+    (`unrecorded`), so the toast can say the rejected ones will be offered again.
+    Only accepted sections are rewritten (`src/lib/proposals/apply.ts`); every other section keeps its
+    exact bytes, the last one included, and a new section brings its own blank line so the one before it
+    isn't touched either. A randomized test holds it to that. A new section goes after the section before
+    it in the proposal. The dialog saves the note first, so the review sees the latest text. Afterwards the
+    editor reloads the saved text, recorded as this tab's own save so it isn't "Updated from disk"
+    ([D20](#d20)). Because the editor remounts, ⌘Z can't reach the change, so the toast offers Undo for 10
+    seconds; Undo puts the old text back with a conditional save, so it never overwrites a newer edit.
+  - **Undecided changes keep waiting.** Accepted and rejected changes are recorded per section and never
+    offered again; a proposal closes as "applied" or "dismissed" once nothing is left, and the harness
+    reads the decisions with `GET /api/agent/proposals?id=`, so its next pass knows what was kept.
+  - **Stored** as one JSON file per proposal in `<dataDir>/.proposals/` (hidden, like `.trash`, so it is
+    never listed or exported), next to the notes they are about. They follow their note through renames
+    and moves, and close as "orphaned" when it is deleted, so a new note with the same name doesn't
+    inherit them. A newer proposal from the same integration for the same note replaces the older one.
+    A `requestId` makes a retried request return the first proposal, checked before anything else: after
+    a restart and an owner edit the version it read is gone, but the proposal it sent is on disk. A retry
+    never shows a note the integration can no longer read. At most 20 wait per integration.
+    A closed proposal drops the note text it carried (only its decisions are looked up
+    later) and is removed after 30 days.
+  - **Creating notes is a separate permission** (`canCreate` on the integration, off by default and
+    for files from before it). Changes to existing notes stay proposals; a new note is written at once
+    (`POST /api/agent/notes`, MCP `create_note`), because it can't overwrite anything and a review of a
+    whole new note would be one more step for no safety. The owner asked for this over "propose a new
+    note" (2026-09-25). It is limited to the folders the integration can read, never replaces a note (a
+    taken name is 409 `name_taken`, not "Draft 2", so the harness knows what it made), and a
+    `requestId` makes a retry return the same note, while its folder is still one the integration can
+    read (else 404 and nothing is created). `create_note` is listed only to integrations that have the
+    permission. Who made it is kept in `.proposals/created.json`, following the note through renames and
+    dropped with it on delete, so the note says "Hermes Agent created this note" until the owner
+    dismisses that. Dismissing only hides the line; the record still answers retries.
+  - **Sections keep their order.** A whole-note proposal that moves sections is refused (400) when it
+    arrives: each change replaces its section where it is, so an accepted move would silently keep the
+    old order. Reviewing and applying moves (with their own conflicts) could come later.
+  - **Word diffs** in the review (`src/lib/proposals/word-diff.ts`): Myers on words, with bounded work.
+    Small shared words between edits fold into the edits, and a mostly rewritten passage shows as the old
+    text then the new, which reads far better than alternating fragments.
+- **MCP** at `/api/agent/mcp` (`src/lib/server/mcp/`), behind the same token and folders, over the same
+  code as the REST routes (`agent-actions.ts`, `proposal-service.ts`). Hand-written JSON-RPC: a stateless,
+  tools-only server is a handful of message types, so no SDK (rule 8, [D4](#d4)).
+  - **Dual-era.** A 2026-07-28 request carries its version in `_meta` and mirrors it, the method and the
+    tool name into headers; write checks they match (400 `HeaderMismatch`), answers an unknown version
+    with 400 and the supported list, an unknown method with 404, has `server/discover`, and puts
+    `resultType` and `serverInfo` on every result. A legacy client (2024-11-05 to 2025-11-25) opens with
+    `initialize`, which is answered without a session: its spec allows a server that doesn't mint one,
+    notifications get 202, and 2025-03-26 batches work. Turnstone and Hermes Agent both speak legacy today.
+  - **Tools:** `list_notes`, `read_note` (Markdown, the `#`/`##` headings, and the version),
+    `propose_changes` (sections or whole note), `get_proposal`, and `create_note` for integrations
+    allowed to create notes. Reading tools are marked
+    `readOnlyHint`, so clients that ask before write-capable tools don't ask for them, and may retry them.
+    What the model can fix (a missing note, a stale version, bad arguments) is a tool error it can read.
+  - **The workflow lives in the server's `instructions`** and the tool descriptions, so a harness needs no
+    skill or prompt written for write.
+  - A request whose `Origin` names another site gets 403, as the spec requires against DNS rebinding.
+    GET and DELETE answer 405 with a JSON-RPC body: Hermes probes the endpoint with HEAD and GET first
+    and gives up on anything that looks like a web page.
+  - **Tried live** (2026-09-24) with Turnstone 1.8.4 (four nodes and the console) and Hermes Agent 0.21.4:
+    each read a note, proposed by section with reasons, and on a second pass read the owner's decisions
+    with `get_proposal`, kept a section the owner had rewritten, and built on the note as it then was.
+- **Launchers: "Send to…" on a note** (`src/lib/server/launch/`), from a Send button in the note's header
+  (shown only when a harness can take the note) and from the ⋯ menu. An integration may also say how write
+  starts a job in its harness; without that, the harness is started from its own UI and still reads and
+  proposes through MCP. A launcher only starts or continues work and keeps the harness's reference; the
+  results come back as proposals, so write never reads a harness's events or replies.
+  - **Turnstone:** a coordinator (the console's `/v1/api/workstreams/new`, continued with its `/send`)
+    or a single workstream (`/v1/api/route/workstreams/new` with write's job id as `ws_id`, so a retry
+    can't start a second one, and write's four MCP tools in `auto_approve_tools`). **Hermes Agent:**
+    `POST /v1/runs` with the job id as `Idempotency-Key` and a `session_id` that later passes reuse.
+    **Anything else:** a webhook, one POST with the note, the instruction, the sections and the brief.
+    Tried live (2026-09-25): a single workstream ran without prompts; a coordinator stopped at
+    `read_note` and `propose_changes` for approval, because Turnstone applies neither per-server
+    auto-approve nor creation-time `auto_approve_tools` to coordinators. The dialog and the note's
+    "working" notice say so for coordinator jobs. So a new Turnstone launcher starts single workstreams
+    unless the owner picks a coordinator.
+  - **Continue by default.** "Send to…" continues the harness's last conversation about this note (the
+    newest job for it), so the harness remembers what it proposed and can ask `get_proposal` what was
+    kept; "Start a new conversation" is one checkbox away. A conversation that no longer exists (404)
+    starts a new one. Jobs are JSON files in `.proposals/jobs/`, follow their note through renames, go
+    with it when it (or its folder) is deleted, so a new note with that name starts its own conversation,
+    and are removed after 30 days.
+  - **One brief for every harness** (`src/lib/launch/brief.ts`): the note, the owner's words as written,
+    the sections it may change, and the job id to use as `requestId`. How to use the tools is in the MCP
+    instructions, not repeated here.
+  - **Knowing it's working.** The note says "Turnstone is working on this note" until a proposal with the
+    job's `requestId` (or any newer one from that integration) arrives, checking every 15 seconds while
+    the page is visible; after an hour it stops counting a job as working, so a harness that never answers
+    doesn't leave the note waiting.
+  - **Keys like the AI keys** ([D29](#d29)): kept in `integrations.json`, write-only (the dialog shows the
+    last four characters), and only sent to the origin they were saved for. The owner's session starts
+    jobs; an integration token can't. "Test connection" checks the address and key without starting
+    anything (Turnstone's `whoami`, naming missing permissions; Hermes's models list).
+  - **Private certificates.** Self-hosted harnesses often sit behind a private authority (Caddy's local
+    CA, whose certificates are issued for an address inside Docker). An integration can hold that
+    authority's PEM; write then trusts what it signed, for that server only, and skips the host name
+    check. That needs Node's `https` rather than `fetch` (which can't take a CA without a dependency), so
+    launchers use `node:http`/`node:https` with no redirects, a 1 MB answer cap and a timeout.
+- **Tokens.** `wrt_` plus 32 random bytes as base64url, made by the server and shown once. Only the
+  SHA-256 and the last four characters are saved: with 256 random bits there is nothing to guess, so no
+  slow hash and no lockout are needed. The exact shape lets auth tell a token from a password without
+  hashing: `authenticateRequest` refuses a token-shaped Bearer outright, so a harness with a stale
+  token never spends the password budget and never locks the owner out ([D30](#d30)). A new token
+  replaces the old one at once.
+- **Two separate doors.** `/api/agent/*` accepts only integration tokens, even with sign-in off,
+  because the token is what names the folders; a session cookie or the password doesn't open it. The
+  rest of the API never accepts a token, so a harness can't reach `/api/integrations` to widen its own
+  folders or make more tokens. The proxy checks the token first ([D13](#d13)), and `handleAgent()`
+  (`src/lib/server/agent-http.ts`) checks it again, with the same CSRF check and error mapping as
+  `handle()` ([D3](#d3)).
+- **Folders, not notes, and nothing by default.** An integration reads only the folders ticked for it;
+  there is no "all folders" switch. A folder outside its list answers exactly like a missing one (404
+  "Note not found."), and `/api/agent/tree` leaves such folders out, so probing reveals nothing. Folder
+  names are saved as on disk. Renaming a folder in write renames it in every list, and deleting one
+  removes it from every list, so a new folder made later with the old name isn't readable by accident.
+  Both happen under the write lock with the folder change; if the integrations file can't be written
+  then, the folder change stands and the error is logged. A folder renamed outside write drops out of
+  reach (it fails closed) and the dialog shows it as no longer in the library.
+- **Sign-in off.** With `WRITE_AUTH=off` the rest of the API is open to anything that can reach write, so
+  folder limits only bind harnesses that go through `/api/agent`. The Integrations dialog says so.
+- **Storage.** `WRITE_CONFIG_DIR/integrations.json` (0600, [D28](#d28)): `{ version, integrations: [{ id,
+name, kind, folders, tokenHash, tokenHint, createdAt }] }`. Unlike `settings.json` it is read strictly:
+  it decides who reads which notes, so a file that exists but isn't valid refuses every agent request
+  with 503 instead of reading as "no integrations". "Last used" is kept in memory, so an agent request
+  never rewrites the file; it resets when the server restarts or the token is replaced.
+- **The dialog.** Integrations has its own dialog, opened from the sidebar apart from Settings: an
+  integration is a door into the notes, not a preference. Changes save at once, like the password. The
+  token sits in a read-only field that selects itself, since the clipboard API needs HTTPS or
+  localhost and write is often reached over plain HTTP on a LAN.
+- Code: `src/lib/integrations.ts`, `src/lib/server/integration-*.ts`, `src/lib/server/agent-http.ts`,
+  `src/lib/server/storage/integrations*.ts`, `src/app/api/integrations/`, `src/app/api/agent/` and
+  `src/components/integrations/`; for proposals, `src/lib/proposals/`, `src/lib/server/proposal-*.ts`,
+  `src/lib/server/storage/proposals*.ts`, `src/app/api/proposals/` and `src/components/proposals/`; for MCP,
+  `src/lib/server/mcp/` and `src/app/api/agent/mcp/`; for launchers, `src/lib/launch/`,
+  `src/lib/server/launch/`, `src/lib/server/storage/jobs.ts`, `src/app/api/integrations/launch/` and
+  `src/components/launch/`.

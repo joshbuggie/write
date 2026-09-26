@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { resetPasswordGuard } from "@/lib/server/auth";
 import { sessionCookieFor, setUpTestAccount } from "@/lib/server/auth-test-utils";
+import { createFolder, createIntegration } from "@/lib/server/storage";
 import { withTempDataDir, writeTestConfigFile } from "@/lib/server/storage/test-utils";
 import { config, proxy } from "./proxy";
 
@@ -109,4 +110,39 @@ describe("proxy", () => {
         error: { code: "storage_unavailable", message: expect.stringContaining("account.json") },
       });
     }));
+
+  describe("/api/agent", () => {
+    it("opens only with an integration token, never with a session, even with sign-in off", () =>
+      withTempDataDir(async () => {
+        const account = await setUpTestAccount("sam", "pw");
+        await createFolder("Essays");
+        const { token } = await createIntegration({ name: "A", kind: "other", folders: ["Essays"] });
+        const agent = (headers?: HeadersInit) => proxy(request("/api/agent/tree", headers));
+        expect(passes(await agent({ authorization: `Bearer ${token}` }))).toBe(true);
+        expect(passes(await agent({ cookie: sessionCookieFor(account) }))).toBe(false);
+        const denied = await agent({ authorization: "Bearer pw" });
+        expect(denied.status).toBe(401);
+        expect(await denied.json()).toEqual({
+          error: { code: "unauthorized", message: expect.stringContaining("integration token") },
+        });
+        vi.stubEnv("WRITE_AUTH", "off");
+        expect(passes(await agent())).toBe(false);
+      }));
+
+    it("doesn't let an integration token into the rest of the API", () =>
+      withTempDataDir(async () => {
+        await setUpTestAccount("sam", "pw");
+        const { token } = await createIntegration({ name: "A", kind: "other", folders: [] });
+        expect(passes(await proxy(request("/api/tree", { authorization: `Bearer ${token}` })))).toBe(false);
+      }));
+
+    it("fails closed with a 503 when integrations.json is broken", () =>
+      withTempDataDir(async () => {
+        await writeTestConfigFile("integrations.json", "{ broken");
+        const res = await proxy(
+          request("/api/agent/tree", { authorization: `Bearer wrt_${"a".repeat(43)}` }),
+        );
+        expect(res.status).toBe(503);
+      }));
+  });
 });

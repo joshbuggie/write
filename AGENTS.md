@@ -22,7 +22,8 @@ are binding for every change:
    exactly once with `noteRefFromParams` / `decodeSegment`. Route Handler params are never used for names;
    API names travel in the query string or the JSON body.
 3. **Mutations and downloads go through `/api` Route Handlers wrapped in `handle()`** (auth, CSRF, error
-   mapping). No Server Actions. The client calls them only through `api` in `src/lib/api-client.ts`, or,
+   mapping), or in `handleAgent()` for `/api/agent`, which integrations call with their token. No Server
+   Actions. The client calls them only through `api` in `src/lib/api-client.ts`, or,
    for downloads, `useDownload()` / `downloadFile` (`src/lib/download.ts`), which throw the same `ApiError`.
 4. **Read Markdown with `serializeBody(editor)`, never `editor.getMarkdown()`.**
 5. **Every Markdown extension needs round-trip fixtures** in `src/lib/markdown/__fixtures__/`. New syntax

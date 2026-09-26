@@ -1,10 +1,14 @@
 import type { Stats } from "node:fs";
 import { lstat, mkdir, readdir, rename } from "node:fs/promises";
 import { compareNames, nameKey, validateName } from "@/lib/names";
-import type { FolderSummary, NoteSummary, Tree } from "@/lib/types";
+import type { FolderSummary, NoteRef, NoteSummary, Tree } from "@/lib/types";
 import { getDataDir } from "./config";
 import { StorageError } from "./errors";
 import { errorCode, exists, mapFsError, renameCaseOnly } from "./fs-utils";
+import { dropFolderScope, followFolderRename } from "./integrations";
+import { createdFollowNote } from "./created-notes";
+import { jobsFollowNote } from "./jobs";
+import { orphanProposals, proposalsFollowFolder } from "./proposals";
 import { withWriteLock } from "./mutex";
 import { isVisibleName, noteStem, readNames, resolveFolder, safeJoin } from "./paths";
 import { moveToTrash } from "./trash";
@@ -87,7 +91,10 @@ export async function createFolder(name: string): Promise<FolderSummary> {
   });
 }
 
-/** Renames a folder and everything in it (including files the app ignores). Case-only renames work. */
+/**
+ * Renames a folder and everything in it (including files the app ignores). Case-only renames work.
+ * Integrations that could read it keep reading it under the new name (docs/design-decisions.md#d31).
+ */
 export async function renameFolder(name: string, newName: string): Promise<FolderSummary> {
   const target = checkedFolderName(newName);
   return withWriteLock(async () => {
@@ -104,6 +111,13 @@ export async function renameFolder(name: string, newName: string): Promise<Folde
             throw new StorageError("name_taken", `A folder named "${target}" already exists.`);
           await rename(current.path, dest);
         }
+        await followFolderRename(current.name, target);
+        await proposalsFollowFolder(current.name, target);
+        const from = current.name.normalize("NFC");
+        await jobsFollowNote((n) => (n.folder.normalize("NFC") === from ? { ...n, folder: target } : null));
+        await createdFollowNote((n) =>
+          n.folder.normalize("NFC") === from ? { ...n, folder: target } : null,
+        );
       }
       return { name: target, notes: await listFolderNotes(dest, target) };
     } catch (err) {
@@ -112,13 +126,21 @@ export async function renameFolder(name: string, newName: string): Promise<Folde
   });
 }
 
-/** Soft-deletes a folder with all its contents into .trash. Bootstrap recreates "notebook" if it was the last. */
+/**
+ * Soft-deletes a folder with all its contents into .trash. Bootstrap recreates "notebook" if it was the last.
+ * The folder leaves every integration's list (docs/design-decisions.md#d31).
+ */
 export async function deleteFolder(name: string): Promise<void> {
   return withWriteLock(async () => {
     const dataDir = getDataDir();
     try {
       const folder = await resolveFolder(dataDir, name);
       await moveToTrash(dataDir, folder.path, [folder.name]);
+      await dropFolderScope(folder.name);
+      await orphanProposals((p) => p.folder.normalize("NFC") === folder.name.normalize("NFC"));
+      const inFolder = (n: NoteRef) => n.folder.normalize("NFC") === folder.name.normalize("NFC");
+      await jobsFollowNote((n) => (inFolder(n) ? "drop" : null));
+      await createdFollowNote((n) => (inFolder(n) ? "drop" : null));
     } catch (err) {
       throw mapFsError(err, "Folder not found.");
     }

@@ -5,9 +5,14 @@ import { cache } from "react";
 import { type AiSettings, DEFAULT_AI_SETTINGS } from "@/lib/ai/settings";
 import { SESSION_COOKIE } from "@/lib/constants";
 import { loginHref, SETUP_HREF } from "@/lib/routes";
+import type { NoteSendState } from "@/lib/launch/types";
+import type { CreatedBy, ProposalSummary } from "@/lib/proposals/types";
 import type { Note, NoteRef, Tree } from "@/lib/types";
 import { isAuthEnabled, readAuthState, verifySessionToken } from "./auth";
+import { sendStateFor } from "./launch/targets";
+import { summariesFor } from "./proposal-review";
 import {
+  createdRecordFor,
   ensureBootstrap,
   listTree,
   mostRecentNote,
@@ -96,3 +101,49 @@ export const loadAiSettings = cache(async (): Promise<AiSettings> => {
     return DEFAULT_AI_SETTINGS;
   }
 });
+
+/**
+ * The note's pending proposals, for the banner above it (docs/design-decisions.md#d31). A problem reading
+ * them must never keep the note from opening, so any error is logged and the banner stays away.
+ */
+export async function loadNoteProposals(note: Note): Promise<ProposalSummary[]> {
+  await connection();
+  await requirePageAuth();
+  try {
+    return await summariesFor(note);
+  } catch (err) {
+    console.error("[write] Couldn't read the note's proposals:", err);
+    return [];
+  }
+}
+
+/**
+ * Where this note can be sent, and which jobs are still working on it (docs/design-decisions.md#d31). Like
+ * the proposals, a problem here must never keep the note from opening.
+ */
+export async function loadSendState(note: Note): Promise<NoteSendState> {
+  await connection();
+  await requirePageAuth();
+  try {
+    return await sendStateFor(note);
+  } catch (err) {
+    console.error("[write] Couldn't read where the note can be sent:", err);
+    return { targets: [], working: [] };
+  }
+}
+
+/**
+ * Which integration created this note, if one did and the owner hasn't dismissed it
+ * (docs/design-decisions.md#d31). Like the proposals, a problem here must never keep the note from opening.
+ */
+export async function loadCreatedBy(note: Note): Promise<CreatedBy | null> {
+  await connection();
+  await requirePageAuth();
+  try {
+    const record = await createdRecordFor(note);
+    return record && { id: record.id, source: record.source, createdAt: record.createdAt };
+  } catch (err) {
+    console.error("[write] Couldn't read who created the note:", err);
+    return null;
+  }
+}

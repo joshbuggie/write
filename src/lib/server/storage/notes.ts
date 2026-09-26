@@ -9,6 +9,9 @@ import { StorageError } from "./errors";
 import { atomicWrite, mapFsError, renameCaseOnly, renameNoClobber } from "./fs-utils";
 import { listTree, toSummary } from "./folders";
 import { withWriteLock } from "./mutex";
+import { createdFollowNote } from "./created-notes";
+import { jobsFollowNote } from "./jobs";
+import { orphanProposals, proposalsFollowNote, sameNoteRef } from "./proposals";
 import {
   lookupNote,
   noteNotFound,
@@ -73,21 +76,45 @@ export async function readNote(ref: NoteRef): Promise<Note> {
   }
 }
 
+type CreateInput = {
+  folder: string;
+  name?: string;
+  content?: string;
+  /** Fail with name_taken instead of adding " 2": an integration names the note it means. */
+  exact?: boolean;
+};
+
+/**
+ * A deleted note's jobs and "created by" record go with it, so a new note under the same name starts its
+ * own conversation and isn't labelled as made by a harness. Inside the write lock only.
+ */
+async function dropNoteRecords(ref: NoteRef): Promise<void> {
+  await jobsFollowNote((n) => (sameNoteRef(n, ref) ? "drop" : null));
+  await createdFollowNote((n) => (sameNoteRef(n, ref) ? "drop" : null));
+}
+
 /** Creates a note, auto-suffixing a taken name ("Untitled 2") so "New note" never fails on a collision. */
-export async function createNote(input: { folder: string; name?: string; content?: string }): Promise<Note> {
+export function createNote(input: CreateInput): Promise<Note> {
+  return withWriteLock(() => createNoteUnlocked(input));
+}
+
+/** createNote for storage code that already holds the write lock (see created-notes.ts). */
+export async function createNoteUnlocked(input: CreateInput): Promise<Note> {
   const name = input.name === undefined ? UNTITLED : checkedNoteName(input.name);
   const bytes = encodeChecked(toLf(input.content ?? ""), { eol: "lf", bom: false });
-  return withWriteLock(async () => {
-    try {
-      const folder = await resolveFolder(getDataDir(), input.folder);
-      const finalName = uniqueName(name, await takenNoteNames(folder.path));
-      const file = safeJoin(folder.path, finalName + NOTE_EXT);
-      await atomicWrite(file, bytes, { noClobber: true });
-      return noteFromBytes(folder.name, finalName, await lstat(file), bytes);
-    } catch (err) {
-      throw mapFsError(err, "Folder not found.");
+  try {
+    const folder = await resolveFolder(getDataDir(), input.folder);
+    const taken = await takenNoteNames(folder.path);
+    const finalName = uniqueName(name, taken);
+    if (input.exact && finalName !== name) {
+      throw new StorageError("name_taken", `A note named "${name}" already exists in ${folder.name}.`);
     }
-  });
+    const file = safeJoin(folder.path, finalName + NOTE_EXT);
+    await atomicWrite(file, bytes, { noClobber: true });
+    return noteFromBytes(folder.name, finalName, await lstat(file), bytes);
+  } catch (err) {
+    throw mapFsError(err, "Folder not found.");
+  }
 }
 
 /**
@@ -96,70 +123,84 @@ export async function createNote(input: { folder: string; name?: string; content
  * style and BOM. A forced overwrite of a version the client didn't base its edit on first copies that version
  * into .trash.
  */
-export async function saveNote(input: {
-  ref: NoteRef;
-  content: string;
-  baseVersion: string | null;
-  force?: boolean;
-}): Promise<SavedNote> {
-  const { ref, baseVersion, force = false } = input;
-  const text = toLf(input.content);
-  // Too large as LF is too large in any style (CRLF and a BOM only add bytes), so say so before any
-  // version check: a conflict banner would only lead to the same error after "Keep mine".
-  if (Buffer.byteLength(text) > MAX_NOTE_BYTES) throw tooLarge();
-  return withWriteLock(async () => {
-    const dataDir = getDataDir();
-    try {
-      const folder = await resolveFolder(dataDir, ref.folder);
-      const existing = await lookupNote(folder.path, ref.name);
-      if (existing && !existing.stats.isFile()) throw noteNotFound();
-
-      if (!existing) {
-        if (!force) throw new StorageError("version_conflict", "This note no longer exists on disk.", null);
-        const bytes = encodeChecked(text, { eol: "lf", bom: false });
-        const file = safeJoin(folder.path, ref.name + NOTE_EXT);
-        await atomicWrite(file, bytes, { noClobber: true });
-        return { ...toSummary(folder.name, ref.name, await lstat(file)), version: versionOf(bytes) };
-      }
-
-      const current = await readFile(existing.path);
-      const decoded = decode(current);
-      const currentVersion = versionOf(current);
-      const unchanged = {
-        ...toSummary(folder.name, existing.name, existing.stats),
-        size: current.length,
-        version: currentVersion,
-      };
-      if (!force && current.length > MAX_NOTE_BYTES) {
-        throw new StorageError("read_only", "This note is too large to edit here.");
-      }
-      if (!force && !decoded.utf8Ok) {
-        throw new StorageError("read_only", "This file isn't valid UTF-8, so it can't be edited here.");
-      }
-      if (!force && baseVersion !== currentVersion) {
-        if (decoded.text === text) return unchanged;
-        const note = noteFromBytes(folder.name, existing.name, existing.stats, current);
-        throw new StorageError("version_conflict", "This note changed on disk since you opened it.", note);
-      }
-
-      const bytes = encodeChecked(text, decoded);
-      if (bytes.equals(current)) return unchanged;
-      // A forced save over a version the client never saw ("Keep mine") keeps the other version in .trash.
-      if (baseVersion !== currentVersion) {
-        await copyToTrash(dataDir, current, [folder.name, existing.name + NOTE_EXT]);
-      }
-      await atomicWrite(existing.path, bytes);
-      return {
-        ...toSummary(folder.name, existing.name, await lstat(existing.path)),
-        version: versionOf(bytes),
-      };
-    } catch (err) {
-      throw mapFsError(err, "Note not found.");
-    }
-  });
+export async function saveNote(input: SaveInput): Promise<SavedNote> {
+  checkSaveSize(input);
+  return withWriteLock(() => saveNoteUnlocked(input));
 }
 
-/** Renames and/or moves a note without ever overwriting another file. Case-only renames work. */
+/** What saveNote takes: the note, its new full text, and the version the edit was based on. */
+export type SaveInput = { ref: NoteRef; content: string; baseVersion: string | null; force?: boolean };
+
+/**
+ * Too large as LF is too large in any style (CRLF and a BOM only add bytes), so say so before any version
+ * check: a conflict banner would only lead to the same error after "Keep mine".
+ */
+function checkSaveSize(input: SaveInput): void {
+  if (Buffer.byteLength(toLf(input.content)) > MAX_NOTE_BYTES) throw tooLarge();
+}
+
+/**
+ * saveNote for storage code that already holds the write lock, such as applying a proposal, where the
+ * save and the proposal's update must happen as one step (docs/design-decisions.md#d31).
+ */
+export async function saveNoteUnlocked(input: SaveInput): Promise<SavedNote> {
+  checkSaveSize(input);
+  const { ref, baseVersion, force = false } = input;
+  const text = toLf(input.content);
+  const dataDir = getDataDir();
+  try {
+    const folder = await resolveFolder(dataDir, ref.folder);
+    const existing = await lookupNote(folder.path, ref.name);
+    if (existing && !existing.stats.isFile()) throw noteNotFound();
+
+    if (!existing) {
+      if (!force) throw new StorageError("version_conflict", "This note no longer exists on disk.", null);
+      const bytes = encodeChecked(text, { eol: "lf", bom: false });
+      const file = safeJoin(folder.path, ref.name + NOTE_EXT);
+      await atomicWrite(file, bytes, { noClobber: true });
+      return { ...toSummary(folder.name, ref.name, await lstat(file)), version: versionOf(bytes) };
+    }
+
+    const current = await readFile(existing.path);
+    const decoded = decode(current);
+    const currentVersion = versionOf(current);
+    const unchanged = {
+      ...toSummary(folder.name, existing.name, existing.stats),
+      size: current.length,
+      version: currentVersion,
+    };
+    if (!force && current.length > MAX_NOTE_BYTES) {
+      throw new StorageError("read_only", "This note is too large to edit here.");
+    }
+    if (!force && !decoded.utf8Ok) {
+      throw new StorageError("read_only", "This file isn't valid UTF-8, so it can't be edited here.");
+    }
+    if (!force && baseVersion !== currentVersion) {
+      if (decoded.text === text) return unchanged;
+      const note = noteFromBytes(folder.name, existing.name, existing.stats, current);
+      throw new StorageError("version_conflict", "This note changed on disk since you opened it.", note);
+    }
+
+    const bytes = encodeChecked(text, decoded);
+    if (bytes.equals(current)) return unchanged;
+    // A forced save over a version the client never saw ("Keep mine") keeps the other version in .trash.
+    if (baseVersion !== currentVersion) {
+      await copyToTrash(dataDir, current, [folder.name, existing.name + NOTE_EXT]);
+    }
+    await atomicWrite(existing.path, bytes);
+    return {
+      ...toSummary(folder.name, existing.name, await lstat(existing.path)),
+      version: versionOf(bytes),
+    };
+  } catch (err) {
+    throw mapFsError(err, "Note not found.");
+  }
+}
+
+/**
+ * Renames and/or moves a note without ever overwriting another file. Case-only renames work. Its pending
+ * proposals go with it (docs/design-decisions.md#d31).
+ */
 export async function updateNote(input: {
   ref: NoteRef;
   newName?: string;
@@ -182,6 +223,11 @@ export async function updateNote(input: {
       const dest = safeJoin(target.path, name + NOTE_EXT);
       if (sameFolder && nameKey(name) === nameKey(note.name)) await renameCaseOnly(note.path, dest);
       else await renameNoClobber(note.path, dest);
+      const from = { folder: folder.name, name: note.name };
+      const to = { folder: target.name, name };
+      await proposalsFollowNote(from, to);
+      await jobsFollowNote((n) => (sameNoteRef(n, from) ? to : null));
+      await createdFollowNote((n) => (sameNoteRef(n, from) ? to : null));
       return toSummary(target.name, name, await lstat(dest));
     } catch (err) {
       throw mapFsError(err, "Note not found.");
@@ -189,13 +235,18 @@ export async function updateNote(input: {
   });
 }
 
-/** Soft-deletes a note into .trash, keeping its folder name so it's easy to find and restore by hand. */
+/**
+ * Soft-deletes a note into .trash, keeping its folder name so it's easy to find and restore by hand. Its
+ * pending proposals are closed (docs/design-decisions.md#d31).
+ */
 export async function deleteNote(ref: NoteRef): Promise<void> {
   return withWriteLock(async () => {
     const dataDir = getDataDir();
     try {
       const { folder, note } = await resolveNote(dataDir, ref);
       await moveToTrash(dataDir, note.path, [folder.name, note.name + NOTE_EXT]);
+      await orphanProposals((p) => sameNoteRef(p, { folder: folder.name, name: note.name }));
+      await dropNoteRecords({ folder: folder.name, name: note.name });
     } catch (err) {
       throw mapFsError(err, "Note not found.");
     }
@@ -209,11 +260,13 @@ export async function deleteNote(ref: NoteRef): Promise<void> {
 export async function discardIfEmpty(ref: NoteRef): Promise<boolean> {
   return withWriteLock(async () => {
     try {
-      const { note } = await resolveNote(getDataDir(), ref);
+      const { folder, note } = await resolveNote(getDataDir(), ref);
       if (note.stats.size > MAX_NOTE_BYTES) return false;
       const { text, utf8Ok } = decode(await readFile(note.path));
       if (!utf8Ok || text.trim() !== "") return false;
       await unlink(note.path);
+      await orphanProposals((p) => sameNoteRef(p, { folder: folder.name, name: note.name }));
+      await dropNoteRecords({ folder: folder.name, name: note.name });
       return true;
     } catch (err) {
       const mapped = mapFsError(err, "Note not found.");

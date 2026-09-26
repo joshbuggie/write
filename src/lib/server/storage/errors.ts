@@ -3,6 +3,7 @@ import type { Note } from "@/lib/types";
 
 export type StorageErrorCode = Extract<
   ErrorCode,
+  | "bad_request"
   | "invalid_name"
   | "not_found"
   | "name_taken"

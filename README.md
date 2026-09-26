@@ -26,6 +26,7 @@ open in vim, Obsidian, iA Writer or anything else.
 - [Security](#security)
 - [iPhone and iPad](#iphone-and-ipad)
 - [AI assistant (optional)](#ai-assistant-optional)
+- [Integrations (optional)](#integrations-optional)
 - [Keyboard shortcuts](#keyboard-shortcuts)
 - [Upgrading](#upgrading)
 - [FAQ and troubleshooting](#faq-and-troubleshooting)
@@ -447,6 +448,112 @@ works when Ollama runs on the same computer as write. In Docker, `localhost` is 
 the host's LAN address, or `host.docker.internal` (built into Docker Desktop; on Linux, add
 `extra_hosts: ["host.docker.internal:host-gateway"]` to the service in `docker-compose.yml`), and make sure
 the model server listens on the network, not only on its own `localhost`.
+
+---
+
+## Integrations (optional)
+
+Agent harnesses such as [Turnstone](https://github.com/turnstonelabs/turnstone) or
+[Hermes Agent](https://github.com/NousResearch/hermes-agent) can read your notes directly and propose
+changes to them, so you don't have to copy text back and forth by hand. Each harness gets its own token,
+and reads only the folders you choose. **Nothing in a note changes until you accept it.**
+
+1. Open **Integrations** at the bottom of the sidebar (on a phone, at the end of the Notes screen) and
+   click **Add integration**.
+2. Name it, pick the harness, and tick the folders it may read. Notes in other folders stay invisible to
+   it, as if they didn't exist.
+3. Click **Add and show token** and copy the token into the harness. **write shows it only once.** If it's
+   lost, open the integration and click **New token**: the old one stops working at once.
+
+**Connecting over MCP** (Turnstone, Hermes Agent, Claude Desktop and most agent tools): add write as a
+remote MCP server at `https://<your write server>/api/agent/mcp` (Streamable HTTP) with the header
+`Authorization: Bearer <token>`. After **Add and show token**, write shows the exact settings for the
+harness you picked. For example, Hermes Agent's `config.yaml`, with the token in the profile's `.env` as
+`WRITE_TOKEN`:
+
+```yaml
+mcp_servers:
+  write:
+    url: "https://notes.example.com/api/agent/mcp"
+    headers:
+      Authorization: "Bearer ${WRITE_TOKEN}"
+```
+
+The harness gets four tools (`list_notes`, `read_note`, `propose_changes` and `get_proposal`) and
+instructions on how to use them: read a note, propose changes by section with a reason for each, and on a
+later pass check which sections you accepted before building on the note as it is.
+
+To let a harness **create notes** too, tick **Can create new notes in these folders** on its integration.
+It then also gets `create_note`. New notes appear right away, only in the folders it can read, and never
+replace one of yours: a name that is taken is an error. The note says which harness created it until you
+dismiss that. Changes to existing notes still wait for your review.
+
+**Without MCP**, the harness sends the token as `Authorization: Bearer <token>` to
+`https://<your write server>/api/agent`:
+
+- `GET /api/agent/tree` lists the folders it can read and their notes.
+- `GET /api/agent/notes?folder=<folder>&name=<note>` reads one note, with its text and version.
+- `POST /api/agent/proposals` proposes changes to a note it read: the `folder`, `name` and the
+  `baseVersion` it read, then either the whole revised note as `content`, or only the changed sections as
+  `sections: [{ "heading": "Plan", "content": "## Plan\n\nNew text\n" }]` (an empty `content` removes the
+  section; a heading the note doesn't have adds one at the end). Optional: a one-line `summary`, a
+  `reasons` object by heading, and a `requestId` that makes a retried request harmless.
+- `GET /api/agent/proposals?id=<id>` tells the harness which sections you accepted or rejected, so its
+  next pass starts from what you kept.
+- `POST /api/agent/notes` creates a note, if its integration may: `folder`, `name`, `content` and an
+  optional `requestId`. 201 when made, 200 for a retry of the same request, 403 without the permission, 409
+  when the name is taken.
+
+### Sending a note to a harness
+
+To start work from write instead of from the harness, open the integration, switch on **Start jobs from
+write**, and enter the harness's address and API key (**Test connection** checks them without starting
+anything):
+
+- **Turnstone:** its address (the console), an API token that can create workstreams, and whether to start
+  a **single workstream** (the default) or a **coordinator** (several agents). If you registered write in Turnstone under
+  another name than `write`, enter that name. A single workstream runs without prompts: write asks
+  Turnstone to auto-approve its four tools. A coordinator can't be started that way, so the first time
+  it calls write's tools Turnstone asks you to approve them; choose "always". write's tools can only read
+  and propose, so approving them is safe.
+- **Hermes Agent:** its API address including the profile, like `http://hermes.local:8642/p/writing/v1`,
+  and that profile's `API_SERVER_KEY`.
+- **Anything else:** a webhook URL; write POSTs the note, your request and a ready-made brief for an agent.
+
+If the harness uses a private certificate (Caddy's local CA, for example), paste the certificate authority
+under **Private certificate?**. write then trusts what that authority signed, for that server only.
+
+Then, on a note, click the **Send** button (the paper plane next to ✨ at the top of the note; also **Send
+to…** in the ⋯ menu), say what it should do, and optionally pick the sections
+it may change. The note shows that the harness is working, and its changes appear as a proposal to review.
+Sending the same note again continues the same conversation, so the harness knows what you accepted last
+time; tick **Start a new conversation** to start over. API keys are kept on the write server, like the AI
+assistant's, and only sent to the address they were saved for.
+
+### Reviewing proposed changes
+
+When a harness has proposed changes, the note shows a banner with **Review changes**. The review lists
+each changed section (at `#` and `##` headings) with the words that would change, and why, if the harness
+said. Accept or reject each one, then **Apply**.
+
+- **You can keep writing while a harness works.** Sections you didn't touch apply cleanly. When you also
+  changed a section the harness changed, its card says so: accepting replaces your version of that
+  section, rejecting keeps it. Your edits elsewhere in the note are never at risk.
+- Changes you don't decide on keep waiting for another time. What you rejected isn't offered again.
+- Right after Apply, **Undo** in the message at the bottom puts the note back as it was.
+- Front matter is never changed by a proposal.
+- Proposals wait in a hidden `.proposals` folder inside your data folder, next to your notes. They follow a
+  note when you rename or move it, and are closed when you delete it.
+
+A few things to know:
+
+- **Keep sign-in on.** Integration tokens only open `/api/agent`, and the rest of the API never accepts
+  them. With `WRITE_AUTH=off`, though, everything else is open to anyone who can reach write, so folder
+  limits mean little.
+- Renaming a folder in write keeps it readable under its new name. Deleting a folder removes it from every
+  integration, so a new folder with the same name isn't shared by accident.
+- Tokens are saved as fingerprints (SHA-256) in `integrations.json` inside `WRITE_CONFIG_DIR`, never in
+  plain text. **Last used** shows when a token last reached write since the server started.
 
 ---
 
