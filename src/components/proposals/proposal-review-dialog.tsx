@@ -63,15 +63,14 @@ export function ProposalReviewDialog({ noteRef, proposalId, onClose, onApplied }
     if (!review) return;
     const keys = (d: Decision) => Object.keys(decisions).filter((k) => decisions[k] === d);
     setPending(true);
+    let result: ResolveProposalResponse;
     try {
-      const result = await api.resolveProposal({
+      result = await api.resolveProposal({
         id: review.id,
         noteVersion: review.noteVersion,
         accept: keys("accept"),
         reject: keys("reject"),
       });
-      onApplied(result, keys("accept").length);
-      onClose();
     } catch (err) {
       if (isApiError(err, "version_conflict")) {
         setNotice(
@@ -81,9 +80,14 @@ export function ProposalReviewDialog({ noteRef, proposalId, onClose, onApplied }
       } else {
         setNotice(messageOf(err));
       }
+      return;
     } finally {
       setPending(false);
     }
+    // The decisions are saved: close first, so a failure in what follows can't pose as a failed Apply
+    // that invites a second one.
+    onClose();
+    onApplied(result, keys("accept").length);
   }
 
   const label = applyLabel(decisions);
