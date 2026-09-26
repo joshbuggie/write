@@ -17,6 +17,8 @@ export interface LaunchJob {
   instruction: string;
   sections: string[];
   brief: string;
+  /** The integration may create notes, so a harness that approves tools up front approves create_note too. */
+  canCreate: boolean;
 }
 
 export interface Launcher {
@@ -46,9 +48,15 @@ const field = (res: HarnessResponse, name: string): string => {
   return v;
 };
 
-/** Turnstone's names for write's tools, as its MCP server name prefixes them. */
-const turnstoneTools = (server: string) =>
-  ["list_notes", "read_note", "propose_changes", "get_proposal"].map((t) => `mcp__${server}__${t}`);
+/**
+ * Turnstone's names for the tools this integration is offered, as its MCP server name prefixes them. A
+ * single workstream runs without prompts, so create_note is approved too when the owner allowed it: it
+ * can't overwrite a note, which is why it skips review in the first place (docs/design-decisions.md#d31).
+ */
+const turnstoneTools = (server: string, canCreate: boolean) =>
+  ["list_notes", "read_note", "propose_changes", "get_proposal", ...(canCreate ? ["create_note"] : [])].map(
+    (t) => `mcp__${server}__${t}`,
+  );
 
 const title = (job: LaunchJob) => `write: ${job.note.name}`;
 
@@ -73,7 +81,7 @@ const turnstone: Launcher = {
       ws_id: job.id,
       name: title(job),
       initial_message: job.brief,
-      auto_approve_tools: turnstoneTools(l.mcpServerName),
+      auto_approve_tools: turnstoneTools(l.mcpServerName, job.canCreate),
     };
     const res = await callHarness({ url, method: "POST", headers: auth(l), body, ca: l.ca });
     if (res.status === 409) return { wsId: job.id, coordinator: false }; // a retry of this same job: it exists

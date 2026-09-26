@@ -542,10 +542,10 @@ anything):
   a **single workstream** (the default) or a **coordinator** (several agents; its token also needs the
   `admin.coordinator` permission). If you registered write in Turnstone under another name than `write`,
   enter that name. A single workstream runs without prompts: write asks Turnstone to auto-approve its
-  four read and propose tools (`create_note` isn't among them, so Turnstone asks before a harness creates
-  a note). A coordinator can't be started that way, so the first time it calls write's tools Turnstone
-  asks you to approve them; choose "always". Reading and proposing never change a note without your
-  review, so approving those is safe.
+  four read and propose tools, and `create_note` too if the integration can create notes. A coordinator
+  can't be started that way, so the first time it calls write's tools Turnstone asks you to approve them;
+  choose "always". write's tools can only read, propose and create new notes, never change one of yours
+  without your review, so approving them is safe.
 - **Hermes Agent:** its API address including the profile, like `http://hermes.local:8642/p/writing/v1`,
   and that profile's `API_SERVER_KEY`.
 - **Anything else:** a webhook URL and an optional secret, sent as a Bearer token. write POSTs a JSON

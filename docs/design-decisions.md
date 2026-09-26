@@ -930,7 +930,11 @@ wrong_password`. A wrong current password is `403 wrong_password`, not `401`, wh
   results come back as proposals, so write never reads a harness's events or replies.
   - **Turnstone:** a coordinator (the console's `/v1/api/workstreams/new`, continued with its `/send`)
     or a single workstream (`/v1/api/route/workstreams/new` with write's job id as `ws_id`, so a retry
-    can't start a second one, and write's four MCP tools in `auto_approve_tools`). **Hermes Agent:**
+    can't start a second one, and the MCP tools the integration is offered in `auto_approve_tools`: the
+    four read and propose tools, plus `create_note` when it may create notes, since that can't overwrite
+    a note either and a prompt would stall a run the owner already allowed. The list is fixed when the
+    workstream starts, so after ticking "Can create new notes" a continued conversation still asks
+    until the owner starts a new one). **Hermes Agent:**
     `POST /v1/runs` with the job id as `Idempotency-Key` and a `session_id` that later passes reuse.
     **Anything else:** a webhook, one POST with the note, the instruction, the sections and the brief.
     Tried live (2026-09-25): a single workstream ran without prompts; a coordinator stopped at
