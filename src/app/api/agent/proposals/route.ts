@@ -12,8 +12,8 @@ import { isAgentProposalRequest } from "@/lib/server/validate-proposals";
 /** Makes a proposal: 201, or 200 with the first one when the same request is sent again. */
 export const POST = handleAgent(async (req, integration) => {
   const input = await readJson(req, isAgentProposalRequest, MAX_NOTE_JSON_BYTES);
-  const { proposal, created } = await proposeFromAgent(integration, input);
-  const body: AgentProposalResponse = { proposal };
+  const { proposal, created, notice } = await proposeFromAgent(integration, input);
+  const body: AgentProposalResponse = notice ? { proposal, notice } : { proposal };
   return json(body, created ? 201 : 200);
 });
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { composeFile, finalizeMarkdown, joinFile, splitFrontmatter } from "./file-format";
+import { composeFile, finalizeMarkdown, isOnlyFrontmatter, joinFile, splitFrontmatter } from "./file-format";
 
 describe("splitFrontmatter", () => {
   it("splits YAML front matter including the blank lines after it", () => {
@@ -125,5 +125,22 @@ describe("composeFile", () => {
 
   it("works without front matter", () => {
     expect(composeFile("", "Hello")).toBe("Hello\n");
+  });
+});
+
+describe("isOnlyFrontmatter", () => {
+  it("is true for a note wrapped in --- lines, BOM or blank lines included", () => {
+    expect(isOnlyFrontmatter("---\n# Title\n\nbody text\n---")).toBe(true);
+    expect(isOnlyFrontmatter("\uFEFF---\ntags: [a]\n---\n\n  \n")).toBe(true);
+    expect(isOnlyFrontmatter("+++\ntitle = 'x'\n+++\n")).toBe(true);
+    // Storage makes CRLF and lone CRs LF, so the check does too.
+    expect(isOnlyFrontmatter("---\r# Story\rBody\r---\r")).toBe(true);
+    expect(isOnlyFrontmatter("---\r\n# Story\r\nBody\r\n---\r\n")).toBe(true);
+  });
+
+  it("is false with text after the front matter, or without front matter", () => {
+    expect(isOnlyFrontmatter("---\ntags: [a]\n---\n# Title\n")).toBe(false);
+    expect(isOnlyFrontmatter("---\n\n# Title after a rule\n")).toBe(false);
+    expect(isOnlyFrontmatter("")).toBe(false);
   });
 });

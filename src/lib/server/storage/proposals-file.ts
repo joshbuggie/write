@@ -32,6 +32,8 @@ export interface StoredProposal {
   summary: string;
   /** Why each section changed, by heading text as the harness wrote it. */
   reasons: Record<string, string>;
+  /** What the harness was told about front matter it sent and the note doesn't keep, repeated on a retry. */
+  notice?: string | null;
   status: ProposalStatus;
   decisions: ChangeDecision[];
   /** ISO 8601. */
@@ -69,6 +71,7 @@ function parse(text: string): StoredProposal | null {
     isString(v.proposed) &&
     isString(v.summary) &&
     isRecord(v.reasons) &&
+    (v.notice === undefined || v.notice === null || isString(v.notice)) &&
     isString(v.status) &&
     Array.isArray(v.decisions) &&
     isString(v.createdAt) &&

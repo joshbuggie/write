@@ -1,5 +1,6 @@
 import type { Note, NoteRef, Tree } from "@/lib/types";
 import type { AgentCreateNoteRequest } from "@/lib/api-contract";
+import { isOnlyFrontmatter } from "@/lib/markdown/file-format";
 import { HttpError } from "./http";
 import { rememberBase } from "./proposal-bases";
 import {
@@ -17,6 +18,9 @@ import {
  */
 
 const hidden = () => new StorageError("not_found", "Note not found.");
+
+const ONLY_FRONTMATTER =
+  "Nothing was written: this content is only front matter. It starts with a --- line, so everything up to the next --- line would be stored as the note's properties, and the note would show no text. Start the content at its first heading, without a leading --- line. If you do want front matter, put the note's text after its closing ---.";
 
 /** The folders this integration can read, with their notes. Others are left out, names and all. */
 export async function agentTree(integration: StoredIntegration): Promise<Tree> {
@@ -40,7 +44,8 @@ export async function agentReadNote(integration: StoredIntegration, ref: NoteRef
 /**
  * A new note in a folder this integration can read, if the owner let it create notes. Written at once:
  * a new note can't overwrite anything, and later changes to it go through proposals like any other note.
- * A folder it can't read answers like a missing one.
+ * A folder it can't read answers like a missing one. Content that is only front matter is refused: a
+ * story wrapped in --- lines would otherwise be saved as the note's properties, with no text to show.
  */
 export async function agentCreateNote(
   integration: StoredIntegration,
@@ -53,6 +58,7 @@ export async function agentCreateNote(
     );
   }
   if (!canReadFolder(integration, input.folder)) throw new StorageError("not_found", "Folder not found.");
+  if (isOnlyFrontmatter(input.content)) throw new HttpError("bad_request", ONLY_FRONTMATTER);
   const result = await createNoteFor({
     integrationId: integration.id,
     source: integration.name,

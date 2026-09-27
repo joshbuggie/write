@@ -69,7 +69,11 @@ export const TOOL_DEFINITIONS = [
             additionalProperties: false,
           },
         },
-        content: { type: "string", description: "The whole revised note, instead of sections." },
+        content: {
+          type: "string",
+          description:
+            "The whole revised note, instead of sections. Its front matter (a block between --- lines at the very top) is ignored: the note keeps its own.",
+        },
         summary: { type: "string", description: "One line on what you changed and why, shown to the owner." },
         reasons: {
           type: "object",
@@ -91,12 +95,16 @@ export const TOOL_DEFINITIONS = [
     name: "create_note",
     title: "Create a note",
     description:
-      "Creates a new note in a folder list_notes shows. It is written at once, under exactly this name. If a note already has that name nothing is written and you get an error: choose another name, or read that note and propose changes to it. To change the new note later, use propose_changes as for any note.",
+      "Creates a new note in a folder list_notes shows. It is written at once, under exactly this name. If a note already has that name nothing is written and you get an error: choose another name, or read that note and propose changes to it. Returns the note's version and the sections write found in it: check that your headings are there. To change the new note later, use propose_changes as for any note.",
     inputSchema: {
       type: "object",
       properties: {
         ...noteRef,
-        content: { type: "string", description: "The note's complete Markdown." },
+        content: {
+          type: "string",
+          description:
+            "The note's complete Markdown, starting at its first heading or line of text. Don't wrap it in --- lines: a --- line at the very top starts front matter, and everything up to the next --- becomes the note's properties instead of its text.",
+        },
         requestId: {
           type: "string",
           description:

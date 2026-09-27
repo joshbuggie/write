@@ -520,7 +520,9 @@ dismiss that. Changes to existing notes still wait for your review.
   first heading). A whole-note `content` must keep the note's sections in their order: a proposal that
   moves sections is refused. Optional: a one-line `summary`, a `reasons` object by heading, and a
   `requestId` that makes a retried request harmless. 201 when saved, 200 for a retry, 409 with the current
-  note when the version it read is gone, 400 when the proposal changes nothing or moves sections. A newer
+  note when the version it read is gone, 400 when the proposal changes nothing, moves sections, or is only
+  front matter. Front matter is never changed: when a whole-note `content` has other front matter than the
+  note, the answer has a `notice` saying the note keeps its own. A newer
   proposal from the same integration for the same note replaces the older one, and at most 20 can wait
   per integration.
 - `GET /api/agent/proposals?id=<id>` tells the harness which sections you accepted or rejected, so its
@@ -528,7 +530,7 @@ dismiss that. Changes to existing notes still wait for your review.
 - `POST /api/agent/notes` creates a note, if its integration may: `folder`, `name`, `content` and an
   optional `requestId`. 201 when made, 200 for a retry of the same request, 403 without the permission,
   404 for a folder it can't read (or a retry whose note you have since moved out of its folders), 409 when
-  the name is taken.
+  the name is taken, 400 when the content is only front matter (a note wrapped in `---` lines).
 
 The API answers 404 for any folder the integration can't read, as if it didn't exist.
 

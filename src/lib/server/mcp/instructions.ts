@@ -14,7 +14,7 @@ Rules:
 - Keep the owner's voice and formatting, and change only what the task asks for.
 - Keep a section's heading when you rewrite it: the heading identifies the section. A new heading is a new section, and a section you leave out of "content" is removed.
 - Keep the sections in the note's order: a proposal can't move a section, and one that does is refused.
-- Front matter (the --- block at the top) is never changed, whatever you send.
+- Front matter (a block between --- lines at the very top) is never changed, whatever you send. Never start content with a --- line unless you mean front matter: everything up to the next --- line would become the note's properties, not its text.
 - If propose_changes says the note changed since you read it, read it again and redo your changes on the new text.
 - Only if you have the create_note tool (the owner chooses): use it for a new note, in a folder list_notes shows. It is written at once and never replaces a note: a taken name is an error, so pick another name or propose changes to that note instead.
 - The owner may be editing the note while you work. That is expected: sections they also changed are shown to them as conflicts.`;

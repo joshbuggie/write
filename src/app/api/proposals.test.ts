@@ -99,8 +99,9 @@ describe("proposals", () => {
         reasons: { A: "clearer" },
       });
       expect(res.status).toBe(201);
-      const { proposal } = (await res.json()) as AgentProposalResponse;
+      const { proposal, notice } = (await res.json()) as AgentProposalResponse;
       expect(proposal).toMatchObject({ status: "pending", waiting: 1 });
+      expect(notice).toContain("The note keeps its own front matter (22 bytes"); // tags: [x] was dropped
       expect((await readNote(ref)).content).toBe(NOTE); // proposing never writes the note
 
       const [review] = await reviews();
