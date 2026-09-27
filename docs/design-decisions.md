@@ -827,6 +827,14 @@ wrong_password`. A wrong current password is `403 wrong_password`, not `401`, wh
   the budget that is left, never more. A success hands its unit back but doesn't clear earlier failures.
   A request refused because the rest of the budget is reserved by checks still hashing gets a `429` with
   `Retry-After` of at least one second.
+- **The sign-in and setup forms submit only through JavaScript**, as JSON to `/api/auth/*`. When the
+  page's scripts are slow or blocked (Safari holding requests behind iCloud Private Relay's "not private"
+  notice for a Tailscale host, say), a tap on the button used to fall through to a native form submit:
+  a `GET` that put the username and password in the URL, where proxies log them, and that signed nobody
+  in. So the submit button stays disabled until React hydrates (`useHydrated` in
+  `src/lib/use-hydrated.ts`); a disabled default button also blocks Enter-to-submit. The forms say
+  `method="post"` as a backstop, so a native submit that slips through anyway keeps the password out of
+  the URL.
 - Code: `src/lib/server/auth.ts`, `password-guard.ts`, `password-hash.ts`,
   `src/lib/server/storage/account.ts`, `src/lib/account.ts`, `src/app/setup/`, `src/app/login/` and
   `src/app/api/auth/`.

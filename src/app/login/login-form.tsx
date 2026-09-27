@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { TextField } from "@/components/ui/text-field";
 import { api, isApiError } from "@/lib/api-client";
 import { safeNextPath } from "@/lib/routes";
+import { useHydrated } from "@/lib/use-hydrated";
 
 /** "Try again in N minutes." for a wait in seconds, rounded up like the server's own lockout message. */
 function waitHint(seconds: number | null): string {
@@ -32,10 +33,12 @@ export function loginErrorMessage(err: unknown): string {
 /**
  * Username and password form, named so password managers fill it. On success it replaces /login in history
  * (so Back doesn't return here) and refreshes so the server components re-render with the new session
- * cookie.
+ * cookie. It only submits through JavaScript: the button waits for hydration, and method="post" keeps the
+ * password out of the URL if a native submit ever slips through (docs/design-decisions.md#d30).
  */
 export function LoginForm({ next }: { next?: string }) {
   const router = useRouter();
+  const hydrated = useHydrated();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -65,7 +68,7 @@ export function LoginForm({ next }: { next?: string }) {
   }
 
   return (
-    <form onSubmit={onSubmit} className="flex flex-col gap-4" noValidate>
+    <form method="post" onSubmit={onSubmit} className="flex flex-col gap-4" noValidate>
       <TextField
         label="Username"
         name="username"
@@ -90,7 +93,7 @@ export function LoginForm({ next }: { next?: string }) {
         error={error}
         className="w-full"
       />
-      <Button type="submit" variant="primary" pending={pending} className="w-full">
+      <Button type="submit" variant="primary" pending={pending} disabled={!hydrated} className="w-full">
         Sign in
       </Button>
     </form>
