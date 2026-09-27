@@ -315,6 +315,8 @@ export interface AgentProposal {
 /** Answer to creating a proposal (201) or to a retry of one already made (200), and to looking one up. */
 export interface AgentProposalResponse {
   proposal: AgentProposal;
+  /** When a whole-note `content` had other front matter than the note: what was kept instead, and why. */
+  notice?: string;
 }
 
 /** `GET /api/proposals?folder=&name=`: the note's pending proposals, each reviewed against the note now. */

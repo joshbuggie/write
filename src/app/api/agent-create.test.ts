@@ -88,10 +88,13 @@ describe("creating notes as an integration", () => {
       };
       const made = await call("create_note", args);
       expect(made.isError).toBeUndefined();
-      expect(made.content[0].text).toMatch(/^Created Essays\/Rock pools, version [0-9a-f]{16}\.$/);
+      expect(made.content[0].text).toMatch(
+        /^Created Essays\/Rock pools, version [0-9a-f]{16}\.\nSections: # Rock pools$/,
+      );
       const note = await readNote({ folder: "Essays", name: "Rock pools" });
       expect(note.content).toBe("# Rock pools\n\nCold.\n");
       expect(made.structuredContent?.version).toBe(note.version);
+      expect(made.structuredContent).toMatchObject({ sections: ["# Rock pools"], frontmatterBytes: 0 });
       expect(await createdRecordFor(note)).toMatchObject({ source: "Hermes", requestId: "r-1" });
 
       const again = await call("create_note", args);

@@ -21,6 +21,15 @@ export function splitFrontmatter(file: string): SplitFile {
   return { frontmatter: match[0], body: file.slice(match[0].length) };
 }
 
+/**
+ * Front matter and nothing after it: a note that shows no text. Harnesses make these by wrapping a note in
+ * --- lines, so their writes are refused (docs/design-decisions.md#d31). A leading BOM is ignored.
+ */
+export function isOnlyFrontmatter(file: string): boolean {
+  const { frontmatter, body } = splitFrontmatter(file.replace(/^\uFEFF/, ""));
+  return frontmatter !== "" && body.trim() === "";
+}
+
 /** Guarantee: joinFile(splitFrontmatter(x)) === x for every string x. */
 export function joinFile(parts: SplitFile): string {
   return parts.frontmatter + parts.body;

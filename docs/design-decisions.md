@@ -858,6 +858,17 @@ wrong_password`. A wrong current password is `403 wrong_password`, not `401`, wh
     refused with 409 and the note as it is now, saying to read it again. Nothing about the note is
     guessed.
   - **Front matter is never proposed.** It is split off all three versions, and the note's own is kept.
+    Because that happens silently, a whole-note `content` whose front matter differs from the note's gets
+    a `notice` saying what was kept (MCP adds it to the tool's text).
+  - **A harness can't write a note that is only front matter.** An agent that wraps a note in `---` lines
+    makes all of it front matter, and the note shows no text. That happened with Turnstone (2026-09-26):
+    the story became properties, and resending it without the fences added it a second time as body. So
+    `create_note` and whole-note proposals that are only front matter are refused with an error that says
+    to drop the leading `---` (`isOnlyFrontmatter` in `src/lib/markdown/file-format.ts`). They are refused,
+    not saved with a warning, because the harness can fix it at once, and a warning would leave a broken
+    note that only the owner can repair. `create_note` also answers with the sections it found and the
+    front matter's size, so a harness can check its headings landed. The parser itself stays as it is
+    ([D17](#d17)): other Markdown tools read those files the same way.
   - **Applying** (`POST /api/proposals/resolve`) is one step under the write lock: the proposal must still
     be pending and the note still at the version the review was worked out against (409 otherwise; the
     dialog then reloads the review), and the save and the recorded decisions happen together, so a newer
