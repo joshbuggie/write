@@ -2,11 +2,13 @@
 
 import { useRouter } from "next/navigation";
 import { useState, type FormEvent } from "react";
+import { LoadingHint } from "@/components/auth/loading-hint";
 import { Button } from "@/components/ui/button";
 import { TextField } from "@/components/ui/text-field";
 import { passwordError, usernameError } from "@/lib/account";
 import { api, isApiError } from "@/lib/api-client";
 import { loginHref } from "@/lib/routes";
+import { useHydrated } from "@/lib/use-hydrated";
 
 type Field = "username" | "password" | "confirm";
 type Errors = Partial<Record<Field | "form", string>>;
@@ -31,10 +33,12 @@ export function setupErrorMessage(err: unknown): string {
 
 /**
  * Creates the account and signs this browser in. The password is typed twice, because a typo here would
- * lock the owner out of their own server. If someone else finished setup first, it goes to sign-in.
+ * lock the owner out of their own server. If someone else finished setup first, it goes to sign-in. Like
+ * the login form, it only submits through JavaScript (docs/design-decisions.md#d30).
  */
 export function SetupForm() {
   const router = useRouter();
+  const hydrated = useHydrated();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
@@ -67,7 +71,7 @@ export function SetupForm() {
   };
 
   return (
-    <form onSubmit={onSubmit} className="flex flex-col gap-4" noValidate>
+    <form method="post" onSubmit={onSubmit} className="flex flex-col gap-4" noValidate>
       <TextField
         label="Username"
         name="username"
@@ -118,9 +122,10 @@ export function SetupForm() {
           {errors.form}
         </p>
       )}
-      <Button type="submit" variant="primary" pending={pending} className="w-full">
+      <Button type="submit" variant="primary" pending={pending} disabled={!hydrated} className="w-full">
         Create account
       </Button>
+      <LoadingHint />
     </form>
   );
 }
