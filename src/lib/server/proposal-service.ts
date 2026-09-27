@@ -43,7 +43,8 @@ function frontmatterNotice(base: string, content: string): string | null {
  * Makes a proposal for a note the integration can read. The base is the version the harness read: the
  * note itself when it hasn't changed since, else the text remembered when the harness read it. When
  * neither is at hand (the server restarted), it answers 409 with the note as it is now, to read again.
- * `notice` says when the front matter it sent was not what the note keeps.
+ * `notice` says when the front matter it sent was not what the note keeps; it is stored with the
+ * proposal, so a retry whose first answer was lost still says it.
  */
 export async function proposeFromAgent(
   integration: StoredIntegration,
@@ -55,7 +56,8 @@ export async function proposeFromAgent(
   const earlier = req.requestId ? await proposalForRequest(integration.id, req.requestId) : null;
   if (earlier) {
     if (!canReadFolder(integration, earlier.note.folder)) throw hidden();
-    return { proposal: await toAgentProposal(earlier, integration), created: false, notice: null };
+    const proposal = await toAgentProposal(earlier, integration);
+    return { proposal, created: false, notice: earlier.notice ?? null };
   }
   const note = await readNote({ folder: req.folder, name: req.name });
   if (!canReadFolder(integration, note.folder)) throw hidden();
@@ -105,8 +107,14 @@ export async function proposeFromAgent(
     proposed,
     summary: req.summary?.trim() ?? "",
     reasons: req.reasons ?? {},
+    notice,
   });
-  return { proposal: await toAgentProposal(proposal, integration), created, notice };
+  // The stored notice: the same change sent again answers with the first proposal, and what it was told.
+  return {
+    proposal: await toAgentProposal(proposal, integration),
+    created,
+    notice: proposal.notice ?? null,
+  };
 }
 
 /** The proposal's note, or null when it is gone. */

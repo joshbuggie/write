@@ -1,7 +1,14 @@
 import { afterEach, describe, expect, it } from "vitest";
 import type { ApiErrorBody } from "@/lib/api-contract";
 import { resetProposalBases } from "@/lib/server/proposal-bases";
-import { createFolder, createIntegration, createNote, listTree, readNote } from "@/lib/server/storage";
+import {
+  createFolder,
+  createIntegration,
+  createNote,
+  listTree,
+  readNote,
+  updateProposal,
+} from "@/lib/server/storage";
 import { withTempDataDir } from "@/lib/server/storage/test-utils";
 import * as mcp from "./agent/mcp/route";
 import * as notes from "./agent/notes/route";
@@ -70,6 +77,12 @@ describe("front matter from a harness", () => {
       const viaRest = await rest({ folder: "books", name: "Natasha", content: `﻿${FENCED}` });
       expect(viaRest.status).toBe(400);
       expect(((await viaRest.json()) as ApiErrorBody).error.message).toContain("without a leading ---");
+      const lone = await call("create_note", {
+        folder: "books",
+        name: "Natasha",
+        content: FENCED.replace(/\n/g, "\r"),
+      });
+      expect(lone.isError).toBe(true);
       expect(await bookNames()).toEqual([]);
     }));
 
@@ -148,5 +161,31 @@ describe("front matter from a harness", () => {
       expect(plain.isError).toBeUndefined();
       expect(plain.structuredContent).not.toHaveProperty("notice");
       expect((await readNote({ folder: "books", name: "Natasha" })).content).toBe(STORY);
+    }));
+
+  it("says it again on a retry whose first answer was lost, even after the owner decided", () =>
+    withTempDataDir(async () => {
+      const { call } = await setUp();
+      await createNote({ folder: "books", name: "Natasha", content: `---\ntags: [a]\n---\n${STORY}` });
+      const read = await call("read_note", { folder: "books", name: "Natasha" });
+      const args = {
+        folder: "books",
+        name: "Natasha",
+        baseVersion: read.structuredContent?.version as string,
+        content: STORY.replace("dawn", "dusk"),
+        requestId: "save-1",
+      };
+      const first = await call("propose_changes", args);
+      expect(first.content[0].text).toContain("The note keeps its own front matter");
+
+      const retry = await call("propose_changes", args);
+      expect(retry.content[0].text).toContain("you sent this before");
+      expect(retry.content[0].text).toContain("The note keeps its own front matter");
+      expect(retry.structuredContent?.notice).toBe(first.structuredContent?.notice);
+
+      await updateProposal(first.structuredContent?.id as string, (p) => ({ ...p, status: "dismissed" }));
+      const late = await call("propose_changes", args);
+      expect(late.structuredContent).toMatchObject({ status: "dismissed" });
+      expect(late.structuredContent?.notice).toBe(first.structuredContent?.notice);
     }));
 });

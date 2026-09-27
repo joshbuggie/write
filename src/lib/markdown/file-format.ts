@@ -23,10 +23,11 @@ export function splitFrontmatter(file: string): SplitFile {
 
 /**
  * Front matter and nothing after it: a note that shows no text. Harnesses make these by wrapping a note in
- * --- lines, so their writes are refused (docs/design-decisions.md#d31). A leading BOM is ignored.
+ * --- lines, so their writes are refused (docs/design-decisions.md#d31). A leading BOM is ignored, and line
+ * endings are made LF first, as storage does, so a note split by lone CRs can't get past it.
  */
 export function isOnlyFrontmatter(file: string): boolean {
-  const { frontmatter, body } = splitFrontmatter(file.replace(/^\uFEFF/, ""));
+  const { frontmatter, body } = splitFrontmatter(file.replace(/^\uFEFF/, "").replace(/\r\n?/g, "\n"));
   return frontmatter !== "" && body.trim() === "";
 }
 

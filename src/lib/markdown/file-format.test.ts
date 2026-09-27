@@ -133,6 +133,9 @@ describe("isOnlyFrontmatter", () => {
     expect(isOnlyFrontmatter("---\n# Title\n\nbody text\n---")).toBe(true);
     expect(isOnlyFrontmatter("\uFEFF---\ntags: [a]\n---\n\n  \n")).toBe(true);
     expect(isOnlyFrontmatter("+++\ntitle = 'x'\n+++\n")).toBe(true);
+    // Storage makes CRLF and lone CRs LF, so the check does too.
+    expect(isOnlyFrontmatter("---\r# Story\rBody\r---\r")).toBe(true);
+    expect(isOnlyFrontmatter("---\r\n# Story\r\nBody\r\n---\r\n")).toBe(true);
   });
 
   it("is false with text after the front matter, or without front matter", () => {

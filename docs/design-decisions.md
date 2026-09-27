@@ -859,12 +859,14 @@ wrong_password`. A wrong current password is `403 wrong_password`, not `401`, wh
     guessed.
   - **Front matter is never proposed.** It is split off all three versions, and the note's own is kept.
     Because that happens silently, a whole-note `content` whose front matter differs from the note's gets
-    a `notice` saying what was kept (MCP adds it to the tool's text).
+    a `notice` saying what was kept (MCP adds it to the tool's text). The notice is stored with the proposal,
+    so a retry whose first answer was lost says it too.
   - **A harness can't write a note that is only front matter.** An agent that wraps a note in `---` lines
     makes all of it front matter, and the note shows no text. That happened with Turnstone (2026-09-26):
     the story became properties, and resending it without the fences added it a second time as body. So
     `create_note` and whole-note proposals that are only front matter are refused with an error that says
-    to drop the leading `---` (`isOnlyFrontmatter` in `src/lib/markdown/file-format.ts`). They are refused,
+    to drop the leading `---` (`isOnlyFrontmatter` in `src/lib/markdown/file-format.ts`, which makes line endings LF first, as
+    storage does, so lone CRs can't get past it). They are refused,
     not saved with a warning, because the harness can fix it at once, and a warning would leave a broken
     note that only the owner can repair. `create_note` also answers with the sections it found and the
     front matter's size, so a harness can check its headings landed. The parser itself stays as it is
