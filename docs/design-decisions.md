@@ -588,7 +588,13 @@ In order, in `src/components/note/` and `src/components/editor/note-editor.tsx`:
   Heights use `dvh`, never `100vh`.
 - **iPhone specifics:**
   - `useKeyboardInset` publishes the keyboard height as `--kb`, so the formatting toolbar docks right
-    above the keyboard. iOS ignores `interactive-widget`.
+    above the keyboard. iOS ignores `interactive-widget`. "Keyboard open" means the visual viewport lost
+    more than 120 px, not `--kb > 0`: scrolling can pan the visual viewport to the bottom of the layout
+    viewport, where `--kb` reads 0 with the keyboard still up.
+  - Safari scrolls a tapped caret to just above the keyboard, right where the toolbar docks, so once the
+    keyboard is up the toolbar asks ProseMirror to scroll the caret clear of it. A backdrop under the
+    toolbar hides the page in the strip Safari keeps for its address pill: text there invites a tap on
+    the pill, which opens Safari's address bar and closes the keyboard.
   - Toolbar buttons call `preventDefault()` on pointer down, so the editor keeps focus and the keyboard
     stays open.
   - Touch devices (`pointer-coarse:`) get 44×44 targets everywhere. Fine pointers keep compact desktop

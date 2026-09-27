@@ -9,6 +9,9 @@ export type KeyboardInset = {
   zoomed: boolean;
 };
 
+/** More than Safari's own chrome ever takes from the viewport; any real keyboard takes more. */
+const KEYBOARD_MIN = 120;
+
 /**
  * Tracks the iPhone keyboard through `visualViewport` and publishes its height as the `--kb` CSS
  * variable on <html>, so the docked toolbar can sit on top of the keyboard with
@@ -29,7 +32,10 @@ export function useKeyboardInset(): KeyboardInset {
       frame = requestAnimationFrame(() => {
         const inset = Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop));
         root.style.setProperty("--kb", `${inset}px`);
-        const next = { keyboardOpen: inset > 0, zoomed: vv.scale > 1.01 };
+        // Not `inset > 0`: scrolling with the keyboard up can pan the visual viewport to the bottom of the
+        // layout viewport, and the inset then reads 0 while the keyboard is still up.
+        const covered = window.innerHeight - vv.height * vv.scale;
+        const next = { keyboardOpen: covered > KEYBOARD_MIN, zoomed: vv.scale > 1.01 };
         setState((prev) =>
           prev.keyboardOpen === next.keyboardOpen && prev.zoomed === next.zoomed ? prev : next,
         );
