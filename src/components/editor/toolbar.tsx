@@ -3,7 +3,7 @@
 import type { Editor } from "@tiptap/core";
 import { useEditorState } from "@tiptap/react";
 import { KeyboardOff, Sparkles } from "lucide-react";
-import { Fragment, type KeyboardEvent, type PointerEvent } from "react";
+import { Fragment, useEffect, type KeyboardEvent, type PointerEvent } from "react";
 import { createPortal } from "react-dom";
 import { cn } from "@/lib/cn";
 import { TEXT_COLUMN } from "./editor-skeleton";
@@ -105,13 +105,26 @@ export function DesktopToolbar({ editor, onOpenLink }: ToolbarProps) {
 export function KeyboardToolbar({ editor, onOpenLink, onAskAi }: ToolbarProps & { onAskAi?: () => void }) {
   const focused = useEditorState({ editor, selector: ({ editor: e }) => e.isFocused });
   const { keyboardOpen, zoomed } = useKeyboardInset();
+
+  // Safari scrolls a tapped caret to just above the keyboard, which is where this bar docks. Once the
+  // keyboard is up, scroll again so the caret clears the bar (CARET_MARGIN in visual-editor.tsx).
+  useEffect(() => {
+    if (keyboardOpen && editor.isFocused) editor.commands.scrollIntoView();
+  }, [editor, keyboardOpen]);
+
   if (!focused || zoomed) return null;
 
   return createPortal(
     <div
       className={cn(
         "fixed inset-x-0 bottom-[var(--kb)] z-30 border-t border-line bg-canvas/95 backdrop-blur md:hidden",
-        !keyboardOpen && "pb-[env(safe-area-inset-bottom)]",
+        // Safari keeps a strip between the visual viewport and the keyboard for its address pill, and the
+        // page shows through it. Text there invites a tap that lands on the pill, which opens Safari's
+        // address bar and closes the keyboard, so a backdrop covers it (best effort: Safari clips it once
+        // the page is scrolled to the bottom of the layout viewport).
+        keyboardOpen
+          ? "after:absolute after:inset-x-0 after:top-full after:h-16 after:bg-canvas"
+          : "pb-[env(safe-area-inset-bottom)]",
       )}
     >
       <div className="flex h-11 items-center">
