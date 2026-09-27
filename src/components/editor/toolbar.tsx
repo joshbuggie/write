@@ -107,10 +107,15 @@ export function KeyboardToolbar({ editor, onOpenLink, onAskAi }: ToolbarProps & 
   const { keyboardOpen, zoomed } = useKeyboardInset();
 
   // Safari scrolls a tapped caret to just above the keyboard, which is where this bar docks. Once the
-  // keyboard is up, scroll again so the caret clears the bar (CARET_MARGIN in visual-editor.tsx).
+  // keyboard is up and the body has focus, scroll again so the caret clears the bar (CARET_MARGIN in
+  // visual-editor.tsx). `focused` matters on its own: moving from the title to the body keeps the
+  // keyboard up, and this bar only appears once the body has focus, right on top of the caret. The frame
+  // lets a tap's selection reach ProseMirror first, so the scroll targets the new caret.
   useEffect(() => {
-    if (keyboardOpen && editor.isFocused) editor.commands.scrollIntoView();
-  }, [editor, keyboardOpen]);
+    if (!keyboardOpen || !focused) return;
+    const frame = requestAnimationFrame(() => editor.commands.scrollIntoView());
+    return () => cancelAnimationFrame(frame);
+  }, [editor, keyboardOpen, focused]);
 
   if (!focused || zoomed) return null;
 
