@@ -834,7 +834,10 @@ wrong_password`. A wrong current password is `403 wrong_password`, not `401`, wh
   in. So the submit button stays disabled until React hydrates (`useHydrated` in
   `src/lib/use-hydrated.ts`); a disabled default button also blocks Enter-to-submit. The forms say
   `method="post"` as a backstop, so a native submit that slips through anyway keeps the password out of
-  the URL.
+  the URL. A disabled button alone would leave you stuck on a dead page, so `LoadingHint` says "Still
+  loading… reload the page" until hydration. It is hidden for the first 2.5 seconds so a normal load
+  never flashes it, and shows at once when the stylesheet was blocked too. No `<noscript>` message: the
+  app needs JavaScript anyway, and this failure has scripts on but not loaded.
 - Code: `src/lib/server/auth.ts`, `password-guard.ts`, `password-hash.ts`,
   `src/lib/server/storage/account.ts`, `src/lib/account.ts`, `src/app/setup/`, `src/app/login/` and
   `src/app/api/auth/`.

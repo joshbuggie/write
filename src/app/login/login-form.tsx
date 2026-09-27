@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useState, type FormEvent } from "react";
+import { LoadingHint } from "@/components/auth/loading-hint";
 import { Button } from "@/components/ui/button";
 import { TextField } from "@/components/ui/text-field";
 import { api, isApiError } from "@/lib/api-client";
@@ -96,6 +97,7 @@ export function LoginForm({ next }: { next?: string }) {
       <Button type="submit" variant="primary" pending={pending} disabled={!hydrated} className="w-full">
         Sign in
       </Button>
+      <LoadingHint />
     </form>
   );
 }

@@ -79,6 +79,20 @@
   --font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
 }
 
+@theme {
+  /* Hidden for 2.5s, then fades in (LoadingHint). The delay survives prefers-reduced-motion. `display`
+     keeps it from taking space meanwhile, so the card doesn't shrink when it goes; browsers that can't
+     animate `display` just reserve the line. */
+  --animate-appear-late: appear-late 150ms ease-out 2.5s backwards;
+  @keyframes appear-late {
+    from {
+      display: none;
+      opacity: 0;
+      visibility: hidden;
+    }
+  }
+}
+
 @layer base {
   html {
     -webkit-text-size-adjust: 100%;
