@@ -50,18 +50,21 @@ export function Rolodex({ heads, opacity, minTop, onPick, ref }: RolodexProps) {
   const hideTimer = useRef(0);
 
   useImperativeHandle(ref, () => ({
-    turn(f) {
+    turn(index) {
+      // After the last heading, index runs on toward the end of the note; the list stays on that heading.
+      const f = Math.min(index, heads.length - 1);
+      const at = Math.round(f);
       rows.current.forEach((row, i) => {
         if (!row) return;
         const angle = (i - f) * STEP;
         const shown = Math.abs(angle) <= CUT;
         row.style.visibility = shown ? "visible" : "hidden";
-        row.toggleAttribute("data-current", Math.abs(i - f) < 0.5);
+        row.toggleAttribute("data-current", i === at);
         if (!shown) return;
         row.style.transform = `rotateX(${-angle}deg) translateZ(${RADIUS}px)`;
         row.style.opacity = String(1 - Math.abs(angle) / (CUT * 1.3));
       });
-      if (count.current) count.current.textContent = `${Math.round(f) + 1}/${heads.length}`;
+      if (count.current) count.current.textContent = `${at + 1}/${heads.length}`;
     },
     show(clientY, lifted) {
       const el = box.current;

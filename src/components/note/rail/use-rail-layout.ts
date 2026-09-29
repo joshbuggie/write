@@ -81,7 +81,8 @@ const SETTLE_MS = 250;
 
 /**
  * Measures the note for the rail, and again whenever the text, the window or the note's layout changes
- * (typing pauses, the editor loads, a banner appears). Returns the scroll area with the layout.
+ * (typing pauses, the editor loads, a banner appears). Returns the scroll area with the layout; a resize
+ * across 768 px changes the area, and the rail follows it.
  */
 export function useRailLayout(
   root: HTMLElement | null,
@@ -94,12 +95,13 @@ export function useRailLayout(
 
   useEffect(() => {
     if (!root) return;
-    const area = scrollAreaOf(root);
     let timer = 0;
     let frame = 0;
     const update = () => {
       cancelAnimationFrame(frame);
       frame = requestAnimationFrame(() => {
+        // Looked up on every measure: crossing 768 px moves scrolling between the page and <main>.
+        const area = scrollAreaOf(root);
         const next = measure(root, area, titleRef.current);
         setState((prev) =>
           prev.area === area && sameLayout(prev.layout, next) ? prev : { area, layout: next },

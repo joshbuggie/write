@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, type RefObject } from "react";
-import { clamp, indexAt, stepFrom } from "@/lib/rail/geometry";
+import { clamp, indexAt, landingIndex, stepFrom } from "@/lib/rail/geometry";
 import type { Glider } from "./glider";
 import type { RolodexHandle } from "./rolodex";
 import type { RailLayout } from "./use-rail-layout";
@@ -66,7 +66,8 @@ export function useRailScrub({ rail, track, tip, area, glider, layout, rolodex, 
       tip.hidden = true;
       rolodex.current?.setSpeed("");
       rolodex.current?.show(e.clientY, scrub.touch);
-      rolodex.current?.turn(indexAt(layout.current?.stops ?? [0], area.scrollTop));
+      if (layout.current)
+        rolodex.current?.turn(indexAt(layout.current.stops, area.scrollTop, layout.current.max));
     };
 
     const onMove = (e: PointerEvent) => {
@@ -96,8 +97,10 @@ export function useRailScrub({ rail, track, tip, area, glider, layout, rolodex, 
       scrub = null;
       rail.toggleAttribute("data-active", false);
       rolodex.current?.setSpeed("");
-      const stops = layout.current?.stops ?? [0];
-      land(indexAt(stops, area.scrollTop), () => rolodex.current?.hide(450));
+      // After the last heading (anywhere, in a note without headings) the note stays where it was dragged.
+      const target = landingIndex(layout.current?.stops ?? [0], area.scrollTop);
+      if (target === null) rolodex.current?.hide(250);
+      else land(target, () => rolodex.current?.hide(450));
     };
 
     const onWheel = (e: WheelEvent) => {
@@ -105,17 +108,16 @@ export function useRailScrub({ rail, track, tip, area, glider, layout, rolodex, 
       e.stopPropagation(); // the glider treats a wheel reaching window as the reader taking over
       wheel += e.deltaY;
       if (Math.abs(wheel) < WHEEL_STEP) return;
-      const stops = layout.current?.stops ?? [0];
-      const target = clamp(
-        stepFrom(aimed ?? indexAt(stops, area.scrollTop), wheel > 0 ? 1 : -1),
-        0,
-        stops.length - 1,
-      );
+      const current = layout.current;
+      if (!current) return;
+      const from = aimed ?? indexAt(current.stops, area.scrollTop, current.max);
+      // One past the last heading is the end of the note (see land).
+      const target = clamp(stepFrom(from, wheel > 0 ? 1 : -1), 0, current.stops.length);
       wheel = 0;
       aimed = target;
       tip.hidden = true;
       rolodex.current?.show(e.clientY, false);
-      rolodex.current?.turn(indexAt(stops, area.scrollTop));
+      rolodex.current?.turn(indexAt(current.stops, area.scrollTop, current.max));
       land(target, () => {
         aimed = null;
         rolodex.current?.hide(700);

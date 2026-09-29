@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { indexAt, railStops, stepFrom, thumbSize } from "./geometry";
+import { indexAt, landingIndex, railStops, stepFrom, thumbSize } from "./geometry";
 
 describe("railStops", () => {
   it("puts the title at the top and each heading just below the sticky header", () => {
@@ -28,12 +28,36 @@ describe("indexAt", () => {
   it("never reads a whole step before the next heading is reached", () => {
     expect(indexAt(stops, 399)).toBeLessThan(1);
   });
+
+  it("runs on toward the end of the note after the last heading", () => {
+    expect(indexAt([0, 400], 700, 1000)).toBe(1.5);
+    expect(indexAt([0, 400], 1000, 1000)).toBeLessThan(2);
+    expect(indexAt([0], 300, 600)).toBe(0.5); // no headings: progress through the whole note
+  });
+});
+
+describe("landingIndex", () => {
+  it("lands on the nearest heading", () => {
+    expect(landingIndex([0, 400, 800], 150)).toBe(0);
+    expect(landingIndex([0, 400, 800], 650)).toBe(2);
+    expect(landingIndex([0, 400, 800], 800)).toBe(2);
+  });
+
+  it("keeps the dragged position after the last heading, and in a note without headings", () => {
+    expect(landingIndex([0, 400, 800], 950)).toBeNull();
+    expect(landingIndex([0], 1200)).toBeNull();
+    expect(landingIndex([0], 0)).toBe(0);
+  });
 });
 
 describe("stepFrom", () => {
   it("goes to the next heading", () => {
     expect(stepFrom(2, 1)).toBe(3);
     expect(stepFrom(2.6, 1)).toBe(3);
+  });
+
+  it("goes from partway after the last heading back to it, not past it", () => {
+    expect(stepFrom(indexAt([0, 400], 700, 1000), -1)).toBe(1);
   });
 
   it("goes back to the current section's heading before the one before it", () => {

@@ -1042,7 +1042,9 @@ name, kind, folders, tokenHash, tokenHint, createdAt }] }`. Unlike `settings.jso
 - **What it is.** A rail at the right edge of a note replaces the scrollbar: a mark per heading (levels
   1–3, the title first), a thumb, and a heading list that turns like a rolodex beside the pointer while
   you drag. Letting go lands on the nearest heading, just below the sticky header, and a short accent
-  mark beside it fades out. Dragging further left of the rail slows the scrub (½, ¼, then fine), as
+  mark beside it fades out. Past the last heading there is nothing further down to land on, and snapping
+  back up would undo the drag, so the note stays where it was dragged; that covers a note without headings
+  entirely. Stepping down from the last heading goes to the end of the note. Dragging further left of the rail slows the scrub (½, ¼, then fine), as
   scrubbing video on iOS does. With a mouse, hovering names the heading under the pointer and the wheel
   steps one heading at a time; ⌥↑/⌥↓ step too, but only while focus isn't in the text, where those keys
   move the caret.
@@ -1054,7 +1056,8 @@ name, kind, folders, tokenHash, tokenHint, createdAt }] }`. Unlike `settings.jso
   skipped) and lays out a hidden copy of the text with the textarea's wrapping to find where each line
   sits. Notes over 300 KB skip that copy and get a rail without marks.
 - **Where it shows.** Only on notes that scroll by more than half a screen. It follows whatever scrolls
-  the note ([D25](#d25)): the `<main>` pane from 768 px up, the page on phones. The sticky header and
+  the note ([D25](#d25)): the `<main>` pane from 768 px up, the page on phones, looked up again on every
+  measure because a resize across 768 px switches between them. The sticky header and
   toolbar carry `data-sticky-top`, so the rail and its landings stay below them. On a touch screen the rail
   steps aside while a text field has focus: the keyboard and docked toolbar take the bottom of the screen,
   and a thumb at the right edge is placing the caret. Phones also give the text column extra right padding

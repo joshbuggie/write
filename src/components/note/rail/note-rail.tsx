@@ -44,11 +44,13 @@ export function NoteRail({ root, titleRef }: NoteRailProps) {
   const glider = useMemo(() => (area ? createGlider(area) : null), [area]);
   useEffect(() => () => glider?.cancel(), [glider]);
 
+  /** Glides to heading `index` (rounded) and marks it; one past the last heading is the end of the note. */
   const land = useCallback(
     (index: number, then?: () => void) => {
       const current = layoutRef.current;
       if (!current || !area || !glider) return;
-      const i = clamp(Math.round(index), 0, current.heads.length - 1);
+      const i = Math.max(0, Math.round(index));
+      if (i >= current.heads.length) return glider.to(current.max, then);
       glider.to(current.stops[i], () => {
         const { top, left, height } = current.heads[i];
         if (i > 0)
@@ -71,13 +73,15 @@ export function NoteRail({ root, titleRef }: NoteRailProps) {
     let current = -1;
     const sync = () => {
       frame = 0;
-      const f = indexAt(layout.stops, area.scrollTop);
+      const f = indexAt(layout.stops, area.scrollTop, layout.max);
       track.style.setProperty("--thumb", `${thumbSize(layout.visible, layout.total, track.clientHeight)}px`);
       track.style.setProperty("--pos", String(layout.max ? clamp(area.scrollTop / layout.max, 0, 1) : 0));
       const open = rolodex.current?.isOpen() ?? false;
-      if (Math.round(f) !== current) {
+      // Past the last heading, f runs on toward the end; the last mark stays lit.
+      const at = Math.min(Math.round(f), layout.heads.length - 1);
+      if (at !== current) {
         marks[current]?.removeAttribute("data-on");
-        current = Math.round(f);
+        current = at;
         marks[current]?.setAttribute("data-on", "");
         if (open && "vibrate" in navigator) navigator.vibrate(3); // a tick per heading, where phones allow it
       }
@@ -102,8 +106,7 @@ export function NoteRail({ root, titleRef }: NoteRailProps) {
       const current = layoutRef.current;
       if (!current || document.querySelector("dialog:modal")) return;
       e.preventDefault();
-      const next = stepFrom(indexAt(current.stops, area.scrollTop), e.key === "ArrowDown" ? 1 : -1);
-      land(clamp(next, 0, current.heads.length - 1));
+      land(stepFrom(indexAt(current.stops, area.scrollTop, current.max), e.key === "ArrowDown" ? 1 : -1));
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);

@@ -20,18 +20,32 @@ export function railStops(tops: number[], inset: number, max: number): number[] 
   });
 }
 
-/** The fractional heading index at scroll position `s`: the last stop reached, plus progress to the next. */
-export function indexAt(stops: number[], s: number): number {
+/**
+ * The fractional heading index at scroll position `s`: the last stop reached, plus progress to the next.
+ * Past the last heading, progress runs toward `end` (the most the page scrolls), so the text after the
+ * last heading reads as partway into its section rather than at its heading.
+ */
+export function indexAt(stops: number[], s: number, end = stops[stops.length - 1]): number {
   let i = 0;
   while (i + 1 < stops.length && stops[i + 1] <= s + 0.5) i++;
-  if (i === stops.length - 1) return i;
-  const gap = stops[i + 1] - stops[i];
+  const next = i + 1 < stops.length ? stops[i + 1] : end;
+  const gap = next - stops[i];
   return gap > 0 ? i + clamp((s - stops[i]) / gap, 0, 0.999) : i;
 }
 
 /**
+ * The heading to land on when a scrub ends at `s`: the nearest one, or null when `s` is past the last
+ * heading. There is nothing further down to land on, and snapping back up would undo the drag; a note
+ * without headings (only the title's stop, at the top) keeps whatever position it was dragged to.
+ */
+export function landingIndex(stops: number[], s: number): number | null {
+  return s > stops[stops.length - 1] + 0.5 ? null : Math.round(indexAt(stops, s));
+}
+
+/**
  * The heading one step from fractional index `f`. Going back from partway into a section lands on that
- * section's own heading first, the way "previous" works in a document outline.
+ * section's own heading first, the way "previous" works in a document outline. One past the last heading
+ * means the end of the note.
  */
 export function stepFrom(f: number, dir: 1 | -1): number {
   const i = Math.floor(f);
