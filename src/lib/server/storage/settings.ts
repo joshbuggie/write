@@ -1,5 +1,5 @@
 import type { AiSettings } from "@/lib/ai/settings";
-import type { ConnectionInput, SaveSettingsRequest } from "@/lib/api-contract";
+import type { ConnectionInput, SaveSettingsRequest, SettingsResponse } from "@/lib/api-contract";
 import { configFile } from "./config";
 import { readConfigText, writeConfigText } from "./config-files";
 import { withWriteLock } from "./mutex";
@@ -9,16 +9,17 @@ import {
   serializeSettings,
   type StoredAiSettings,
   type StoredConnection,
+  type StoredSettings,
   withDefaultConnection,
 } from "./settings-format";
 
 /**
- * The AI assistant's settings, in `<configDir>/settings.json` (docs/design-decisions.md#d29). That file is
- * the only place API keys live: the server reads them to call a model, and the browser only ever gets
+ * write's settings, in `<configDir>/settings.json`: the AI assistant's (docs/design-decisions.md#d29) and
+ * the appearance settings (docs/design-decisions.md#d32). That file is the only place API keys live: the server reads them to call a model, and the browser only ever gets
  * toAiSettingsView(), which carries at most each key's last four characters.
  */
 
-export type { StoredAiSettings, StoredConnection };
+export type { StoredAiSettings, StoredConnection, StoredSettings };
 
 const settingsFile = () => configFile("settings.json");
 
@@ -36,12 +37,17 @@ function keyFor(input: ConnectionInput, saved: StoredConnection | undefined): st
 }
 
 /**
- * The saved AI settings, keys included (server-only). A missing file or config folder reads as the
- * defaults and nothing is created; a file that isn't valid JSON throws storage_unavailable.
+ * Everything in the settings file, keys included (server-only). A missing file or config folder reads as
+ * the defaults and nothing is created; a file that isn't valid JSON throws storage_unavailable.
  */
-export async function readAiSettings(): Promise<StoredAiSettings> {
+export async function readSettings(): Promise<StoredSettings> {
   const file = await settingsFile();
   return parseSettingsText(await readConfigText(file), file);
+}
+
+/** The saved AI settings, keys included (server-only); see readSettings. */
+export async function readAiSettings(): Promise<StoredAiSettings> {
+  return (await readSettings()).ai;
 }
 
 /** Keys shorter than this (a LAN server's "1234", say) show no characters: four would give most away. */
@@ -61,17 +67,25 @@ export function toAiSettingsView(s: StoredAiSettings): AiSettings {
   };
 }
 
+/** The whole file as the browser may see it: keys become hints (see toAiSettingsView). */
+export const toSettingsView = (s: StoredSettings): SettingsResponse => ({
+  ai: toAiSettingsView(s.ai),
+  appearance: s.appearance,
+});
+
 /**
- * Saves the Settings dialog's AI settings and returns the browser's view of them. Keys are merged in (see
- * keyFor), so the browser never needs the saved key. A corrupt file makes this throw rather than be
- * overwritten, and identical bytes are never rewritten.
+ * Saves the Settings dialog and returns the browser's view of what was saved. Keys are merged in (see
+ * keyFor), so the browser never needs the saved key. A request without `appearance` (a tab opened before
+ * it existed) keeps the saved one. A corrupt file makes this throw rather than be overwritten, and
+ * identical bytes are never rewritten.
  */
-export function saveAiSettings(input: SaveSettingsRequest["ai"]): Promise<AiSettings> {
+export function saveSettings({ ai: input, appearance }: SaveSettingsRequest): Promise<SettingsResponse> {
   return withWriteLock(async () => {
     const file = await settingsFile();
     const text = await readConfigText(file);
-    const saved = new Map(parseSettingsText(text, file).connections.map((c) => [c.id, c]));
-    const next = withDefaultConnection({
+    const current = parseSettingsText(text, file);
+    const saved = new Map(current.ai.connections.map((c) => [c.id, c]));
+    const ai = withDefaultConnection({
       enabled: input.enabled,
       connections: input.connections.map((c) => ({
         id: c.id,
@@ -87,10 +101,16 @@ export function saveAiSettings(input: SaveSettingsRequest["ai"]): Promise<AiSett
       instructions: input.instructions,
       quickActions: input.quickActions.map(({ id, label, prompt, apply }) => ({ id, label, prompt, apply })),
     });
+    const next: StoredSettings = { ai, appearance: appearance ?? current.appearance };
     const bytes = serializeSettings(next);
     if (bytes !== text) await writeConfigText(file, bytes);
-    return toAiSettingsView(next);
+    return toSettingsView(next);
   });
+}
+
+/** Saves the AI settings alone, keeping the saved appearance settings; see saveSettings. */
+export async function saveAiSettings(ai: SaveSettingsRequest["ai"]): Promise<AiSettings> {
+  return (await saveSettings({ ai })).ai;
 }
 
 /**

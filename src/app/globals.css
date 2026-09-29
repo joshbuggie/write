@@ -84,6 +84,13 @@
      keeps it from taking space meanwhile, so the card doesn't shrink when it goes; browsers that can't
      animate `display` just reserve the line. */
   --animate-appear-late: appear-late 150ms ease-out 2.5s backwards;
+  /* The mark beside a heading the note rail just landed on (docs/design-decisions.md#d32). */
+  --animate-rail-landed: rail-landed 1.2s ease-out forwards;
+  @keyframes rail-landed {
+    to {
+      opacity: 0;
+    }
+  }
   @keyframes appear-late {
     from {
       display: none;
@@ -115,6 +122,13 @@
   [role="button"] {
     -webkit-tap-highlight-color: transparent;
     touch-action: manipulation;
+  }
+  /* The note rail replaces the pane's scrollbar (docs/design-decisions.md#d32). */
+  main:has([data-note-rail]) {
+    scrollbar-width: none;
+  }
+  main:has([data-note-rail])::-webkit-scrollbar {
+    display: none;
   }
   /* Native <dialog> backdrop (components/ui/dialog.tsx). Always a darkening veil, in both themes. */
   dialog::backdrop {

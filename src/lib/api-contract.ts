@@ -1,4 +1,5 @@
 import type { AiSettings, ProviderId } from "./ai/settings";
+import type { AppearanceSettings } from "./appearance";
 import type { IntegrationKind, IntegrationView, LauncherInput } from "./integrations";
 import type { SectionEdit } from "./proposals/apply";
 import type { ChangeDecision, ProposalReview, ProposalStatus } from "./proposals/types";
@@ -166,6 +167,7 @@ export interface SetupRequest {
 /** `GET` and `PUT /api/settings`. API keys never appear: each connection only carries `keyHint`. */
 export interface SettingsResponse {
   ai: AiSettings;
+  appearance: AppearanceSettings;
 }
 
 /**
@@ -182,9 +184,13 @@ export interface ConnectionInput {
   clearKey?: boolean;
 }
 
-/** `PUT /api/settings`: the whole AI settings object, with connections as ConnectionInput. */
+/**
+ * `PUT /api/settings`: the whole AI settings object, with connections as ConnectionInput, and the
+ * appearance settings. Without `appearance` (a tab opened before it existed) the saved ones stay.
+ */
 export interface SaveSettingsRequest {
   ai: Omit<AiSettings, "connections"> & { connections: ConnectionInput[] };
+  appearance?: AppearanceSettings;
 }
 
 /** `POST /api/ai/models` ("Test connection"): a connection from the form, saved or not. */

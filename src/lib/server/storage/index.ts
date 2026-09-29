@@ -50,9 +50,13 @@ export { createNoteFor, createdRecordFor, dismissCreatedRecord, type CreatedReco
 export { latestJob, listJobs, saveJob, type JobRef, type StoredJob } from "./jobs";
 export {
   readAiSettings,
+  readSettings,
   saveAiSettings,
+  saveSettings,
   apiKeyFor,
   toAiSettingsView,
+  toSettingsView,
   type StoredAiSettings,
   type StoredConnection,
+  type StoredSettings,
 } from "./settings";
