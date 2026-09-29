@@ -14,6 +14,7 @@ import type {
   UpdateNoteRequest,
 } from "@/lib/api-contract";
 import { AI_LIMITS, PROVIDER_IDS, type QuickAction } from "@/lib/ai/settings";
+import { type AppearanceSettings, isRailOpacity } from "@/lib/appearance";
 
 /**
  * Hand-written type guards for request bodies (no schema library, see docs/design-decisions.md#d4). They
@@ -127,9 +128,16 @@ function isQuickAction(v: unknown): v is QuickAction {
 const isArrayOf = <T>(v: unknown, max: number, item: (x: unknown) => x is T): v is T[] =>
   Array.isArray(v) && v.length <= max && v.every(item);
 
-/** The whole AI settings object from the Settings dialog; ids must be unique and the default must exist. */
+/** The appearance settings from the Settings dialog: every field present and in range. */
+const isAppearance = (v: unknown): v is AppearanceSettings => isObject(v) && isRailOpacity(v.railOpacity);
+
+/**
+ * The Settings dialog's whole settings object: AI connection ids must be unique and the default must exist;
+ * appearance is optional (see SaveSettingsRequest).
+ */
 export function isSaveSettingsRequest(v: unknown): v is SaveSettingsRequest {
   if (!isObject(v) || !isObject(v.ai)) return false;
+  if (v.appearance !== undefined && !isAppearance(v.appearance)) return false;
   const ai = v.ai;
   if (
     !isBoolean(ai.enabled) ||

@@ -5,11 +5,12 @@ import {
   PROVIDER_IDS,
   type QuickAction,
 } from "@/lib/ai/settings";
+import { type AppearanceSettings, DEFAULT_APPEARANCE, isRailOpacity } from "@/lib/appearance";
 import { StorageError } from "./errors";
 
 /**
- * The on-disk format of `<configDir>/settings.json` (docs/design-decisions.md#d29):
- * `{ "version": 1, "ai": StoredAiSettings }`. Parsing is forgiving, because the file may be edited by hand
+ * The on-disk format of `<configDir>/settings.json` (docs/design-decisions.md#d29, #d32):
+ * `{ "version": 1, "ai": StoredAiSettings, "appearance": AppearanceSettings }`. Parsing is forgiving, because the file may be edited by hand
  * or written by another version of write, except that a file that isn't a JSON object at all throws, so a
  * save never overwrites something it didn't understand.
  */
@@ -21,6 +22,9 @@ export type StoredConnection = Omit<AiConnection, "keyHint"> & { apiKey: string 
 
 /** The AI settings as saved on disk. Server-only: send toAiSettingsView() to the browser. */
 export type StoredAiSettings = Omit<AiSettings, "connections"> & { connections: StoredConnection[] };
+
+/** Everything in the settings file. Server-only, because `ai` holds the API keys. */
+export type StoredSettings = { ai: StoredAiSettings; appearance: AppearanceSettings };
 
 type Fields = Record<string, unknown>;
 const isObject = (v: unknown): v is Fields => typeof v === "object" && v !== null && !Array.isArray(v);
@@ -82,7 +86,7 @@ function parseQuickAction(v: unknown): QuickAction | null {
 }
 
 /** Bad parts fall back to defaults; malformed connections (and repeated ids) and quick actions are dropped. */
-function parseSettings(raw: Fields): StoredAiSettings {
+function parseAiSettings(raw: Fields): StoredAiSettings {
   const ai = isObject(raw.ai) ? raw.ai : {};
   const d = DEFAULT_AI_SETTINGS;
   const connections: StoredConnection[] = [];
@@ -104,15 +108,25 @@ function parseSettings(raw: Fields): StoredAiSettings {
   });
 }
 
+/** A missing or out-of-range opacity (a file from before appearance settings, a hand edit) is the default. */
+function parseAppearance(raw: Fields): AppearanceSettings {
+  const appearance = isObject(raw.appearance) ? raw.appearance : {};
+  return {
+    railOpacity: isRailOpacity(appearance.railOpacity)
+      ? appearance.railOpacity
+      : DEFAULT_APPEARANCE.railOpacity,
+  };
+}
+
 const fixOrDelete = "Fix it or delete it (deleting it resets the AI settings and API keys).";
 
 /**
  * The settings in a file's text; null (no file) or a blank file means the defaults. Throws
  * storage_unavailable for text that isn't a JSON object, naming `file` so the user knows what to fix.
  */
-export function parseSettingsText(text: string | null, file: string): StoredAiSettings {
+export function parseSettingsText(text: string | null, file: string): StoredSettings {
   const json = text?.trim(); // trim() also drops the BOM some Windows editors add, which JSON.parse refuses
-  if (!json) return defaults();
+  if (!json) return { ai: defaults(), appearance: { ...DEFAULT_APPEARANCE } };
   let raw: unknown;
   try {
     raw = JSON.parse(json);
@@ -122,9 +136,9 @@ export function parseSettingsText(text: string | null, file: string): StoredAiSe
   if (!isObject(raw)) {
     throw new StorageError("storage_unavailable", `${file} doesn't hold a settings object. ${fixOrDelete}`);
   }
-  return parseSettings(raw);
+  return { ai: parseAiSettings(raw), appearance: parseAppearance(raw) };
 }
 
 /** 2-space JSON with a final newline. Field order is the order the settings object was built in. */
-export const serializeSettings = (s: StoredAiSettings): string =>
-  `${JSON.stringify({ version: FILE_VERSION, ai: s }, null, 2)}\n`;
+export const serializeSettings = (s: StoredSettings): string =>
+  `${JSON.stringify({ version: FILE_VERSION, ai: s.ai, appearance: s.appearance }, null, 2)}\n`;

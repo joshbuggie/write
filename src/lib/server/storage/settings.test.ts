@@ -2,9 +2,17 @@ import { chmod, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { DEFAULT_AI_SETTINGS } from "@/lib/ai/settings";
+import { DEFAULT_APPEARANCE } from "@/lib/appearance";
 import type { ConnectionInput, SaveSettingsRequest } from "@/lib/api-contract";
 import { StorageError } from "./errors";
-import { apiKeyFor, readAiSettings, saveAiSettings, toAiSettingsView } from "./settings";
+import {
+  apiKeyFor,
+  readAiSettings,
+  readSettings,
+  saveAiSettings,
+  saveSettings,
+  toAiSettingsView,
+} from "./settings";
 import { withTempDataDir } from "./test-utils";
 
 const configDir = () => process.env.WRITE_CONFIG_DIR as string;
@@ -133,6 +141,24 @@ describe("readAiSettings", () => {
     }));
 });
 
+describe("appearance settings", () => {
+  it("read as the defaults when missing or out of range", () =>
+    withTempDataDir(async () => {
+      expect((await readSettings()).appearance).toEqual(DEFAULT_APPEARANCE);
+      await writeFile(settingsPath(), JSON.stringify({ version: 1, appearance: { railOpacity: 5 } }));
+      expect((await readSettings()).appearance).toEqual(DEFAULT_APPEARANCE);
+      await writeFile(settingsPath(), JSON.stringify({ version: 1, appearance: { railOpacity: 45 } }));
+      expect((await readSettings()).appearance).toEqual({ railOpacity: 45 });
+    }));
+
+  it("survive saving the AI settings alone", () =>
+    withTempDataDir(async () => {
+      await saveSettings({ ai: input([]), appearance: { railOpacity: 60 } });
+      await saveAiSettings(input([conn({ apiKey: KEY })]));
+      expect(await readSettings()).toMatchObject({ appearance: { railOpacity: 60 } });
+    }));
+});
+
 describe("saveAiSettings", () => {
   it("round-trips, trimming fields, as 2-space JSON with a final newline", () =>
     withTempDataDir(async () => {
@@ -166,7 +192,9 @@ describe("saveAiSettings", () => {
       expect(view).toEqual(toAiSettingsView(stored));
 
       const text = await readFile(settingsPath(), "utf8");
-      expect(text).toBe(`${JSON.stringify({ version: 1, ai: stored }, null, 2)}\n`);
+      expect(text).toBe(
+        `${JSON.stringify({ version: 1, ai: stored, appearance: DEFAULT_APPEARANCE }, null, 2)}\n`,
+      );
       expect(text.startsWith('{\n  "version": 1,\n  "ai": {\n    "enabled": true,')).toBe(true);
     }));
 

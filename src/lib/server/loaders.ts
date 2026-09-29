@@ -2,7 +2,9 @@ import { cookies } from "next/headers";
 import { notFound, redirect } from "next/navigation";
 import { connection } from "next/server";
 import { cache } from "react";
-import { type AiSettings, DEFAULT_AI_SETTINGS } from "@/lib/ai/settings";
+import { DEFAULT_AI_SETTINGS } from "@/lib/ai/settings";
+import type { SettingsResponse } from "@/lib/api-contract";
+import { DEFAULT_APPEARANCE } from "@/lib/appearance";
 import { SESSION_COOKIE } from "@/lib/constants";
 import { loginHref, SETUP_HREF } from "@/lib/routes";
 import type { NoteSendState } from "@/lib/launch/types";
@@ -16,10 +18,10 @@ import {
   ensureBootstrap,
   listTree,
   mostRecentNote,
-  readAiSettings,
   readNote,
+  readSettings,
   StorageError,
-  toAiSettingsView,
+  toSettingsView,
 } from "./storage";
 
 /**
@@ -88,17 +90,18 @@ export const loadUsername = cache(async (): Promise<string | null> => {
 });
 
 /**
- * The AI settings as the browser may see them (keys reduced to their last four characters). A broken
- * settings file must never take the notes down, so any error is logged and the assistant reads as off.
+ * The settings as the browser may see them (keys reduced to their last four characters). A broken
+ * settings file must never take the notes down, so any error is logged and everything reads as the
+ * defaults, with the assistant off.
  */
-export const loadAiSettings = cache(async (): Promise<AiSettings> => {
+export const loadSettings = cache(async (): Promise<SettingsResponse> => {
   await connection();
   await requirePageAuth();
   try {
-    return toAiSettingsView(await readAiSettings());
+    return toSettingsView(await readSettings());
   } catch (err) {
-    console.error("[write] Couldn't read the AI settings, so the assistant is off:", err);
-    return DEFAULT_AI_SETTINGS;
+    console.error("[write] Couldn't read the settings, so the assistant is off:", err);
+    return { ai: DEFAULT_AI_SETTINGS, appearance: DEFAULT_APPEARANCE };
   }
 });
 

@@ -23,7 +23,7 @@ files.
   [D18](#d18) opening a note · [D19](#d19) autosave · [D20](#d20) conflicts · [D21](#d21) rename ·
   [D22](#d22) paste and links
 - Files in and out: [D23](#d23) downloads · [D24](#d24) import
-- UI: [D25](#d25) responsive layout · [D26](#d26) tokens and theme
+- UI: [D25](#d25) responsive layout · [D26](#d26) tokens and theme · [D32](#d32) the note rail
 - Self-hosting: [D27](#d27) build output and health · [D28](#d28) configuration
 - Optional features: [D29](#d29) the AI assistant · [D31](#d31) integrations and proposals from agent harnesses
 
@@ -656,8 +656,8 @@ In order, in `src/components/note/` and `src/components/editor/note-editor.tsx`:
   directory, or `/data` in Docker), `WRITE_CONFIG_DIR` (default `./config`, or `/config` in Docker) and
   `WRITE_AUTH` (`off` turns sign-in off, [D30](#d30)). All are read at runtime, so they can live in `.env.local` for `npm start` /
   `npm run dev`. How the server runs stays in the environment.
-- **One settings file.** What people change in the app, today only the AI assistant's settings
-  ([D29](#d29)), is saved by the Settings dialog (`PUT /api/settings`) in `WRITE_CONFIG_DIR/settings.json`
+- **One settings file.** What people change in the app, the AI assistant's settings ([D29](#d29)) and the
+  appearance settings ([D32](#d32)), is saved by the Settings dialog (`PUT /api/settings`) in `WRITE_CONFIG_DIR/settings.json`
   (`src/lib/server/storage/settings.ts`). Those settings are changed from a phone and include API keys, and
   an environment variable would need shell access and a restart for each change. On the server rather than
   in `localStorage`, they are shared by every device, and the keys never sit in a browser.
@@ -1032,3 +1032,44 @@ name, kind, folders, tokenHash, tokenHint, createdAt }] }`. Unlike `settings.jso
   `src/lib/server/mcp/` and `src/app/api/agent/mcp/`; for launchers, `src/lib/launch/`,
   `src/lib/server/launch/`, `src/lib/server/storage/jobs.ts`, `src/app/api/integrations/launch/` and
   `src/components/launch/`.
+
+---
+
+<a id="d32"></a>
+
+## D32. The note rail: scrub a long note and land on its headings
+
+- **What it is.** A rail at the right edge of a note replaces the scrollbar: a mark per heading (levels
+  1–3, the title first), a thumb, and a heading list that turns like a rolodex beside the pointer while
+  you drag. Letting go lands on the nearest heading, just below the sticky header, and a short accent
+  mark beside it fades out. Past the last heading there is nothing further down to land on, and snapping
+  back up would undo the drag, so the note stays where it was dragged; that covers a note without headings
+  entirely. Stepping down from the last heading goes to the end of the note. Dragging further left of the rail slows the scrub (½, ¼, then fine), as
+  scrubbing video on iOS does. With a mouse, hovering names the heading under the pointer and the wheel
+  steps one heading at a time; ⌥↑/⌥↓ step too, but only while focus isn't in the text, where those keys
+  move the caret.
+- **It only reads and scrolls.** The rail measures the page and sets `scrollTop`; it never touches the
+  editor's DOM (a class on a ProseMirror heading would be read back as an edit), so the landing mark is a
+  separate fixed element. Opening, scrubbing and landing never write the note ([D9](#d9)).
+- **Both editors.** In the visual editor the headings are the `h1`–`h3` elements. In source mode the note
+  is one textarea, so the rail finds heading lines with `markdownHeadings` (front matter and fenced code
+  skipped) and lays out a hidden copy of the text with the textarea's wrapping to find where each line
+  sits. Notes over 300 KB skip that copy and get a rail without marks.
+- **Where it shows.** Only on notes that scroll by more than half a screen. It follows whatever scrolls
+  the note ([D25](#d25)): the `<main>` pane from 768 px up, the page on phones, looked up again on every
+  measure because a resize across 768 px switches between them. The sticky header and
+  toolbar carry `data-sticky-top`, so the rail and its landings stay below them. On a touch screen the rail
+  steps aside while a text field has focus: the keyboard and docked toolbar take the bottom of the screen,
+  and a thumb at the right edge is placing the caret. Phones also give the text column extra right padding
+  so the marks don't sit on the text.
+- **Performance.** Headings are measured again when typing pauses (250 ms), when the note's size changes
+  and on window resize. The thumb, the current mark and the heading list follow the scroll position once
+  per frame without re-rendering React.
+- **The heading list is frosted glass.** Its opacity is an appearance setting (30–100 %, default 80 %),
+  saved in `settings.json` next to the AI settings ([D28](#d28)) as `"appearance": { "railOpacity": 80 }`.
+  A missing or out-of-range value reads as the default. `PUT /api/settings` takes `appearance` as
+  optional, so a tab opened before the field existed keeps the saved value. The Settings dialog is owned by
+  `SettingsProvider`, which both the AI assistant and the note screen read.
+- Code: `src/components/note/rail/`, `src/lib/rail/` (the scroll math and the Markdown heading scan, both
+  tested), `src/lib/appearance.ts`, `src/components/settings/appearance-section.tsx` and
+  `src/components/settings/settings-provider.tsx`.

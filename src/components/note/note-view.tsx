@@ -18,6 +18,7 @@ import { ConfirmDialog } from "@/components/ui/dialog";
 import { useDownload } from "@/components/ui/download-link";
 import { useToast } from "@/components/ui/toast";
 import { api, isApiError } from "@/lib/api-client";
+import { cn } from "@/lib/cn";
 import { moveDraft } from "@/lib/drafts";
 import type { NoteSendState } from "@/lib/launch/types";
 import type { CreatedBy, ProposalSummary } from "@/lib/proposals/types";
@@ -30,6 +31,7 @@ import { NoteHeader } from "./note-header";
 import { watchForLeaving } from "./note-lifecycle";
 import { NoteMenu } from "./note-menu";
 import { Notice, SourceModeNotice } from "./notice";
+import { NoteRail } from "./rail/note-rail";
 import { ReadOnlyNote } from "./read-only-note";
 import { SaveStatus } from "./save-status";
 import { TitleInput } from "./title-input";
@@ -80,6 +82,7 @@ function EditableNote(props: {
   const titleRef = useRef<HTMLInputElement>(null);
   const mountedRef = useRef(false);
   const [toolbarSlot, setToolbarSlot] = useState<HTMLElement | null>(null);
+  const [column, setColumn] = useState<HTMLElement | null>(null);
   const [dialog, setDialog] = useState<"move" | "delete" | "edit-visually" | "send" | null>(null);
 
   const session = useEditorSession(note, titleRef, (fresh) => {
@@ -223,8 +226,9 @@ function EditableNote(props: {
           />
         }
       />
-      <div ref={setToolbarSlot} className="sticky top-12 z-10 hidden md:block" />
-      <article className={TEXT_COLUMN}>
+      <div ref={setToolbarSlot} data-sticky-top className="sticky top-12 z-10 hidden md:block" />
+      {/* On phones the text keeps clear of the rail's marks at the right edge. */}
+      <article ref={setColumn} className={cn(TEXT_COLUMN, "max-md:pr-8")}>
         <ConflictBanner
           note={note}
           sync={sync}
@@ -258,6 +262,7 @@ function EditableNote(props: {
           onChange={() => autosaver.markDirty()}
         />
       </article>
+      <NoteRail root={column} titleRef={titleRef} />
 
       {review.reviewing && (
         <ProposalReviewDialog

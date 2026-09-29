@@ -31,7 +31,10 @@ type NoteHeaderProps = {
 export function NoteHeader({ noteRef, resolveDownloadHref, status, send, assist, menu }: NoteHeaderProps) {
   const sidebar = useSidebar();
   return (
-    <header className="sticky top-0 z-20 border-b border-line bg-canvas/85 pt-[env(safe-area-inset-top)] backdrop-blur">
+    <header
+      data-sticky-top
+      className="sticky top-0 z-20 border-b border-line bg-canvas/85 pt-[env(safe-area-inset-top)] backdrop-blur"
+    >
       <div className="flex h-11 items-center gap-1 pr-[max(0.25rem,env(safe-area-inset-right))] pl-[max(0.25rem,env(safe-area-inset-left))] md:h-12 md:px-3">
         <Link
           href={LIBRARY_HREF}

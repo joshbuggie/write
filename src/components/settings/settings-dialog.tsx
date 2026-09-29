@@ -4,18 +4,19 @@ import { useEffect, useId, useRef, useState, type FormEvent } from "react";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { useToast } from "@/components/ui/toast";
-import type { SaveSettingsRequest } from "@/lib/api-contract";
-import { connectionName, type AiSettings } from "@/lib/ai/settings";
+import type { SaveSettingsRequest, SettingsResponse } from "@/lib/api-contract";
+import { connectionName } from "@/lib/ai/settings";
 import { AccountSection } from "./account-section";
 import { AiSettingsSection } from "./ai-settings-section";
+import { AppearanceSection } from "./appearance-section";
 import { keyProblem, toSaveRequest, type DraftConnection, type SettingsDraft } from "./settings-draft";
 
 type SettingsDialogProps = {
-  initial: AiSettings;
+  initial: SettingsResponse;
   /** The signed-in account; null while sign-in is off, which hides the Account section. */
   username: string | null;
   /** Saves on the server; throws (ApiError) with a message to show when that fails. */
-  onSave: (next: SaveSettingsRequest["ai"]) => Promise<void>;
+  onSave: (next: SaveSettingsRequest) => Promise<void>;
   onClose: () => void;
 };
 
@@ -28,7 +29,8 @@ type SettingsDialogProps = {
 export function SettingsDialog({ initial, username, onSave, onClose }: SettingsDialogProps) {
   const formId = useId();
   const toast = useToast();
-  const [draft, setDraft] = useState<SettingsDraft>(initial);
+  const [draft, setDraft] = useState<SettingsDraft>(initial.ai);
+  const [appearance, setAppearance] = useState(initial.appearance);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const errorRef = useRef<HTMLParagraphElement>(null);
@@ -51,7 +53,7 @@ export function SettingsDialog({ initial, username, onSave, onClose }: SettingsD
     setPending(true);
     setError(null);
     try {
-      await onSave(toSaveRequest(draft));
+      await onSave({ ai: toSaveRequest(draft), appearance });
       toast.show({ message: "Settings saved" });
       onClose();
     } catch (err) {
@@ -81,9 +83,10 @@ export function SettingsDialog({ initial, username, onSave, onClose }: SettingsD
     >
       {username !== null && <AccountSection username={username} />}
       <form id={formId} noValidate onSubmit={(e) => void save(e)}>
+        <AppearanceSection value={appearance} onChange={setAppearance} />
         <AiSettingsSection
           draft={draft}
-          savedConnections={initial.connections}
+          savedConnections={initial.ai.connections}
           onChange={update}
           onChangeConnection={updateConnection}
         />

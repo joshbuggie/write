@@ -9,6 +9,7 @@ import type {
   SettingsResponse,
   TestConnectionResponse,
 } from "@/lib/api-contract";
+import { DEFAULT_APPEARANCE } from "@/lib/appearance";
 import { chunkLine, eventLine, hangingBody, jsonAnswer, mockFetch, sse } from "@/lib/server/ai/test-utils";
 import { resetPasswordGuard } from "@/lib/server/auth";
 import { setUpTestAccount } from "@/lib/server/auth-test-utils";
@@ -126,7 +127,7 @@ describe("/api/settings", () => {
     withTempDataDir(async () => {
       const res = await call(settings.GET, "GET", "/api/settings");
       expect(res.status).toBe(200);
-      expect(await res.json()).toEqual({ ai: DEFAULT_AI_SETTINGS });
+      expect(await res.json()).toEqual({ ai: DEFAULT_AI_SETTINGS, appearance: DEFAULT_APPEARANCE });
     }));
 
   it("PUT saves and answers the view: a key hint, never the key", () =>
@@ -175,7 +176,29 @@ describe("/api/settings", () => {
         expect((await errorOf(res)).code).toBe("bad_request");
       }
       const res = await call(settings.GET, "GET", "/api/settings");
-      expect(await res.json()).toEqual({ ai: DEFAULT_AI_SETTINGS });
+      expect(await res.json()).toEqual({ ai: DEFAULT_AI_SETTINGS, appearance: DEFAULT_APPEARANCE });
+    }));
+});
+
+describe("/api/settings appearance", () => {
+  const put = (body: unknown) => call(settings.PUT, "PUT", "/api/settings", { body });
+
+  it("saves the rail opacity with the AI settings, and keeps it when a request leaves it out", () =>
+    withTempDataDir(async () => {
+      const res = await put({ ai: aiWith([GPT]), appearance: { railOpacity: 55 } });
+      expect(((await res.json()) as SettingsResponse).appearance).toEqual({ railOpacity: 55 });
+      await save(aiWith([GPT], { enabled: false })); // a tab from before appearance settings existed
+      const got = await call(settings.GET, "GET", "/api/settings");
+      expect(((await got.json()) as SettingsResponse).appearance).toEqual({ railOpacity: 55 });
+    }));
+
+  it("refuses an opacity the slider can't produce", () =>
+    withTempDataDir(async () => {
+      for (const railOpacity of [29, 101, 50.5, "80", null]) {
+        const res = await put({ ai: aiWith([GPT]), appearance: { railOpacity } });
+        expect(res.status).toBe(400);
+      }
+      expect((await put({ ai: aiWith([GPT]), appearance: null })).status).toBe(400);
     }));
 });
 
