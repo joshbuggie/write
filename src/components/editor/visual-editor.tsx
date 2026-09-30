@@ -20,6 +20,7 @@ import type { EditorReady } from "./note-editor";
 import { EditorSkeleton } from "./editor-skeleton";
 import { SourceEditor } from "./source-editor";
 import { DesktopToolbar, KeyboardToolbar } from "./toolbar";
+import { visualWordCounters } from "./word-counters";
 import "./editor.css";
 
 type VisualEditorProps = {
@@ -119,6 +120,7 @@ export function VisualEditor({ content, allowLossy, toolbarSlot, onReady, onChan
         hasFocus: () => current.isFocused,
         snapshot: () => takeSnapshot(current, parts.frontmatter),
         restore: (snapshot) => void restoreSnapshot(current, snapshot, parts.frontmatter),
+        ...visualWordCounters(current),
       },
     });
   });

@@ -115,12 +115,13 @@ export function NoteRail({ root, titleRef }: NoteRailProps) {
   if (!shown || !layout) return null;
   return (
     <>
+      {/* Its bottom stays clear of the word count bar (h-8), which hides when the rail does on touch. */}
       <div
         ref={setRail}
         data-note-rail
         aria-hidden
         style={{ top: layout.top }}
-        className="group fixed right-0 bottom-[env(safe-area-inset-bottom)] z-20 w-[34px] cursor-ns-resize touch-none select-none"
+        className="group fixed right-0 bottom-[calc(env(safe-area-inset-bottom)+2rem)] z-20 w-[34px] cursor-ns-resize touch-none select-none"
       >
         <div ref={setTrack} className="absolute inset-x-0 top-3.5 bottom-3.5 [--thumb:28px]">
           <div className="absolute inset-y-0 right-2.5 w-0.5 rounded-full bg-line" />

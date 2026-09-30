@@ -19,7 +19,7 @@ const ToastContext = createContext<ToastApi | null>(null);
 
 /**
  * Hosts transient notifications ("Updated from disk", import results, failed actions). Mounted once by the
- * notes layout. Phones: centered above the keyboard/toolbar; from md: bottom-right.
+ * notes layout. Phones: centered above the keyboard/toolbar; from md: bottom-right, above a note's word count bar.
  */
 export function ToastProvider({ children }: { children: React.ReactNode }) {
   const [toasts, setToasts] = useState<ActiveToast[]>([]);
@@ -60,7 +60,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
         className={cn(
           "pointer-events-none fixed inset-x-4 z-50 flex flex-col items-center gap-2",
           "bottom-[calc(var(--kb)+56px+env(safe-area-inset-bottom))]",
-          "md:inset-x-auto md:right-4 md:bottom-4 md:items-end",
+          "md:inset-x-auto md:right-4 md:bottom-12 md:items-end",
         )}
       >
         {toasts.map((t) => (

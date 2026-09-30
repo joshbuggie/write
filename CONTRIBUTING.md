@@ -123,6 +123,7 @@ src/proxy.ts: optional auth gate in front of everything except health/login/stat
 | `src/lib/autosave.ts`, `drafts.ts`         | Framework-free autosave state machine, plus crash-safety drafts in `localStorage`.                                                                               |
 | `src/components/note/`                     | The note screen: `NoteView` orchestrates the editor, autosave, title/rename and conflict banner.                                                                 |
 | `src/components/note/rail/`                | The note rail: heading marks, the scrubbing thumb and the rolodex of headings beside it. Its scroll math and source-mode heading scan are in `src/lib/rail/`.    |
+| `src/lib/word-count.ts`                    | How words are counted, for the word count bar under a note (`note/word-count-bar.tsx`). Each editor counts through its handle.                                   |
 | `src/components/editor/`                   | The visual (Tiptap) and source (textarea) editors, toolbar, link dialog, `editor.css`, and the snapshot a rename hands to the new editor (`editor-snapshot.ts`). |
 | `src/components/shell/`, `sidebar/`        | App shell, `ShellProvider` context, sidebar and phone library.                                                                                                   |
 | `src/components/ui/`                       | Small UI kit: `Button`, `IconButton`, `Dialog`, `Menu`, `Toast`, `TextField`, `DownloadLink`.                                                                    |
@@ -393,6 +394,9 @@ mode.
       "Download all" zips unzip with `ditto -x -k`; downloading right after typing includes the latest
       edit. Rename the file on disk, then click ⬇: an error toast appears and the app stays put.
 - [ ] **Front matter:** edit a note with YAML front matter, then `diff` it: the front matter is untouched.
+- [ ] **Word count:** the bar under a note updates when you pause typing and shows "N of M words" while
+      text in the body is selected, in both the visual editor and source mode. It doesn't cover the rail's
+      last mark or a toast, and on a phone it hides while the keyboard is up.
 - [ ] **Auth** (if touched): with an empty `WRITE_CONFIG_DIR`, every page redirects to `/setup` and the API
       returns 401. Setup refuses a short password and mismatched passwords, then signs you in; after that
       `/setup` goes to `/login` and `POST /api/auth/setup` answers 409. Sign out, then sign in with the

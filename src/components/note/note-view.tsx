@@ -36,6 +36,7 @@ import { ReadOnlyNote } from "./read-only-note";
 import { SaveStatus } from "./save-status";
 import { TitleInput } from "./title-input";
 import { useEditorSession } from "./use-editor-session";
+import { WordCountBar } from "./word-count-bar";
 
 // Tiptap is a big chunk; load it only on the client and only on the note screen.
 const NoteEditor = dynamic(() => import("@/components/editor/note-editor"), {
@@ -205,8 +206,9 @@ function EditableNote(props: {
     banner?.focus({ preventScroll: true });
   }
 
+  // At least a screen tall, so the word count bar sits at the bottom even under a short note.
   return (
-    <>
+    <div className="flex min-h-dvh flex-col">
       <NoteHeader
         noteRef={ref}
         resolveDownloadHref={downloadHref}
@@ -263,6 +265,7 @@ function EditableNote(props: {
         />
       </article>
       <NoteRail root={column} titleRef={titleRef} />
+      <WordCountBar root={column} editor={sync.editor} />
 
       {review.reviewing && (
         <ProposalReviewDialog
@@ -311,6 +314,6 @@ function EditableNote(props: {
         description="Some formatting (HTML, footnotes…) will be removed from this file when you edit it visually."
         confirmLabel="Edit visually"
       />
-    </>
+    </div>
   );
 }
