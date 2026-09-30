@@ -15,12 +15,20 @@ const LINE_MARKERS = /^[ \t>]*(?:[-*+]|\d{1,9}[.)])[ \t]+(?:\[[ xX]\](?=[ \t]|$)
 const DEFINITION = /^ {0,3}\[[^\]]+\]:[ \t]*\S/;
 
 /**
+ * A line holding only `&nbsp;` (after any list or quote marker) is how an empty paragraph is written
+ * (write-paragraph.ts), so the visual editor shows nothing there.
+ */
+const EMPTY_PARAGRAPH = /^[ \t>]*(?:(?:[-*+]|\d{1,9}[.)])[ \t]+)?&nbsp;[ \t]*$/;
+
+/**
  * Inline syntax the visual editor doesn't show as text, unless escaped with `\`: images (alt text isn't
- * counted there), link destinations and titles, HTML tags and entities. Autolinks like
- * `<https://…>` aren't tags (a tag name can't hold `:` or `@`), so their URL still counts as a word.
+ * counted there), link destinations and titles, and HTML tags. Autolinks like `<https://…>` aren't tags
+ * (a tag name can't hold `:` or `@`), so their URL still counts as a word. Of the entities, the editor
+ * decodes only `&amp;`, `&lt;`, `&gt;` and `&quot;`, whose characters are no words; it shows every other
+ * one (`&eacute;`, `&#65;`) as the literal text, which counts as a word, so those stay.
  */
 const INLINE =
-  /(?<!\\)!\[[^\]\n]*\]\([^)\n]*\)|(?<!\\)\]\([^)\n]*\)|(?<!\\)<\/?[A-Za-z][A-Za-z0-9-]*(?:\s[^<>\n]*)?\/?>|(?<!\\)&(?:#\d{1,7}|#[xX][\da-fA-F]{1,6}|[A-Za-z][A-Za-z\d]{1,31});/g;
+  /(?<!\\)!\[[^\]\n]*\]\([^)\n]*\)|(?<!\\)\]\([^)\n]*\)|(?<!\\)<\/?[A-Za-z][A-Za-z0-9-]*(?:\s[^<>\n]*)?\/?>|(?<!\\)&(?:amp|lt|gt|quot);/g;
 const HAS_INLINE = /[\]<&]/;
 const maskInlineSyntax = (s: string) =>
   HAS_INLINE.test(s) ? s.replace(INLINE, (m) => (m.startsWith("]") ? "]" + mask(m.slice(1)) : mask(m))) : s;
@@ -58,7 +66,7 @@ function maskInline(line: string): string {
 /**
  * The file with its Markdown syntax masked, so counting its words matches the visual editor's count of
  * the same note (docs/design-decisions.md#d33). Front matter, list markers, task boxes, a fence's language,
- * reference definitions and inline syntax are masked; code keeps its text, as the visual editor shows it.
+ * reference definitions, empty-paragraph markers and inline syntax are masked; code keeps its text, as the visual editor shows it.
  * The result has the same length and word boundaries as the file, so a selection's offsets count its
  * words in their context. A line scan rather than a parse, since source-mode notes can be megabytes.
  */
@@ -85,7 +93,7 @@ export function maskMarkdown(file: string): string {
       fence = { char: open[2][0], length: open[2].length };
       return open[1] + open[2] + mask(open[3]);
     }
-    if (DEFINITION.test(line)) return mask(line);
+    if (DEFINITION.test(line) || EMPTY_PARAGRAPH.test(line)) return mask(line);
     if (LIST_ITEM.test(line)) inList = true;
     const marker = LINE_MARKERS.exec(line)?.[0] ?? "";
     return mask(marker) + maskInline(line.slice(marker.length));

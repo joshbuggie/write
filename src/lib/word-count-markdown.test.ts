@@ -22,6 +22,12 @@ const NOTES: [string, number][] = [
   ['Read [the docs](https://example.com/docs "Docs title") now.', 4],
   ['[ref][id] here\n\n[id]: https://x.y "Title"\n', 2],
   ["AT&amp;T and &amp; here", 3],
+  ["x &lt; y &gt; z &quot;q&quot; &amp;amp;", 5],
+  // Other entities show as their literal text (such notes open in source mode unless the user insists).
+  ["&#65; and caf&eacute; &mdash; it&#39;s", 5],
+  ["- &nbsp;\n- b\n", 1],
+  ["&nbsp;\n\ntext\n\n> &nbsp;\n", 1],
+  ["a &nbsp; b", 3],
   ["Use `<div>` and `1.` and `[x]` here", 7],
   ["\\<div> text", 2],
   ["| a | b |\n| - | - |\n| c | d |\n", 4],

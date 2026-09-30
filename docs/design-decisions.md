@@ -1085,15 +1085,18 @@ name, kind, folders, tokenHash, tokenHint, createdAt }] }`. Unlike `settings.jso
   count: "well-known", "don't" and a URL are one word each, a lone "—" or "#" is none. Chinese, Japanese,
   Thai, Lao, Khmer and Myanmar don't put spaces between words, so runs in those scripts are split with
   `Intl.Segmenter`. Front matter doesn't count ([D17](#d17)).
-- **Both editors count the same.** The visual editor counts its document's text, with blocks, images and
-  line breaks separating words. Source mode counts the Markdown after `maskMarkdown` replaces the syntax
-  the visual editor doesn't show as text: front matter, numbered list markers, task boxes, a fence's
-  language, reference definitions, images (alt text isn't counted visually either), link destinations and
-  titles, HTML tags and entities. It knows enough context to leave code alone: fenced and indented code
-  blocks and inline code keep their text, and autolinks (`<https://…>`) and escaped `\<tags>` stay words.
-  It's a line scan rather than a parse, because marked is slow on the huge notes source mode exists for,
-  so rare constructs (a code span across lines, a link with parentheses in its URL) can still differ by a
-  word. Tests hold both editors to the same count for each construct.
+- **Both editors count the same.** The visual editor counts its document's text, with blocks, images and line
+  breaks separating words. Source mode counts the Markdown after `maskMarkdown` replaces the syntax the visual
+  editor doesn't show as text: front matter, numbered list markers, task boxes, a fence's language, reference
+  definitions, the `&nbsp;` lines that stand for empty paragraphs, images (alt text isn't counted visually
+  either), link destinations and titles, HTML tags, and the four entities the editor decodes (`&amp;`, `&lt;`,
+  `&gt;`, `&quot;`). Other entities stay: the editor shows `&eacute;` or `&#65;` as that literal text (such
+  notes open in source mode, [D16](#d16), and editing one visually anyway writes the text), so both count it
+  as a word. It knows enough context to leave code alone: fenced and indented code blocks and inline code keep
+  their text, and autolinks (`<https://…>`) and escaped `\<tags>` stay words. It's a line scan rather than a
+  parse, because marked is slow on the huge notes source mode exists for, so rare constructs (a code span
+  across lines, a link with parentheses in its URL) can still differ by a word. Tests hold both editors to the
+  same count for each construct.
 - **Selections keep their context.** Masking replaces each syntax character with a placeholder, so the
   masked text has the file's length and word boundaries. A source-mode selection counts the words of the
   masked file that it covers a letter or digit of, rather than re-reading the selected text on its own,
