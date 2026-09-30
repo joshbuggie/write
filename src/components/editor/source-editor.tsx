@@ -4,6 +4,7 @@ import { useEffect, useEffectEvent, useRef } from "react";
 import { useAi } from "@/components/ai/ai-provider";
 import { SourceAssist } from "@/components/ai/source-assist";
 import type { EditorReady, SourceReason } from "./note-editor";
+import { sourceWordCounters } from "./word-counters";
 
 type SourceEditorProps = {
   /** The full file, front matter included: in source mode the user edits exactly what is on disk. */
@@ -48,6 +49,7 @@ export function SourceEditor({ content, sourceReason, onReady, onChange }: Sourc
         // A textarea's text is exact, so the text (restored as a draft) is all a remount needs.
         snapshot: () => ({ content: el.value, caret: el.selectionStart }),
         restore: () => {},
+        ...sourceWordCounters(el),
       },
     });
   });

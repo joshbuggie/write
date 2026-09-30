@@ -52,6 +52,10 @@ export type EditorHandle = {
    * same text. Otherwise (the text changed meanwhile) it does nothing. Doesn't move the focus.
    */
   restore(snapshot: EditorSnapshot): void;
+  /** Words in the body, front matter excluded, for the word count bar. */
+  countWords(): number;
+  /** Words in the selection, or null when there is only a caret. */
+  countSelectedWords(): number | null;
 };
 
 export type EditorReady = {

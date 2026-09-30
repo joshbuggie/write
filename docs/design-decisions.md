@@ -23,7 +23,8 @@ files.
   [D18](#d18) opening a note · [D19](#d19) autosave · [D20](#d20) conflicts · [D21](#d21) rename ·
   [D22](#d22) paste and links
 - Files in and out: [D23](#d23) downloads · [D24](#d24) import
-- UI: [D25](#d25) responsive layout · [D26](#d26) tokens and theme · [D32](#d32) the note rail
+- UI: [D25](#d25) responsive layout · [D26](#d26) tokens and theme · [D32](#d32) the note rail ·
+  [D33](#d33) the word count
 - Self-hosting: [D27](#d27) build output and health · [D28](#d28) configuration
 - Optional features: [D29](#d29) the AI assistant · [D31](#d31) integrations and proposals from agent harnesses
 
@@ -1073,3 +1074,46 @@ name, kind, folders, tokenHash, tokenHint, createdAt }] }`. Unlike `settings.jso
 - Code: `src/components/note/rail/`, `src/lib/rail/` (the scroll math and the Markdown heading scan, both
   tested), `src/lib/appearance.ts`, `src/components/settings/appearance-section.tsx` and
   `src/components/settings/settings-provider.tsx`.
+
+## D33. The word count: a bar under the note, counted by the editor
+
+- **What it is.** A bar pinned to the bottom of an editable note shows how many words its body has
+  ("1,234 words"), and while part of the body is selected, how many of them are selected ("56 of 1,234
+  words"). The selection counts only while the body has focus, because elsewhere it isn't highlighted.
+  Read-only notes have no bar.
+- **What a word is.** A run of non-space characters with at least one letter or digit, as word processors
+  count: "well-known", "don't" and a URL are one word each, a lone "—" or "#" is none. Chinese, Japanese,
+  Thai, Lao, Khmer and Myanmar don't put spaces between words, so runs in those scripts are split with
+  `Intl.Segmenter`. Front matter doesn't count ([D17](#d17)).
+- **Both editors count the same.** The visual editor counts its document's text, with blocks, images and line
+  breaks separating words. Source mode counts the Markdown after `maskMarkdown` replaces the syntax the visual
+  editor doesn't show as text: front matter, numbered list markers, task boxes, a fence's language, reference
+  definitions, the `&nbsp;` lines that stand for empty paragraphs, images (alt text isn't counted visually
+  either), link destinations and titles, HTML tags, and the four entities the editor decodes (`&amp;`, `&lt;`,
+  `&gt;`, `&quot;`). Other entities stay: the editor shows `&eacute;` or `&#65;` as that literal text (such
+  notes open in source mode, [D16](#d16), and editing one visually anyway writes the text), so both count it
+  as a word. It knows enough context to leave code alone: fenced and indented code blocks and inline code keep
+  their text, and autolinks (`<https://…>`) and escaped `\<tags>` stay words. It's a line scan rather than a
+  parse, because marked is slow on the huge notes source mode exists for, so rare constructs (a code span
+  across lines, a link with parentheses in its URL) can still differ by a word. Tests hold both editors to the
+  same count for each construct.
+- **Selections keep their context.** Masking replaces each syntax character with a placeholder, so the
+  masked text has the file's length and word boundaries. A source-mode selection counts the words of the
+  masked file that it covers a letter or digit of, rather than re-reading the selected text on its own,
+  where `typescript` selected on a fence line would look like a word. A selection never outnumbers the
+  total. Each editor exposes `countWords()` and `countSelectedWords()` on its `EditorHandle`, so the bar
+  never touches Tiptap or the textarea itself and never writes the note ([D9](#d9)).
+- **Performance.** Counting is one linear pass: about 3 ms for the largest note the visual editor opens.
+  In source mode a 5 MB note, the largest that opens editable, takes 20–100 ms to mask, depending on how
+  much syntax it has, plus 40 ms to count. So the whole note is counted again when typing pauses (200 ms)
+  and only when its text changed (ProseMirror documents are immutable; the textarea's text is compared,
+  and its masked copy is kept). A selection is counted as soon as it changes, from the kept copy, in well
+  under a millisecond; a caret moving as you type costs nothing.
+- **Where it shows.** It is `sticky` at the bottom of whatever scrolls the note ([D25](#d25)), and the note
+  screen is at least a screen tall so the bar stays at the bottom under a short note. From 768 px up it
+  spans the main pane and not the sidebar, and the count lines up with the right edge of the
+  text column. The rail ([D32](#d32)) and toasts sit above it. On a touch screen it steps aside while a
+  text field has focus, as the rail does, because the keyboard and docked toolbar take that space.
+- Code: `src/lib/word-count.ts` and `src/lib/word-count-markdown.ts` (both tested),
+  `src/components/editor/word-counters.ts` and
+  `src/components/note/word-count-bar.tsx`.
