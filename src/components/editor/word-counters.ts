@@ -1,7 +1,7 @@
 import type { Editor } from "@tiptap/core";
 import type { Node as PMNode } from "@tiptap/pm/model";
-import { splitFrontmatter } from "@/lib/markdown/file-format";
-import { countDocWords, countMarkdownWords } from "@/lib/word-count";
+import { countDocWords, countWords } from "@/lib/word-count";
+import { maskMarkdown } from "@/lib/word-count-markdown";
 import type { EditorHandle } from "./note-editor";
 
 type WordCounters = Pick<EditorHandle, "countWords" | "countSelectedWords">;
@@ -29,17 +29,18 @@ export function visualWordCounters(editor: Editor): WordCounters {
 }
 
 /**
- * The source editor's word counts: the Markdown body without its front matter, which the visual editor
- * doesn't count either, so a selection only counts the part of it in the body. Recounted only when the
- * text changed, since a source-mode note can be megabytes.
+ * The source editor's word counts, from the text with its Markdown syntax masked (see maskMarkdown), which
+ * matches what the visual editor counts. A selection counts the words it covers in the masked text, so it
+ * keeps its context: text inside a fence is code, and front matter is never counted. Masked again only
+ * when the text changed, since a source-mode note can be megabytes.
  */
 export function sourceWordCounters(el: HTMLTextAreaElement): WordCounters {
-  let counted: { text: string; bodyStart: number; total: number } | null = null;
+  let counted: { text: string; masked: string; total: number } | null = null;
   const count = () => {
     const text = el.value;
     if (counted?.text !== text) {
-      const { frontmatter, body } = splitFrontmatter(text);
-      counted = { text, bodyStart: frontmatter.length, total: countMarkdownWords(body) };
+      const masked = maskMarkdown(text);
+      counted = { text, masked, total: countWords(masked) };
     }
     return counted;
   };
@@ -47,11 +48,9 @@ export function sourceWordCounters(el: HTMLTextAreaElement): WordCounters {
     countWords: () => count().total,
     countSelectedWords: () => {
       const { selectionStart, selectionEnd } = el;
-      if (selectionStart === selectionEnd) return null;
-      const { text, bodyStart } = count();
-      return countMarkdownWords(
-        text.slice(Math.max(selectionStart, bodyStart), Math.max(selectionEnd, bodyStart)),
-      );
+      return selectionStart === selectionEnd
+        ? null
+        : countWords(count().masked, selectionStart, selectionEnd);
     },
   };
 }

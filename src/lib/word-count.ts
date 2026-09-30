@@ -17,12 +17,17 @@ function wordSegmenter(): Intl.Segmenter | null {
   return segmenter;
 }
 
-/** Words in a run the segmenter splits (Chinese, Japanese, Thai…): each word-like segment counts. */
-function unspacedWords(token: string): number {
+/**
+ * Words of a run the segmenter splits (Chinese, Japanese, Thai…) that overlap `from`–`to`, offsets within
+ * the run: each word-like segment counts.
+ */
+function unspacedWords(token: string, from: number, to: number): number {
   const seg = wordSegmenter();
   if (!seg) return 1;
   let n = 0;
-  for (const s of seg.segment(token)) if (s.isWordLike) n++;
+  for (const s of seg.segment(token)) {
+    if (s.isWordLike && s.index < to && s.index + s.segment.length > from) n++;
+  }
   return n;
 }
 
@@ -31,33 +36,25 @@ function unspacedWords(token: string): number {
  * characters with at least one letter or digit, so "well-known", "don't" and a URL are one word each, and
  * a lone "—" or "#" is none. Chinese, Japanese and Thai don't put spaces between words, so runs in those
  * scripts are split by `Intl.Segmenter`. One linear pass, since source-mode notes can be megabytes.
+ *
+ * With `from`–`to`, counts the words of the whole text that the range covers a letter or digit of, so a
+ * selection is counted in its context and never outnumbers the total.
  */
-export function countWords(text: string): number {
+export function countWords(text: string, from = 0, to = text.length): number {
+  if (from >= to) return 0;
+  let start = from;
+  while (start > 0 && !/\s/.test(text[start - 1])) start--; // back to the start of the word `from` is in
   let n = 0;
   const tokens = /\S+/g;
-  for (let m = tokens.exec(text); m; m = tokens.exec(text)) {
+  tokens.lastIndex = start;
+  for (let m = tokens.exec(text); m && m.index < to; m = tokens.exec(text)) {
     const token = m[0];
-    if (UNSPACED.test(token)) n += unspacedWords(token);
-    else if (WORDISH.test(token)) n++;
+    const lo = Math.max(from - m.index, 0);
+    const hi = Math.min(to - m.index, token.length);
+    if (UNSPACED.test(token)) n += unspacedWords(token, lo, hi);
+    else if (WORDISH.test(token.slice(lo, hi))) n++;
   }
   return n;
-}
-
-/**
- * Line-start syntax that has letters or digits, so it would count as a word: numbered list markers
- * (`1.`), task boxes (`[x]`) and a code fence's language (```` ```ts ````). Bullets, `#`, `>` and table
- * pipes have none and are skipped by countWords anyway.
- */
-const LINE_SYNTAX = /^[ \t>]*(?:(?:[-*+]|\d{1,9}[.)])[ \t]+(?:\[[ xX]\][ \t]+)?|(?:```|~~~)\S*)/gm;
-/** HTML tags, which the visual editor never shows as text. */
-const TAGS = /<\/?[A-Za-z][^<>\n]*>/g;
-
-/**
- * Words in Markdown source as the visual editor would count them. Link destinations need no stripping:
- * `[text](url)` is one run of non-space characters with its last word.
- */
-export function countMarkdownWords(markdown: string): number {
-  return countWords(markdown.replace(LINE_SYNTAX, " ").replace(TAGS, " "));
 }
 
 /** Words between two positions of an editor document; blocks and leaves (images, breaks) separate words. */

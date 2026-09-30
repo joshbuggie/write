@@ -123,7 +123,7 @@ src/proxy.ts: optional auth gate in front of everything except health/login/stat
 | `src/lib/autosave.ts`, `drafts.ts`         | Framework-free autosave state machine, plus crash-safety drafts in `localStorage`.                                                                               |
 | `src/components/note/`                     | The note screen: `NoteView` orchestrates the editor, autosave, title/rename and conflict banner.                                                                 |
 | `src/components/note/rail/`                | The note rail: heading marks, the scrubbing thumb and the rolodex of headings beside it. Its scroll math and source-mode heading scan are in `src/lib/rail/`.    |
-| `src/lib/word-count.ts`                    | How words are counted, for the word count bar under a note (`note/word-count-bar.tsx`). Each editor counts through its handle.                                   |
+| `src/lib/word-count*.ts`                   | How words are counted for the word count bar (`note/word-count-bar.tsx`), and source mode's syntax masking so both editors agree.                                |
 | `src/components/editor/`                   | The visual (Tiptap) and source (textarea) editors, toolbar, link dialog, `editor.css`, and the snapshot a rename hands to the new editor (`editor-snapshot.ts`). |
 | `src/components/shell/`, `sidebar/`        | App shell, `ShellProvider` context, sidebar and phone library.                                                                                                   |
 | `src/components/ui/`                       | Small UI kit: `Button`, `IconButton`, `Dialog`, `Menu`, `Toast`, `TextField`, `DownloadLink`.                                                                    |

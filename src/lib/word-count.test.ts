@@ -1,7 +1,7 @@
 import { getSchema } from "@tiptap/core";
 import { describe, expect, it } from "vitest";
 import { createMarkdownManager, createSchemaExtensions } from "./markdown/extensions";
-import { countDocWords, countMarkdownWords, countWords } from "./word-count";
+import { countDocWords, countWords } from "./word-count";
 
 describe("countWords", () => {
   it("counts runs of non-space characters that have a letter or digit", () => {
@@ -36,28 +36,23 @@ describe("countWords", () => {
   });
 });
 
-describe("countMarkdownWords", () => {
-  it("doesn't count list markers, task boxes or a fence's language", () => {
-    const md = [
-      "1. first",
-      "2) second",
-      "- [x] done",
-      "* [ ] open",
-      "> 3. quoted",
-      "```ts",
-      "code",
-      "```",
-    ].join("\n");
-    expect(countMarkdownWords(md)).toBe(6);
+describe("countWords in a range", () => {
+  it("counts the words the range touches a letter or digit of", () => {
+    const text = "alpha beta, gamma";
+    expect(countWords(text, 0, 0)).toBe(0);
+    expect(countWords(text, 2, 3)).toBe(1); // inside "alpha"
+    expect(countWords(text, 4, 7)).toBe(2); // "a b"
+    expect(countWords(text, 10, 11)).toBe(0); // just the comma
+    expect(countWords(text, 0, text.length)).toBe(3);
   });
 
-  it("doesn't count HTML tags or link destinations", () => {
-    expect(countMarkdownWords('Some <span class="x">red</span> text<br>')).toBe(3);
-    expect(countMarkdownWords("Read [the docs](https://example.com/docs) and ![a cat](cat.png).")).toBe(6);
-  });
-
-  it("keeps emphasis, headings and a leading number that isn't a list marker", () => {
-    expect(countMarkdownWords("# Title\n\n**Bold** and _em_ text\n\n2024 was long")).toBe(8);
+  it("never counts more words than the whole text has", () => {
+    const text = "東京に行きました";
+    const total = countWords(text);
+    for (let from = 0; from < text.length; from++) {
+      for (let to = from + 1; to <= text.length; to++)
+        expect(countWords(text, from, to)).toBeLessThanOrEqual(total);
+    }
   });
 });
 
@@ -75,10 +70,5 @@ describe("countDocWords", () => {
     const doc = docOf("alpha beta gamma\n");
     // Position 1 is the start of the paragraph's text.
     expect(countDocWords(doc, 1, 1 + "alpha beta".length)).toBe(2);
-  });
-
-  it("agrees with the Markdown count for the same note", () => {
-    const md = "## Plan\n\n1. Write [the intro](https://x.y)\n2. Edit it\n\n> A *quoted* line\n";
-    expect(countDocWords(docOf(md))).toBe(countMarkdownWords(md));
   });
 });

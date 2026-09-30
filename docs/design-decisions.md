@@ -1086,19 +1086,31 @@ name, kind, folders, tokenHash, tokenHint, createdAt }] }`. Unlike `settings.jso
   Thai, Lao, Khmer and Myanmar don't put spaces between words, so runs in those scripts are split with
   `Intl.Segmenter`. Front matter doesn't count ([D17](#d17)).
 - **Both editors count the same.** The visual editor counts its document's text, with blocks, images and
-  line breaks separating words. Source mode counts the Markdown, first dropping the syntax that contains
-  letters or digits and would otherwise count: numbered list markers, task boxes, a code fence's
-  language and HTML tags. Link destinations need nothing, since `[text](url)` sticks to its last word.
-  Each editor exposes `countWords()` and `countSelectedWords()` on its `EditorHandle`, so the bar never
-  touches Tiptap or the textarea itself and never writes the note ([D9](#d9)).
-- **Performance.** Counting is one linear pass, about 3 ms for the largest note the visual editor opens
-  and 40 ms for a 5 MB source note. So the whole note is counted again when typing pauses (200 ms) and
-  only when its text changed (ProseMirror documents are immutable; the textarea's text is compared). A
-  selection is counted as soon as it changes; a caret moving as you type costs nothing.
+  line breaks separating words. Source mode counts the Markdown after `maskMarkdown` replaces the syntax
+  the visual editor doesn't show as text: front matter, numbered list markers, task boxes, a fence's
+  language, reference definitions, images (alt text isn't counted visually either), link destinations and
+  titles, HTML tags and entities. It knows enough context to leave code alone: fenced and indented code
+  blocks and inline code keep their text, and autolinks (`<https://…>`) and escaped `\<tags>` stay words.
+  It's a line scan rather than a parse, because marked is slow on the huge notes source mode exists for,
+  so rare constructs (a code span across lines, a link with parentheses in its URL) can still differ by a
+  word. Tests hold both editors to the same count for each construct.
+- **Selections keep their context.** Masking replaces each syntax character with a placeholder, so the
+  masked text has the file's length and word boundaries. A source-mode selection counts the words of the
+  masked file that it covers a letter or digit of, rather than re-reading the selected text on its own,
+  where `typescript` selected on a fence line would look like a word. A selection never outnumbers the
+  total. Each editor exposes `countWords()` and `countSelectedWords()` on its `EditorHandle`, so the bar
+  never touches Tiptap or the textarea itself and never writes the note ([D9](#d9)).
+- **Performance.** Counting is one linear pass: about 3 ms for the largest note the visual editor opens.
+  In source mode a 5 MB note, the largest that opens editable, takes 20–100 ms to mask, depending on how
+  much syntax it has, plus 40 ms to count. So the whole note is counted again when typing pauses (200 ms)
+  and only when its text changed (ProseMirror documents are immutable; the textarea's text is compared,
+  and its masked copy is kept). A selection is counted as soon as it changes, from the kept copy, in well
+  under a millisecond; a caret moving as you type costs nothing.
 - **Where it shows.** It is `sticky` at the bottom of whatever scrolls the note ([D25](#d25)), and the note
   screen is at least a screen tall so the bar stays at the bottom under a short note. From 768 px up it
   spans the main pane and not the sidebar, and the count lines up with the right edge of the
   text column. The rail ([D32](#d32)) and toasts sit above it. On a touch screen it steps aside while a
   text field has focus, as the rail does, because the keyboard and docked toolbar take that space.
-- Code: `src/lib/word-count.ts` (tested), `src/components/editor/word-counters.ts` and
+- Code: `src/lib/word-count.ts` and `src/lib/word-count-markdown.ts` (both tested),
+  `src/components/editor/word-counters.ts` and
   `src/components/note/word-count-bar.tsx`.
