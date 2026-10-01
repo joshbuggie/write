@@ -12,9 +12,11 @@ type ToastInput = {
   action?: { label: string; onClick: () => void };
 };
 type ToastApi = { show(t: ToastInput): void };
-type ActiveToast = ToastInput & { id: number };
+type ActiveToast = ToastInput & { id: number; leaving?: boolean };
 
 const MAX_VISIBLE = 3;
+/** How long a toast takes to fade out before it leaves the page; matches `duration-200` below. */
+const FADE_MS = 200;
 const ToastContext = createContext<ToastApi | null>(null);
 
 /**
@@ -26,10 +28,17 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
   const timers = useRef(new Map<number, ReturnType<typeof setTimeout>>());
   const nextId = useRef(1);
 
+  // A toast fades out first, so it doesn't vanish in one frame, then leaves the page.
   const dismiss = useCallback((id: number) => {
     clearTimeout(timers.current.get(id));
-    timers.current.delete(id);
-    setToasts((all) => all.filter((t) => t.id !== id));
+    setToasts((all) => all.map((t) => (t.id === id ? { ...t, leaving: true } : t)));
+    timers.current.set(
+      id,
+      setTimeout(() => {
+        timers.current.delete(id);
+        setToasts((all) => all.filter((t) => t.id !== id));
+      }, FADE_MS),
+    );
   }, []);
 
   const show = useCallback(
@@ -70,7 +79,9 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
             className={cn(
               "pointer-events-auto flex max-w-full items-center gap-3 rounded-lg border border-line bg-surface",
               "py-2.5 pr-2 pl-3.5 text-[15px] shadow-pop md:max-w-sm md:text-[14px]",
+              "transition-opacity duration-200 ease-out",
               t.tone === "error" ? "text-danger" : "text-ink",
+              t.leaving && "pointer-events-none opacity-0",
             )}
           >
             {t.tone === "error" && (
