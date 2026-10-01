@@ -6,8 +6,9 @@ import { sameNoteRef } from "../storage/proposals";
 
 /**
  * What the note screen needs for "Send to…" (docs/design-decisions.md#d31): the harnesses this note can be
- * sent to (a launcher, and the note's folder among its folders), and the jobs still working on it, so the
- * note can say so until their proposal arrives. Read-only, like every loader.
+ * sent to (a launcher, and the note's folder among its folders), the ones with a launcher that can't read
+ * the folder, and the jobs still working on it, so the note can say so until their proposal arrives.
+ * Read-only, like every loader.
  */
 
 /** A job still counts as working this long; a harness that never answers doesn't leave the note waiting. */
@@ -17,8 +18,10 @@ export async function sendStateFor(note: Note): Promise<NoteSendState> {
   const ref = { folder: note.folder, name: note.name };
   const integrations = await readIntegrations();
   const jobs = (await listJobs()).filter((j) => sameNoteRef(j.note, ref));
-  const targets = integrations
-    .filter((i) => i.launcher && canReadFolder(i, note.folder))
+  const launchers = integrations.filter((i) => i.launcher);
+  const blocked = launchers.filter((i) => !canReadFolder(i, note.folder)).map((i) => i.name);
+  const targets = launchers
+    .filter((i) => canReadFolder(i, note.folder))
     .map((i) => ({
       integrationId: i.id,
       name: i.name,
@@ -27,7 +30,7 @@ export async function sendStateFor(note: Note): Promise<NoteSendState> {
     }));
 
   const recent = jobs.filter((j) => Date.now() - Date.parse(j.createdAt) < WORKING_MS);
-  if (recent.length === 0) return { targets, working: [] };
+  if (recent.length === 0) return { targets, blocked, working: [] };
   const proposals = (await listProposals()).filter((p) => sameNoteRef(p.note, ref));
   const answered = (j: StoredJob) =>
     proposals.some(
@@ -42,5 +45,5 @@ export async function sendStateFor(note: Note): Promise<NoteSendState> {
       mayNeedApproval: j.ref.coordinator === true,
       createdAt: j.createdAt,
     }));
-  return { targets, working };
+  return { targets, blocked, working };
 }
