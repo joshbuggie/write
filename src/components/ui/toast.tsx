@@ -27,18 +27,25 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
   const [toasts, setToasts] = useState<ActiveToast[]>([]);
   const timers = useRef(new Map<number, ReturnType<typeof setTimeout>>());
   const nextId = useRef(1);
+  // Toasts already fading out. A ref, not state, so a second key press before the next render still sees it.
+  const leaving = useRef(new Set<number>());
 
-  // A toast fades out first, so it doesn't vanish in one frame, then leaves the page.
+  // A toast fades out first, so it doesn't vanish in one frame, then leaves the page. Only the first
+  // dismissal counts: it returns false for a toast that is already leaving.
   const dismiss = useCallback((id: number) => {
+    if (leaving.current.has(id)) return false;
+    leaving.current.add(id);
     clearTimeout(timers.current.get(id));
     setToasts((all) => all.map((t) => (t.id === id ? { ...t, leaving: true } : t)));
     timers.current.set(
       id,
       setTimeout(() => {
         timers.current.delete(id);
+        leaving.current.delete(id);
         setToasts((all) => all.filter((t) => t.id !== id));
       }, FADE_MS),
     );
+    return true;
   }, []);
 
   const show = useCallback(
@@ -92,9 +99,10 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
               <button
                 type="button"
                 className="h-7 shrink-0 rounded-md px-2 font-medium text-accent hover:bg-accent-soft pointer-coarse:h-11"
+                // Fading out keeps the button on the page, and keys still reach it: an action runs once.
+                disabled={t.leaving}
                 onClick={() => {
-                  dismiss(t.id);
-                  t.action?.onClick();
+                  if (dismiss(t.id)) t.action?.onClick();
                 }}
               >
                 {t.action.label}
