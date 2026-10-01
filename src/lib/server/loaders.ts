@@ -131,7 +131,7 @@ export async function loadSendState(note: Note): Promise<NoteSendState> {
     return await sendStateFor(note);
   } catch (err) {
     console.error("[write] Couldn't read where the note can be sent:", err);
-    return { targets: [], working: [] };
+    return { targets: [], blocked: [], working: [] };
   }
 }
 

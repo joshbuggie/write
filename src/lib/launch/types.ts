@@ -25,5 +25,10 @@ export interface WorkingJob {
 
 export interface NoteSendState {
   targets: SendTarget[];
+  /**
+   * Harnesses with a launcher that can't read this note's folder, by name. The Send button shows greyed out
+   * for them instead of vanishing, so it's clear the folder is what's missing.
+   */
+  blocked: string[];
   working: WorkingJob[];
 }

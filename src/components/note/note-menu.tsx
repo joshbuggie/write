@@ -14,6 +14,8 @@ type NoteMenuProps = {
   onToggleMode?: () => void;
   /** "Send to…" a harness (docs/design-decisions.md#d31); absent when no integration can take this note. */
   onSend?: () => void;
+  /** A harness could take it if it could read the folder: "Send to…" shows, disabled, like the header's. */
+  sendBlocked?: boolean;
   onDelete: () => void;
 };
 
@@ -26,6 +28,7 @@ export function NoteMenu({
   onDownload,
   onToggleMode,
   onSend,
+  sendBlocked = false,
   onDelete,
 }: NoteMenuProps) {
   const items: MenuItem[] = [];
@@ -38,6 +41,9 @@ export function NoteMenu({
     items.push({ label: "Edit visually", icon: Pilcrow, onSelect: onToggleMode, disabled: !canEditVisually });
   }
   if (onSend) items.push("separator", { label: "Send to…", icon: Send, onSelect: onSend });
+  else if (sendBlocked) {
+    items.push("separator", { label: "Send to…", icon: Send, onSelect: () => {}, disabled: true });
+  }
   items.push("separator", { label: "Delete", icon: Trash2, onSelect: onDelete, destructive: true });
 
   return <Menu label="Note actions" items={items} align="end" />;

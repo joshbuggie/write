@@ -213,7 +213,7 @@ function EditableNote(props: {
         noteRef={ref}
         resolveDownloadHref={downloadHref}
         status={<SaveStatus state={state} onRetry={() => autosaver.retry()} onShowConflict={showConflict} />}
-        send={<SendButton targets={send.targets} onClick={() => setDialog("send")} />}
+        send={<SendButton send={send} folder={note.folder} onClick={() => setDialog("send")} />}
         assist={<AiButton />}
         menu={
           <NoteMenu
@@ -224,6 +224,7 @@ function EditableNote(props: {
             onDownload={() => void startDownload(downloadHref)}
             onToggleMode={toggleMode}
             onSend={send.targets.length > 0 ? () => setDialog("send") : undefined}
+            sendBlocked={send.targets.length === 0 && send.blocked.length > 0}
             onDelete={() => setDialog("delete")}
           />
         }
